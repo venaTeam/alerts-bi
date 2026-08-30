@@ -57,10 +57,12 @@ def index_page(teams: list[TeamOut]) -> str:
   </select>
   <button type="submit">Run</button>
   <p class="failure" id="failure" role="alert"></p>
+  <p class="result" id="result" role="status"></p>
 </form>
-<p class="note">A run reads 168 hours for one team, so it can take a while; the response
-arrives when it finishes. Runs are serialized — a second request while one is running gets
-a 409. Against the mock dataset set <code>run_at</code> to
+<p class="note">The finished scorecard downloads as a file, and the result line links to
+it in a new tab; this page stays as it is, so the next run is one click away. A run reads
+168 hours for one team and is serialized — a second request while one is running gets a
+409. Against the mock dataset set <code>run_at</code> to
 <code>2026-08-25T18:00:00Z</code>, which is the clock it was generated on.</p>
 <h2>Registered teams</h2>
 <table><thead><tr><th>team_id</th><th>display name</th><th>v1 operators</th>
