@@ -177,7 +177,10 @@ test('selectTeam returns exactly one entry and never defaults', () => {
 
 test('selectTeam fails loudly on an unknown team and lists the known ones', () => {
   const loaded = loadRegistry();
-  assert.throws(() => selectTeam(loaded, 'no-such-team'), /Known teams: checkout-api/);
+  // Asserts membership rather than position: the list is sorted, so pinning the first
+  // entry would break every time a team is added.
+  assert.throws(() => selectTeam(loaded, 'no-such-team'), /is not in the registry/);
+  assert.throws(() => selectTeam(loaded, 'no-such-team'), /Known teams: .*checkout-api/);
 });
 
 test('the team snapshot is a stable immutable JSON string', () => {
