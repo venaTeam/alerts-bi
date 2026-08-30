@@ -14,6 +14,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final
 
+from alerts_bi.timefmt import iso_date, iso_instant
+
 __all__ = [
     "alert_worklist_csv",
     "csv_cell",
@@ -38,9 +40,7 @@ def csv_cell(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, datetime):
-        text = value.isoformat().replace("+00:00", "Z")
-        if not text.endswith("Z"):
-            text += "Z"
+        text = iso_instant(value)
     elif isinstance(value, date):
         text = value.isoformat()
     elif isinstance(value, Decimal):
@@ -66,8 +66,10 @@ def to_csv(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
 
 
 def _iso_date(value: Any) -> str:
-    if isinstance(value, datetime | date):
-        return value.isoformat()[:10]
+    if isinstance(value, datetime):
+        return iso_date(value)
+    if isinstance(value, date):
+        return value.isoformat()
     return str(value or "")[:10]
 
 

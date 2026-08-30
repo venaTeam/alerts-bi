@@ -40,7 +40,7 @@ def test_none_becomes_an_empty_cell_not_the_string_none() -> None:
 
 
 def test_dates_are_written_as_iso_instants() -> None:
-    assert csv_cell(datetime(2026, 8, 20, 12, 0, 0)) == "2026-08-20T12:00:00Z"
+    assert csv_cell(datetime(2026, 8, 20, 12, 0, 0)) == "2026-08-20T12:00:00.000Z"
 
 
 def test_rows_are_joined_with_crlf_per_rfc_4180() -> None:
@@ -126,9 +126,7 @@ def test_html_escaping_neutralizes_markup_in_alert_content() -> None:
     assert escape_html('<script>alert("x")</script>') == (
         "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"
     )
-    # &#x27; is the hexadecimal form of the same character the JavaScript build wrote as
-    # &#39;. Rendered output is identical; only the source bytes differ.
-    assert escape_html("it's") == "it&#x27;s"
+    assert escape_html("it's") == "it&#39;s", "decimal, so a scorecard stays byte-comparable"
     assert escape_html("a & b") == "a &amp; b"
 
 

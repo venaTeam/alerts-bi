@@ -80,23 +80,23 @@ class Principle(NamedTuple):
 #: together with it, and both namespaces are legal citations in a verdict.
 PRINCIPLE_CATALOG: Final = (
     Principle(
-        "P1", "core", "Non-actionable - implies no investigation, fix, escalation or attention"
+        "P1", "core", "Non-actionable — implies no investigation, fix, escalation or attention"
     ),
     Principle(
         "P2",
         "core",
-        'Informational - reports an event or a status rather than a problem ("that\'s a log!")',
+        'Informational — reports an event or a status rather than a problem ("that\'s a log!")',
     ),
-    Principle("P3", "core", "States the outcome, not the failure - something failed, but not what"),
+    Principle("P3", "core", "States the outcome, not the failure — something failed, but not what"),
     Principle("P4", "core", "Component or application name does not identify a real thing"),
-    Principle("P5", "core", "No environment context - the reader cannot tell where it fired"),
+    Principle("P5", "core", "No environment context — the reader cannot tell where it fired"),
     Principle(
         "P6", "core", "Not grounded in a golden signal (latency / traffic / errors / saturation)"
     ),
     Principle(
         "P7", "v2", "critical that fails the Wake-Up Test (urgent + immediate damage + runbook)"
     ),
-    Principle("P8", "v2", "Severity is not derived from impact - the two are incoherent"),
+    Principle("P8", "v2", "Severity is not derived from impact — the two are incoherent"),
     Principle(
         "P9", "v2", "impact restates the technical cause rather than the operational symptom"
     ),

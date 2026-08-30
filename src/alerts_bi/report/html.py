@@ -9,9 +9,10 @@ text written by other teams and by a model, and none of it is trusted markup.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from html import escape
 from typing import Any, Final
 
@@ -19,6 +20,7 @@ from alerts_bi.domain.metrics import WINDOW_DAYS
 from alerts_bi.domain.window import WINDOW_HOURS
 from alerts_bi.rules.catalogs import PRINCIPLE_CATALOG
 from alerts_bi.rules.phase import PHASE_LABELS
+from alerts_bi.timefmt import iso_date, iso_instant
 
 __all__ = ["escape_html", "render_scorecard", "rollup_schema"]
 
@@ -26,23 +28,35 @@ __all__ = ["escape_html", "render_scorecard", "rollup_schema"]
 def escape_html(value: Any) -> str:
     """Escape a value for HTML text and attribute contexts.
 
-    ``html.escape`` covers ``&``, ``<``, ``>``, ``"`` and ``'``. It renders the apostrophe
-    as ``&#x27;`` where the superseded JavaScript implementation wrote ``&#39;`` - the same
-    character in hexadecimal rather than decimal, so rendered output is identical and only
-    the source bytes differ.
+    ``html.escape`` covers ``&``, ``<``, ``>``, ``"`` and ``'``, but writes the apostrophe as
+    ``&#x27;``. It is rewritten to the decimal ``&#39;`` so a scorecard is byte-comparable
+    against one rendered by the superseded JavaScript implementation. The two entities are
+    the same character and render identically; matching the bytes is what lets a diff of two
+    scorecards mean "the numbers differ" rather than "the escaper differs".
     """
     if value is None:
         return ""
-    return escape(str(value), quote=True)
+    return escape(str(value), quote=True).replace("&#x27;", "&#39;")
 
 
 def _number(value: Any, digits: int = 2) -> str:
+    """Format a metric for display, rounding halves away from zero.
+
+    Python's own formatting rounds a tie to the nearest even digit, so 147 alerts over 24
+    covered hours - exactly 6.125 - would print as 6.12 where every other tool the team
+    uses prints 6.13. Quantizing a Decimal built from the float keeps the tie rule
+    conventional without pretending to a precision the value does not have.
+    """
     if value is None:
         return "—"
     try:
-        return f"{float(value):.{digits}f}"
+        number = float(value)
     except (TypeError, ValueError):
         return "—"
+    if not math.isfinite(number):
+        return "—"
+    quantum = Decimal(1).scaleb(-digits)
+    return str(Decimal(number).quantize(quantum, rounding=ROUND_HALF_UP))
 
 
 def _int(value: Any) -> str:
@@ -52,15 +66,16 @@ def _int(value: Any) -> str:
 
 
 def _iso_date(value: Any) -> str:
-    if isinstance(value, datetime | date):
-        return value.isoformat()[:10]
+    if isinstance(value, datetime):
+        return iso_date(value)
+    if isinstance(value, date):
+        return value.isoformat()
     return str(value or "")[:10]
 
 
 def _iso_instant(value: Any) -> str:
     if isinstance(value, datetime):
-        text = value.isoformat()
-        return text if text.endswith("Z") else text.replace("+00:00", "") + "Z"
+        return iso_instant(value)
     return str(value or "")
 
 

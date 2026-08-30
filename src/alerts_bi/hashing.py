@@ -19,11 +19,27 @@ same as ``"a" + "bc"``.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-__all__ = ["canonical_encode", "sha256_of", "sha256_text"]
+__all__ = ["canonical_encode", "compact_json", "sha256_of", "sha256_text"]
+
+
+def compact_json(value: Any) -> str:
+    """Serialize a value for storage, compactly and in insertion order.
+
+    Used for the JSON-valued audit columns - the representative document, the panel
+    parse result, the evidence list. Insertion order is preserved rather than sorted
+    because these columns are read by people: the fields stay in the order the
+    pipeline produced them. Hashed values go through :func:`canonical_encode`
+    instead, which sorts.
+
+    The separators are explicit so the stored bytes do not depend on the default
+    spacing of whichever json implementation is in use.
+    """
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
 def _number_to_string(value: float | int) -> str:

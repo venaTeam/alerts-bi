@@ -44,8 +44,8 @@ def derive_phase(
 #: Human-readable phase labels for the scorecard.
 PHASE_LABELS: Final[dict[str, str]] = {
     "no_data": "No data in this window",
-    "phase_0": "Phase 0 - Clean",
-    "phase_1": "Phase 1 - New rules (dual-run)",
-    "phase_2": "Phase 2 - Enrich",
+    "phase_0": "Phase 0 — Clean",
+    "phase_1": "Phase 1 — New rules (dual-run)",
+    "phase_2": "Phase 2 — Enrich",
     "done": "Done",
 }

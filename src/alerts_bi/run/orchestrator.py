@@ -9,7 +9,6 @@ It never defaults to all teams.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -22,7 +21,7 @@ from alerts_bi.domain.normalize import AlertRecord
 from alerts_bi.domain.window import build_run_window
 from alerts_bi.es.client import EsClient
 from alerts_bi.es.reader import read_team_alerts
-from alerts_bi.hashing import sha256_of
+from alerts_bi.hashing import compact_json, sha256_of
 from alerts_bi.llm.assess import AssessmentOutcome, assess_alerts, mark_all_unassessed
 from alerts_bi.llm.client import LlmClient
 from alerts_bi.llm.openai_client import OpenAiLlmClient
@@ -39,6 +38,7 @@ from alerts_bi.rules.engine import (
 from alerts_bi.rules.phase import derive_phase
 from alerts_bi.rules.readiness import phase2_readiness_pct
 from alerts_bi.suppression.evaluate import build_r5_findings, evaluate_suppression
+from alerts_bi.timefmt import iso_instant
 from alerts_bi.versions import APP_VERSION, PARSER_VERSION, PROMPT_VERSION, RULESET_VERSION
 
 __all__ = ["RunSummary", "compute_run_id", "execute_run", "select_llm_client"]
@@ -90,7 +90,7 @@ def compute_run_id(
 
 
 def _iso(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return iso_instant(value)
 
 
 def _naive(value: datetime) -> datetime:
@@ -344,7 +344,7 @@ def execute_run(
                     "unmeasured_leaves": (
                         1 if interpretation.safety_state == "unparseable" else unmeasured
                     ),
-                    "notes": json.dumps(
+                    "notes": compact_json(
                         {
                             "unknown_fields": interpretation.unknown_fields,
                             "unmeasured_reason": interpretation.unmeasured_reason,
@@ -359,7 +359,7 @@ def execute_run(
                     {
                         "sql_text_hash": interpretation.sql_text_hash,
                         "parser_version": PARSER_VERSION,
-                        "parsed_result": json.dumps(
+                        "parsed_result": compact_json(
                             [leaf.to_public() for leaf in interpretation.leaves]
                         ),
                         "safety_state": interpretation.safety_state,
@@ -493,9 +493,7 @@ def _build_finding_row(
         "key_field": identity.key_field,
         "representative_at": _naive(representative.timestamp),
         "representative_hash": representative.doc_hash,
-        "representative_doc": json.dumps(
-            representative.source, separators=(",", ":"), ensure_ascii=False
-        ),
+        "representative_doc": compact_json(representative.source),
         "message": representative.message,
         "severity": representative.severity,
         "component": representative.component,
@@ -508,7 +506,7 @@ def _build_finding_row(
         "last_seen": _naive(max(timestamps)),
         "core_rule_ids": ",".join(identity.core_rule_ids),
         "readiness_rule_ids": ",".join(identity.readiness_rule_ids),
-        "findings_evidence": json.dumps(list(evidence.values()), default=str),
+        "findings_evidence": compact_json(list(evidence.values())),
         "quality_state": state,
         "llm_principle_id": None
         if is_rule_flagged

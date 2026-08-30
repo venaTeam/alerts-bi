@@ -24,6 +24,7 @@ from alerts_bi.rules.catalogs import (
     R2_HEARTBEAT_MESSAGES,
 )
 from alerts_bi.rules.text import is_blank, normalize_field_value, normalize_message
+from alerts_bi.timefmt import iso_instant
 
 __all__ = [
     "Finding",
@@ -163,7 +164,7 @@ def evaluate_r7(row: AlertRecord) -> Finding | None:
             {
                 "reason": "future",
                 "time_created": row.time_created,
-                "timestamp": receipt.isoformat(),
+                "timestamp": iso_instant(receipt),
             },
         )
     if created < earliest:
@@ -173,7 +174,7 @@ def evaluate_r7(row: AlertRecord) -> Finding | None:
             {
                 "reason": "older_than_24h",
                 "time_created": row.time_created,
-                "timestamp": receipt.isoformat(),
+                "timestamp": iso_instant(receipt),
             },
         )
     return None

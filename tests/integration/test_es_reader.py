@@ -38,8 +38,10 @@ def test_the_query_is_scoped_to_exact_operators_and_the_half_open_window() -> No
     query = build_query(["a", "b"], WINDOW)
     filters = query["bool"]["filter"]
     assert filters[0] == {"terms": {"operator": ["a", "b"]}}
-    assert filters[1]["range"]["@timestamp"]["gte"] == "2026-08-18T18:00:00Z"
-    assert filters[1]["range"]["@timestamp"]["lt"] == "2026-08-25T18:00:00Z"
+    # Milliseconds are always written, even at a whole second: one instant format is used
+    # everywhere, and the hashed run and batch identifiers depend on it.
+    assert filters[1]["range"]["@timestamp"]["gte"] == "2026-08-18T18:00:00.000Z"
+    assert filters[1]["range"]["@timestamp"]["lt"] == "2026-08-25T18:00:00.000Z"
     assert "lte" not in filters[1]["range"]["@timestamp"]
 
 

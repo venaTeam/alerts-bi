@@ -20,6 +20,7 @@ from alerts_bi.domain.window import RunWindow
 from alerts_bi.es.client import ElasticsearchError, EsClient
 from alerts_bi.logging_setup import log
 from alerts_bi.registry import TeamEntry
+from alerts_bi.timefmt import iso_instant
 
 __all__ = ["V1_INDEX", "V2_INDEX", "ReadResult", "build_query", "read_schema", "read_team_alerts"]
 
@@ -65,7 +66,7 @@ def build_query(operators: Sequence[str], window: RunWindow) -> dict[str, Any]:
 
 def _iso(value: datetime) -> str:
     """Render an instant the way Elasticsearch date parsing expects."""
-    return value.isoformat().replace("+00:00", "Z")
+    return iso_instant(value)
 
 
 def read_schema(

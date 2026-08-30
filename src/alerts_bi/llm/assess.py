@@ -17,6 +17,7 @@ from typing import Any, Final
 
 from alerts_bi.db.repositories import verdict_key
 from alerts_bi.domain.normalize import AlertRecord
+from alerts_bi.hashing import compact_json
 from alerts_bi.llm.client import LlmClient, LlmTransportError
 from alerts_bi.llm.grouping import Batch, build_batches
 from alerts_bi.llm.request import assert_lossless, build_request, serialize_request
@@ -147,9 +148,7 @@ def assess_alerts(
                         "justification": verdict.justification,
                         # The source row expires after three months, so the exact document
                         # the model judged is stored here or the verdict is unauditable.
-                        "representative_doc": json.dumps(
-                            alert.source, separators=(",", ":"), ensure_ascii=False
-                        ),
+                        "representative_doc": compact_json(alert.source),
                         "doc_hash": alert.doc_hash,
                         "classified_at": _naive(now),
                         "ruleset_version": RULESET_VERSION,
@@ -234,7 +233,7 @@ def _attempt_batch(
                 "partition_index": batch.partition_index,
                 "partition_count": batch.partition_count,
                 "alert_count": len(batch.alerts),
-                "alert_ids": json.dumps(list(batch.alert_ids)),
+                "alert_ids": compact_json(list(batch.alert_ids)),
                 "request_hash": request_hash,
                 # The complete payload is auditable data, kept in SQL and never in logs.
                 "request_payload": request_text,
