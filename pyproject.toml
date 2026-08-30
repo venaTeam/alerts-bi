@@ -1,0 +1,99 @@
+[project]
+name = "alerts-bi"
+version = "0.1.0"
+description = "Alerts BI — single-team weekly alert quality and migration scorecard"
+requires-python = ">=3.12"
+readme = "README.md"
+
+# Production dependencies are deliberately few. Everything else the pipeline needs -
+# hashing, CSV, HTML escaping, SQL text parsing, deterministic ordering - is standard
+# library, which keeps the supply chain small for an on-prem deployment.
+dependencies = [
+    # Official Elasticsearch client, matched to the 8.x cluster the mock and ECK run.
+    "elasticsearch>=8.15,<9",
+    # Regular OpenAI SDK, pointed at the on-prem compatible endpoint.
+    "openai>=1.55,<2",
+    # SQL Server driver. Ships wheels and needs no separately installed ODBC driver,
+    # which keeps `uv sync` sufficient to run the integration tests.
+    "pymssql>=2.3,<3",
+    # Validates config/teams.json against the checked-in JSON Schema (2020-12).
+    "jsonschema>=4.23,<5",
+]
+
+[project.scripts]
+alerts-bi = "alerts_bi.cli:run_cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "ruff>=0.8,<0.13",
+    "mypy>=1.13,<2",
+    "types-jsonschema>=4.23",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alerts_bi"]
+
+# ----------------------------------------------------------------------- ruff
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # import sorting
+    "UP",     # pyupgrade
+    "B",      # bugbear
+    "C4",     # comprehensions
+    "SIM",    # simplify
+    "RUF",    # ruff-specific
+]
+ignore = [
+    # The fixture scripts and report renderers legitimately carry long literal strings.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture definitions are deliberately dense so a reviewer can scan the dataset as a
+# table, and the seeded generator mirrors the original structure on purpose.
+"scripts/*" = ["E741"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ----------------------------------------------------------------------- mypy
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests", "scripts"]
+strict = true
+warn_unreachable = true
+# Reports are built from rows read back out of the database, which are untyped by
+# construction; the alternative is a second set of row dataclasses that would drift from
+# the schema without adding a guarantee.
+disallow_any_explicit = false
+
+[[tool.mypy.overrides]]
+module = ["pymssql.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration and acceptance tests skip themselves with an explanatory message when the
+# mock stack is unreachable, rather than failing.
+markers = [
+    "integration: requires the local Elasticsearch and SQL Server stack",
+    "acceptance: requires a clean mock fixture load",
+]
+filterwarnings = ["error::DeprecationWarning:alerts_bi.*"]

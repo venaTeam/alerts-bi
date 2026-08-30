@@ -18,7 +18,22 @@ The MVP does not include scheduled execution, historical backfill, an interactiv
 
 ## 2. Recommended implementation shape
 
-Use a Node.js ESM command-line application for the MVP. This matches the existing mock scripts and allows their Elasticsearch request code and fixtures to be reused. Keep the components independent so a scheduler or service wrapper can be added later without changing the analysis logic.
+Use a **Python 3.12+ command-line application** for the MVP (implementation language changed 2026-08-30; see design section 7.7). The project is defined by `pyproject.toml` with a committed lockfile and installs as a proper `alerts_bi` package. Keep the components independent so a scheduler or service wrapper can be added later without changing the analysis logic.
+
+The approved toolchain is:
+
+| Concern | Approved tool |
+|---|---|
+| Packaging and dependencies | `pyproject.toml` plus a committed lockfile |
+| Elasticsearch access | the official `elasticsearch` Python client |
+| SQL Server access | a real SQL Server driver; never SQLite or an in-memory substitute |
+| LLM transport | the regular OpenAI **Python** SDK |
+| Registry schema validation | a JSON Schema validator against the checked-in schema |
+| Tests | `pytest` |
+| Formatting and linting | `ruff` |
+| Static typing | `mypy` (or an equivalent strict checker), with type hints throughout |
+
+Production dependencies stay minimal. Nothing in the build, tests, mock seeding or runtime may require Node.js.
 
 ### 2.1 Run orchestrator
 
@@ -119,7 +134,7 @@ The prompt and model identifiers must be explicit versions, not free-form labels
 
 The prompt must encode the approved per-alert decision procedure and confidence meanings. Treat changes to the instructions, guides, or R/P catalogue as a prompt-version change, and test that batch neighbours provide context without causing verdict copying.
 
-Use the regular OpenAI Node SDK with the on-prem `baseURL`, API key, and model/deployment identifier supplied through configuration. Call Chat Completions with strict JSON-schema output and temperature zero. Set SDK automatic retries to zero so the pipeline alone enforces and audits the three total attempts; make the per-attempt timeout configurable and count transport failures and timeouts as attempts. Lock the SDK version in the package lockfile and provide a deterministic fake client for tests.
+Use the regular OpenAI Python SDK with the on-prem base URL, API key, and model/deployment identifier supplied through configuration. Call Chat Completions with strict JSON-schema output and temperature zero. Set the SDK's automatic retries to zero (`max_retries=0`) so the pipeline alone enforces and audits the three total attempts; make the per-attempt timeout configurable and count transport failures and timeouts as attempts. Lock the SDK version in the committed lockfile and provide a deterministic fake client for tests.
 
 The fake implements the same `LlmClient` contract and selects scripted results by batch ID and attempt number. Cover valid responses, transport failures, timeouts, malformed JSON, batch-ID mismatch, every alert-ID set failure, invalid enum relationships, recovery on a later attempt, and total exhaustion. Unit and integration tests must prove byte-identical retries, exactly three attempts, whole-batch rejection, batch-wide unassessed state, persistence, and reuse. Keep live endpoint tests opt-in.
 
@@ -160,7 +175,7 @@ The mock environment is the implementation test bed, but parts of it predate the
 - Stop using the mock's Unattributed bucket as part of the MVP run path.
 - Update `team_alert_status.md` after fixture behavior changes.
 
-Do not create a second fixture system; extend `scripts/generate-mock-alerts.mjs` and continue using the existing Elasticsearch and Kibana containers.
+Do not create a second fixture system; extend `scripts/generate_mock_alerts.py` and continue using the existing Elasticsearch and Kibana containers.
 
 ## 4. Delivery milestones
 
@@ -204,7 +219,7 @@ Success means every mock team can be run individually and its stored scorecard r
 
 ### Unit tests
 
-Cover at least:
+Written with `pytest`. Cover at least:
 
 - Identity construction and representative selection.
 - UTC half-open window boundaries, partial daily buckets, and seven-day rollups.
@@ -229,11 +244,11 @@ Extend `docker-compose.yml` with a pinned SQL Server 2022 container, readiness h
 
 ### Acceptance tests
 
-Give the existing seeded generator a fixed default acceptance clock and require a clean reload. Reconcile every approved rule, add dense and over-200 batching groups, and cover every suppression and retry path. Maintain a hand-reviewed `test/fixtures/expected-results.json` for every mock team with daily volume, diagnostic operands, per-rule counts, batch membership, quality states, suppression, readiness, and phase. The production pipeline must not generate this oracle. Provide a verification command that compares persisted SQL results and CSV exports with it; check HTML structure and required content rather than volatile formatting.
+Also `pytest`. Give the existing seeded generator a fixed default acceptance clock and require a clean reload. Reconcile every approved rule, add dense and over-200 batching groups, and cover every suppression and retry path. Maintain a hand-reviewed `test/fixtures/expected-results.json` for every mock team with daily volume, diagnostic operands, per-rule counts, batch membership, quality states, suppression, readiness, and phase. The production pipeline must not generate this oracle. Provide a verification command that compares persisted SQL results and CSV exports with it; check HTML structure and required content rather than volatile formatting.
 
 ## 6. Configuration and security
 
-Keep configuration outside source code. The runtime needs:
+Keep configuration outside source code, loaded from the environment with an uncommitted `.env` documented by `.env.example`. The runtime needs:
 
 - Elasticsearch URL and credentials.
 - SQL Server connection details.

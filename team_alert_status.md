@@ -29,11 +29,11 @@ definitions:
 Regenerate with a clean reload, then reproduce any row below:
 
 ```bash
-RESET=1 node scripts/generate-mock-alerts.mjs
+RESET=1 uv run python scripts/generate_mock_alerts.py
 ```
 
 ```bash
-node src/cli.js run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
+uv run alerts-bi run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
 ```
 
 ## How to read this
@@ -133,7 +133,7 @@ does not need a second, advisory opinion first.
 ## The four acceptance teams
 
 These are pinned fixtures, defined in
-[`scripts/acceptance-teams.mjs`](scripts/acceptance-teams.mjs). Every row sits on
+[`scripts/acceptance_teams.py`](scripts/acceptance_teams.py). Every row sits on
 `2026-08-20T12:00:00Z` or `2026-08-21T12:00:00Z` with an exact expected outcome, so
 [`test/fixtures/expected-results.json`](test/fixtures/expected-results.json) can be
 computed by hand.

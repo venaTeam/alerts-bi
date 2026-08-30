@@ -1,8 +1,15 @@
-# ---- dependencies ----
-node_modules/
-.pnp/
-.pnp.js
-jspm_packages/
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+dist/
+build/
 
 # ---- environment and local credentials ----
 .env
@@ -38,13 +45,7 @@ sqlserver-data/
 # ---- logs and coverage ----
 logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 coverage/
-.nyc_output/
-*.lcov
 
 # ---- build and cache ----
 dist/
@@ -52,8 +53,6 @@ build/
 .cache/
 .tmp/
 tmp/
-*.tsbuildinfo
-.eslintcache
 
 # ---- editor ----
 .vscode/
