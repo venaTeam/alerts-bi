@@ -23,11 +23,22 @@ import { APP_VERSION } from './versions.js';
 const USAGE = `alerts-bi ${APP_VERSION}
 
 Usage:
+  alerts-bi run --team <team_id> [options]
+  alerts-bi report (--run-id <id> | --team <team_id>) [--out <dir>]
   alerts-bi db migrate [--database <name>]
   alerts-bi db status [--database <name>]
   alerts-bi db reset-test
 
 Options:
+  --team        Registry team_id to analyse. Required for a run; never defaults.
+  --run-at      Freeze run_at (ISO 8601 UTC). Defaults to now. Used for reproducible
+                runs against the fixed-clock mock dataset.
+  --out         Output directory for the scorecard and CSV exports.
+                Default: out/<run_id prefix>
+  --no-llm      Run the deterministic pipeline only; eligible identities are
+                recorded as unassessed with an explicit reason.
+  --fake-llm    Use the deterministic fake client instead of the on-prem model.
+  --registry    Path to the team registry. Default: config/teams.json
   --database    Target database. Default: SQL_DATABASE from the environment.
 `;
 
@@ -140,6 +151,11 @@ export async function main(argv) {
   switch (command) {
     case 'db':
       return commandDb(positional.slice(1), flags);
+    case 'run':
+    case 'report': {
+      const { runCommand } = await import('./run/commands.js');
+      return runCommand(command, flags);
+    }
     default:
       process.stderr.write(`unknown command: ${command}\n\n${USAGE}`);
       return 2;
