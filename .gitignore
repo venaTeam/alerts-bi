@@ -1,4 +1,17 @@
-# ---- dependencies ----
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+dist/
+build/
+
+# ---- node (retained until the JavaScript implementation is removed) ----
 node_modules/
 .pnp/
 .pnp.js
