@@ -13,7 +13,17 @@ import { logger } from '../util/logger.js';
  * one dialect is a constraint that was never tested.
  */
 
-const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
+// The SQL migrations are a language-neutral asset and now live with the Python package
+// during the port. This file is the superseded JavaScript reference implementation; it
+// reads the same single canonical directory so both implementations stay in step and the
+// parity comparison is against identical schema.
+const MIGRATIONS_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'alerts_bi',
+  'db',
+  'migrations',
+);
 
 /**
  * @typedef {object} MigrationFile
