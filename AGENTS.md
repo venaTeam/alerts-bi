@@ -1,0 +1,163 @@
+# Alerts BI repository instructions
+
+**Last updated:** 2026-08-30
+
+## Mandatory first action
+
+Before answering a repository question, planning, reviewing, running a command, editing a file, or delegating work, read [`alerts_bi_design.md`](alerts_bi_design.md) **in full**.
+
+Do this in every new session. Do not rely on chat history, summaries, or memory. Every subagent must also read the complete design document before starting its task.
+
+If the design cannot be read, stop and report that blocker. It is the canonical product and architecture specification.
+
+## Document authority and reading order
+
+After reading the design, use these documents according to the task:
+
+1. [`alerts_bi_flow.md`](alerts_bi_flow.md) — concise runtime sequence for one MVP run.
+2. [`alerts_bi_implementation_plan.md`](alerts_bi_implementation_plan.md) — implementation components, milestones, tests, and definition of done.
+3. [`Alerting_Guide_Appchi_EN.md`](Alerting_Guide_Appchi_EN.md) and [`what_is_an_incorrect_alert_EN.md`](what_is_an_incorrect_alert_EN.md) — the company standard. Read both completely for rule-engine, LLM-prompt, scoring, or alert-quality work.
+4. [`team_alert_status.md`](team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
+
+For any MVP implementation, architecture, integration, or acceptance task, read the runtime flow and implementation blueprint **in full** before changing code. For rule-engine, LLM-prompt, scoring, or alert-quality work, also read both alerting guides **in full**.
+
+The precedence order is:
+
+`alerts_bi_design.md` → approved flow → implementation blueprint → current code and mock documentation.
+
+If a lower-priority document or existing implementation conflicts with the design, follow the design and reconcile the stale artifact. If new information would change an approved decision, explain the contradiction and obtain confirmation before editing the design.
+
+## Current repository state
+
+At this instruction revision, the repository contains the settled design, runtime flow, implementation blueprint, alerting guides, and an Elasticsearch/Kibana mock. The Node.js MVP application, SQL Server store, registry, migrations, and acceptance suite have not been implemented yet. Verify the current tree before relying on this statement because implementation work may have advanced.
+
+Known drift is recorded in design section 7.5:
+
+- `scripts/generate-mock-alerts.mjs` includes post-MVP R6 and multi-month data and lacks the dense batching and full acceptance cases now required.
+- `scripts/es-scale-probe.mjs` reports the old diagnostics and lacks the final selected-team measurement contract.
+- `team_alert_status.md` uses withdrawn phase and rule descriptions.
+
+Reconcile these artifacts before treating mock results as acceptance data. Extend the existing generator; do not create a separate fixture system.
+
+## Locked MVP scope
+
+Keep these decisions intact unless the design is explicitly revised:
+
+- Run manually for **one selected team**. Never default to all teams.
+- Capture `run_at` once and query the exact UTC half-open window `[run_at - 168h, run_at)`.
+- Validate the versioned team registry before querying. Require at least one source operator, enforce exact case-sensitive operator uniqueness across teams, and store the registry version, complete-file SHA-256, and selected-entry snapshot with the run.
+- Query `appchi-v1` only by the selected team's configured v1 operators and `appchi-v2` only by its configured v2 operator. Elasticsearch is the sole alert source.
+- Use `application + key_field` as the only alert identity. Do not use or persist an Elasticsearch row ID as business identity.
+- Keep v1 and v2 volume separate. Publish distinct alerts as `sum(daily distinct identities) / 7`, labelled **distinct alerts per day**.
+- Calculate node volatility from `node_name` through the approved `node_name_ratio`; use only nonempty-node rows in both numerator and denominator. Store diagnostic operands and return `null` for a zero denominator.
+- Evaluate deterministic core rules on every raw row. Any core finding on an identity blocks that whole identity from the LLM, but findings stay attached only to rows that matched.
+- Use the identity's most recent row as the representative document for LLM assessment and v2 readiness.
+- Treat R8-R10 as phase-readiness gaps. They never block LLM assessment and do not enter deterministic quality totals.
+- Derive the migration phase from identity presence and readiness; do not use self-reported phase or infer silent rule inventory.
+- Persist each run and render reports only from committed SQL Server data.
+- Produce one self-contained HTML scorecard and exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
+- Report a single week without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
+
+### Rule boundaries that commonly drift
+
+- R1 and R2 use normalized **whole-value equality**, never substring or message-length matching.
+- R3 checks required identity fields and an optional supplied `node_name`; an absent or empty optional `node_name` is valid.
+- R4 applies only when `provider = grafana`. API alerts do not carry an alert-rule URL and never match R4 for its absence.
+- R5 comes only from the approved panel-suppression evaluation.
+- R6 spam detection is post-MVP.
+- R7 applies only to v1. `time_created` is valid on both inclusive boundaries from `@timestamp - 24h` through `@timestamp`; future and older values are invalid.
+- R8-R10 apply only to v2 and follow the exact catalogs and URL rules in the design.
+
+### Suppression boundaries
+
+- Parse supplied frozen panel SQL into an AST; never ask the LLM to interpret SQL.
+- Panel SQL never establishes ownership and never narrows source alert counts.
+- Evaluate only approved instance-field negations that are top-level `AND` leaves.
+- Ignore and log unknown fields. Mark unsafe `OR` nesting, unresolved `query` variables, and missing required variable definitions as unmeasured.
+- Resolve only the frozen supported variable types from the registry.
+- Apply the greater-than-50% blast-radius guard and multi-panel unanimity rule.
+- Cache the frozen interpretation by SQL-text hash and parser version.
+- Do not call Grafana during an MVP run.
+
+### LLM boundaries
+
+- Use the regular OpenAI Node SDK against the compatible on-prem `baseURL`.
+- Use Chat Completions, strict JSON-schema output, temperature zero, configurable timeout, and SDK `maxRetries: 0`.
+- Use the deterministic fake client for normal tests. Live endpoint validation is separate and opt-in.
+- Reuse durable verdicts by `(application, key_field, prompt_version, model_version)`. Store `classified_at`, the full representative document, its hash, and the verdict.
+- Group candidates by `alert_rule_url`; when absent, group by `application`.
+- Send one group per request and never pack groups together.
+- Cap a request at 200 alerts. Split larger groups into deterministic balanced partitions after sorting; partition sizes may differ by at most one.
+- Factor only fields that are identical across every alert in the batch. Reconstruction must be lossless.
+- Persist the serialized request before calling the model. Retry the same complete batch byte-for-byte for **three total attempts**. Never retry individual alerts.
+- Reject an invalid response as a whole. After the third failure, mark every batch member `unassessed` with the shared reason.
+- Keep deterministic findings and LLM findings separate. LLM findings remain advisory.
+
+## Post-MVP order
+
+Do not expand the MVP with deferred features. The approved next steps are:
+
+1. Design and build the interactive frontend over persisted runs and pipeline controls.
+2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
+
+Plan the unattributed-alert audit, cross-team leaderboard, R6, scheduling/Kubernetes, and other deferred work separately afterward.
+
+## Local mock environment
+
+The existing [`docker-compose.yml`](docker-compose.yml) currently provides:
+
+- Elasticsearch 8.15 at `http://localhost:9200`, container `alerts-bi-es`.
+- Kibana 8.15 at `http://localhost:5601`, container `alerts-bi-kibana`.
+- Persistent Elasticsearch data in the `es-data` volume.
+
+Start the current services with:
+
+```powershell
+docker compose up -d
+```
+
+The mock indices are `appchi-v1` and `appchi-v2`. Kibana data views use `@timestamp` as their time field. This is plain Docker, not ECK; no Kubernetes cluster is available here.
+
+Useful scripts:
+
+- `scripts/generate-mock-alerts.mjs` seeds the current synthetic dataset. A normal rerun **appends** another copy. `STATS_ONLY=1` computes statistics without writing.
+- `scripts/es-scale-probe.mjs` is read-only, but its current output contract is stale and must be updated before acceptance use.
+- `scripts/create-kibana-panels.mjs` creates the existing scale-probe dashboard and is designed to be rerunnable.
+
+Reset data only when the task requires a clean fixture load. Before deleting indices or recreating a database, verify that the endpoint is the explicit local mock and that the target database is the disposable `alerts_bi_test`. Never apply destructive fixture operations to production or an unknown endpoint.
+
+The MVP must extend Compose with a pinned SQL Server 2022 service, a health check, persistent `alerts_bi_dev`, disposable `alerts_bi_test`, migrations, `.env.example`, and uncommitted credentials. Do not substitute SQLite.
+
+## Implementation and collaboration practices
+
+- Inspect the repository and working-tree state before editing. Preserve unrelated and user-owned changes.
+- Use Node.js ESM and reuse the existing mock scripts and request patterns where practical.
+- Keep pipeline stages independently testable: registry, ES reader, normalization/metrics, deterministic rules, suppression, LLM, SQL persistence, and reporting.
+- Establish shared contracts before parallel implementation.
+- Use one primary integrator. Delegate only bounded tasks with disjoint file ownership; avoid independent sessions implementing competing architectures or editing the same files.
+- Require each subagent to report assumptions, files changed, commands run, and test results. The primary agent reviews and integrates every contribution and runs the full suite.
+- Use environment configuration for endpoints and credentials. Commit placeholders only; never commit secrets.
+- Do not place alert documents, credentials, or complete LLM payloads in normal logs. Log identifiers, hashes, counts, timings, and redacted errors. Store audit payloads only in the approved SQL records.
+- Prefer deterministic behavior: stable sorting, hashes, IDs, fixture clocks, and output ordering.
+- Use the existing mock ES and a disposable SQL Server database for integration tests. Do not replace them with invented in-memory integration substitutes.
+
+## Verification and completion
+
+Implementation is not complete until the relevant unit, integration, and acceptance checks pass. Verify at least:
+
+- Exact paginated ES retrieval for one selected team.
+- Window boundaries, partial UTC buckets, daily rollups, identity selection, and diagnostic operands.
+- Every deterministic rule boundary, especially R4 provider scoping and R7 time limits.
+- Suppression AST safety, variable behavior, unanimity, and blast-radius handling.
+- Stable LLM grouping, balanced partitions, lossless factoring, exact response-ID validation, byte-identical three-attempt retries, batch-wide failure, and durable verdict reuse.
+- SQL Server migrations, constraints, transactions, restart/idempotency behavior, and SQL-only report rendering.
+- Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract.
+- Reconciliation against a hand-reviewed `test/fixtures/expected-results.json` that the production pipeline does not generate.
+
+Run formatting, linting, type checks, unit tests, integration tests, migrations, and a clean mock acceptance run when those commands exist. Report commands and results accurately. Never claim live LLM, production Elasticsearch, or full acceptance validation unless it ran successfully.
+
+## Keep project instructions synchronized
+
+[`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) must remain behaviorally equivalent. When project-wide guidance changes, update both files in the same change.
+
+When a product or architecture decision is made, update `alerts_bi_design.md` in the same session, move resolved questions into the relevant section, and update its `Last updated` date. Update the flow, blueprint, fixture documentation, and expected-results manifest when the decision changes their behavior.
