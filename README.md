@@ -222,6 +222,8 @@ never committed.
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | On-prem OpenAI-compatible endpoint |
 | `LLM_TIMEOUT_MS` | Per-attempt timeout; a timeout consumes one of the three attempts |
 | `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
+| `API_HOST`, `API_PORT` | Where `alerts-bi serve` listens; `--host` / `--port` override |
+| `API_REGISTRY_PATH`, `API_DATABASE`, `API_OUT_DIR` | Surface overrides for the registry, target database and report directory |
 
 For an on-prem cluster with a private CA, set `ES_CA_CERT` to the bundle path; the
 Elasticsearch Python client takes it directly.
@@ -348,9 +350,22 @@ be approximate.
 ```
 src/alerts_bi/
   cli.py                 command line; a run always names one team
-  api.py                 HTTP trigger surface over the same pipeline
   versions.py            frozen ruleset / prompt / parser versions
-  config.py              environment configuration
+  config/                environment configuration, split by what it configures
+    env.py                 reading the environment and .env
+    elasticsearch.py           sql.py                  } the three backing services
+    llm.py                 /
+    app.py                 the pipeline's configuration, composing those three
+    api.py                 the HTTP surface: where it listens, what it writes
+  api/                   HTTP trigger surface over the same pipeline
+    app.py                 application factory and exception handlers
+    routers/               the routes, grouped by what they are for
+    service.py             everything that touches the pipeline, plus the run gate
+    schemas.py             the wire contract; OpenAPI is generated from it
+    dependencies.py        typed access to per-application state
+    negotiation.py         the one rule for HTML versus JSON
+    ui/                    the two pages the surface renders itself
+    server.py              running it under uvicorn
   registry.py            ownership registry loading and validation
   es/                    Elasticsearch client and team-scoped reader
   domain/                run window, schema normalization, metric engine

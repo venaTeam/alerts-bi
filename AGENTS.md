@@ -155,6 +155,7 @@ The MVP must extend Compose with a pinned SQL Server 2022 service, a health chec
 - Inspect the repository and working-tree state before editing. Preserve unrelated and user-owned changes.
 - Use Python 3.12+ with type hints, and reuse the existing mock scripts and request patterns where practical.
 - Keep pipeline stages independently testable: registry, ES reader, normalization/metrics, deterministic rules, suppression, LLM, SQL persistence, and reporting.
+- Configuration lives in `alerts_bi.config`, split by what it configures; the HTTP surface lives in `alerts_bi.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
 - Establish shared contracts before parallel implementation.
 - Use one primary integrator. Delegate only bounded tasks with disjoint file ownership; avoid independent sessions implementing competing architectures or editing the same files.
 - Require each subagent to report assumptions, files changed, commands run, and test results. The primary agent reviews and integrates every contribution and runs the full suite.

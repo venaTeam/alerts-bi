@@ -19,10 +19,12 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from alerts_bi.api import Settings, build_app
-from alerts_bi.config import load_config
+from alerts_bi.api import build_app
+from alerts_bi.api.service import RunGate
+from alerts_bi.config import ApiSettings, load_config
 from alerts_bi.db.migrate import reset_test_database
 from alerts_bi.es.client import EsClient
 from alerts_bi.es.reader import V1_INDEX
@@ -43,7 +45,7 @@ def run_body(**overrides: object) -> dict[str, object]:
 
 
 @pytest.fixture(scope="module")
-def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
+def settings(tmp_path_factory: pytest.TempPathFactory) -> ApiSettings:
     try:
         if not EsClient(CONFIG.es).index_exists(V1_INDEX):
             pytest.skip("mock Elasticsearch has no appchi-v1 index")
@@ -54,7 +56,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"SQL Server is not reachable: {exc}")
 
-    return Settings(
+    return ApiSettings(
         CONFIG,
         database=CONFIG.sql.test_database,
         out_root=Path(tmp_path_factory.mktemp("api-out")),
@@ -62,8 +64,13 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
 
 
 @pytest.fixture(scope="module")
-def client(settings: Settings) -> Iterator[TestClient]:
-    with TestClient(build_app(settings)) as test_client:
+def app(settings: ApiSettings) -> FastAPI:
+    return build_app(settings)
+
+
+@pytest.fixture(scope="module")
+def client(app: FastAPI) -> Iterator[TestClient]:
+    with TestClient(app) as test_client:
         yield test_client
 
 
@@ -213,14 +220,15 @@ def test_a_browser_gets_a_readable_page_when_validation_fails(client: TestClient
 
 
 def test_a_second_concurrent_run_is_refused_rather_than_racing(
-    client: TestClient, settings: Settings
+    client: TestClient, app: FastAPI
 ) -> None:
     """Two runs of the same team and clock would derive one run_id and fight over its rows."""
-    settings.run_lock.acquire()
+    gate: RunGate = app.state.run_gate
+    assert gate.acquire(), "the gate should be free before this test takes it"
     try:
         response = client.post("/runs", json=run_body(), headers=JSON)
     finally:
-        settings.run_lock.release()
+        gate.release()
     assert response.status_code == 409
     assert "already in progress" in response.json()["detail"]
 
@@ -290,7 +298,7 @@ def _free_port() -> int:
     return port
 
 
-def test_the_uvicorn_server_actually_serves(settings: Settings) -> None:
+def test_the_uvicorn_server_actually_serves(settings: ApiSettings) -> None:
     port = _free_port()
     config = uvicorn.Config(build_app(settings), host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config)

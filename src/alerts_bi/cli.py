@@ -85,10 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     api = subparsers.add_parser("serve", help="serve the HTTP trigger surface")
     api.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="bind address; loopback by default because the surface has no authentication",
+        help="bind address; API_HOST, else loopback, because the surface has no authentication",
     )
-    api.add_argument("--port", type=int, default=8000, help="bind port; default 8000")
+    api.add_argument("--port", type=int, help="bind port; API_PORT, else 8000")
     api.add_argument("--registry", help="registry path; default config/teams.json")
     api.add_argument("--database", help="target database; default SQL_DATABASE")
 
@@ -227,23 +226,27 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
 
 def _command_serve(args: argparse.Namespace, config: AppConfig) -> int:
     from alerts_bi.api import serve
+    from alerts_bi.config import load_api_settings
 
-    if args.host not in ("127.0.0.1", "localhost", "::1"):
-        sys.stderr.write(
-            f"warning: binding to {args.host} exposes an unauthenticated endpoint that "
-            "triggers Elasticsearch reads and SQL writes to that network\n"
-        )
-    sys.stdout.write(
-        f"alerts-bi serving on http://{args.host}:{args.port}  (ctrl-c to stop)\n"
-        f"  interactive API docs: http://{args.host}:{args.port}/docs\n"
-    )
-    serve(
+    # Flags override the environment, which overrides the default - the same precedence the
+    # rest of the configuration uses.
+    settings = load_api_settings(
         config,
         host=args.host,
         port=args.port,
         registry_path=args.registry,
         database=args.database,
     )
+    if not settings.loopback_only:
+        sys.stderr.write(
+            f"warning: binding to {settings.host} exposes an unauthenticated endpoint that "
+            "triggers Elasticsearch reads and SQL writes to that network\n"
+        )
+    sys.stdout.write(
+        f"alerts-bi serving on http://{settings.host}:{settings.port}  (ctrl-c to stop)\n"
+        f"  interactive API docs: http://{settings.host}:{settings.port}/docs\n"
+    )
+    serve(settings)
     return 0
 
 
