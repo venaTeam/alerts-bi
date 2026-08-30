@@ -76,7 +76,6 @@ Keep these decisions intact unless the design is explicitly revised:
 - Treat R8-R10 as phase-readiness gaps. They never block LLM assessment and do not enter deterministic quality totals.
 - Derive the migration phase from identity presence and readiness; do not use self-reported phase or infer silent rule inventory.
 - Persist each run and render reports only from committed SQL Server data.
-- A local HTTP surface may start a run and return its scorecard (design section 7.8). It is a wrapper over the same `execute_run`/`persist_run` the CLI calls and adds no analysis: one team per run, `run_at` captured once, the same four files, reports rendered only from SQL, and runs serialized so two cannot race to write one deterministic `run_id`. It is not the deferred interactive frontend.
 - Produce one self-contained HTML scorecard and exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
 - Report a single week without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
 

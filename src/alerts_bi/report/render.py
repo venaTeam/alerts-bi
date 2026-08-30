@@ -27,7 +27,7 @@ from alerts_bi.logging_setup import log
 from alerts_bi.report.csv_export import alert_worklist_csv, daily_metrics_csv, rule_counts_csv
 from alerts_bi.report.html import render_scorecard
 
-__all__ = ["OUTPUT_FILES", "build_run_outputs", "render_run_report"]
+__all__ = ["OUTPUT_FILES", "render_run_report"]
 
 #: The exact file contract. Nothing else is written.
 OUTPUT_FILES: Final = (
@@ -38,13 +38,8 @@ OUTPUT_FILES: Final = (
 )
 
 
-def build_run_outputs(db: Database, run_id: str) -> dict[str, str]:
-    """Render one stored run into the four approved documents, in memory.
-
-    Separated from writing so a caller that serves a report over HTTP renders from the same
-    committed rows as a caller that writes files, rather than growing a second rendering
-    path that could drift from this one.
-    """
+def render_run_report(db: Database, run_id: str, out_dir: Path | str) -> list[Path]:
+    """Render one stored run into the four approved files."""
     run = get_run(db, run_id)
     if run is None:
         raise ValueError(f"run {run_id} is not in the store; nothing to render")
@@ -55,20 +50,15 @@ def build_run_outputs(db: Database, run_id: str) -> dict[str, str]:
     panels = get_run_panels(db, run_id)
     attempts = get_batch_attempts(db, run_id)
 
-    return {
+    directory = Path(out_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    outputs = {
         "scorecard.html": render_scorecard(run, daily, rule_counts, findings, panels, attempts),
         "daily_metrics.csv": daily_metrics_csv(daily),
         "rule_counts.csv": rule_counts_csv(rule_counts),
         "alert_worklist.csv": alert_worklist_csv(findings),
     }
-
-
-def render_run_report(db: Database, run_id: str, out_dir: Path | str) -> list[Path]:
-    """Render one stored run into the four approved files."""
-    outputs = build_run_outputs(db, run_id)
-
-    directory = Path(out_dir)
-    directory.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
     for name in OUTPUT_FILES:
