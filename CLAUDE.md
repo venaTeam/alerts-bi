@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-08-30 (MVP implemented in Python)
+**Last updated:** 2026-08-30 (MVP in Python, merged to `main`)
 
 ## Mandatory first action
 
@@ -48,7 +48,9 @@ The two implementations were compared row for row on the same fixture; the resul
 
 ## Current repository state
 
-The MVP is implemented in Python on the `rewrite/python` branch; the port from JavaScript is complete and the JavaScript implementation has been removed. The repository contains the settled design, runtime flow, implementation blueprint, alerting guides, the `alerts_bi` package under `src/`, SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts, and unit, integration and acceptance suites. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
+The MVP is implemented in Python and merged to `main`; the port from JavaScript is complete and the JavaScript implementation has been removed. `rewrite/python` and `feature/http-api` are the branches it arrived on and are now superseded — do not treat either as current.
+
+The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, fixture notes), the `alerts_bi` package under `src/` (including the `config` and `api` packages), SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts under `scripts/`, the hand-authored oracle at `test/fixtures/expected-results.json`, and unit, integration and acceptance suites under `tests/`. The repository root holds only what tooling requires. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 
@@ -119,17 +121,18 @@ Keep these decisions intact unless the design is explicitly revised:
 
 Do not expand the MVP with deferred features. The approved next steps are:
 
-1. Design and build the interactive frontend over persisted runs and pipeline controls.
+1. Design and build the interactive frontend over persisted runs and pipeline controls. The HTTP trigger surface of design section 7.8 already exists and is the seam it grows from; it is deliberately not that frontend.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
 Plan the unattributed-alert audit, cross-team leaderboard, R6, scheduling/Kubernetes, and other deferred work separately afterward.
 
 ## Local mock environment
 
-The existing [`docker-compose.yml`](docker-compose.yml) currently provides:
+[`docker-compose.yml`](docker-compose.yml) provides:
 
 - Elasticsearch 8.15 at `http://localhost:9200`, container `alerts-bi-es`.
 - Kibana 8.15 at `http://localhost:5601`, container `alerts-bi-kibana`.
+- SQL Server 2022 at `localhost:1433`, container `alerts-bi-sqlserver`, pinned image with a health check.
 - Persistent Elasticsearch data in the `es-data` volume.
 
 Start the current services with:
@@ -146,9 +149,11 @@ Useful scripts:
 - `scripts/es_scale_probe.py` is read-only and reports the two approved diagnostics with their operands, scoped to one selected team.
 - `scripts/create_kibana_panels.py` creates the scale-probe dashboard and is rerunnable.
 
+The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the four hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
+
 Reset data only when the task requires a clean fixture load. Before deleting indices or recreating a database, verify that the endpoint is the explicit local mock and that the target database is the disposable `alerts_bi_test`. Never apply destructive fixture operations to production or an unknown endpoint.
 
-The MVP must extend Compose with a pinned SQL Server 2022 service, a health check, persistent `alerts_bi_dev`, disposable `alerts_bi_test`, migrations, `.env.example`, and uncommitted credentials. Do not substitute SQLite.
+Compose already carries the pinned SQL Server 2022 service with its health check, and the persistent `alerts_bi_dev` and disposable `alerts_bi_test` databases exist with migrations applied. Credentials come from `.env`, which is never committed; `.env.example` carries placeholders. Do not substitute SQLite.
 
 ## Implementation and collaboration practices
 
@@ -176,6 +181,7 @@ Implementation is not complete until the relevant unit, integration, and accepta
 - SQL Server migrations, constraints, transactions, restart/idempotency behavior, and SQL-only report rendering.
 - Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract.
 - Reconciliation against a hand-reviewed `test/fixtures/expected-results.json` that the production pipeline does not generate.
+- For the HTTP surface: that it refuses a run with no team, an unknown team, an unknown model mode and a second concurrent run; that only the four approved outputs are addressable; and that a scorecard it serves is byte-identical to the one the CLI writes for the same run.
 
 Run formatting, linting, type checks, unit tests, integration tests, migrations, and a clean mock acceptance run when those commands exist. Report commands and results accurately. Never claim live LLM, production Elasticsearch, or full acceptance validation unless it ran successfully.
 
