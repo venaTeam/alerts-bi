@@ -6,7 +6,7 @@
 
 This describes the **synthetic fixture**, not any real team. It is documentation of the
 mock, and it is deliberately **not an acceptance oracle**: the oracle is the hand-authored
-[`test/fixtures/expected-results.json`](test/fixtures/expected-results.json), which covers
+[`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json), which covers
 the four `acceptance-*` teams. The seven realistic teams exist to give the pipeline
 lifelike shapes and volumes to run against.
 
@@ -133,9 +133,9 @@ does not need a second, advisory opinion first.
 ## The four acceptance teams
 
 These are pinned fixtures, defined in
-[`scripts/acceptance_teams.py`](scripts/acceptance_teams.py). Every row sits on
+[`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py). Every row sits on
 `2026-08-20T12:00:00Z` or `2026-08-21T12:00:00Z` with an exact expected outcome, so
-[`test/fixtures/expected-results.json`](test/fixtures/expected-results.json) can be
+[`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json) can be
 computed by hand.
 
 ### acceptance-core — one row per rule boundary

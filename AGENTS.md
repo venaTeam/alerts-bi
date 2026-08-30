@@ -4,7 +4,7 @@
 
 ## Mandatory first action
 
-Before answering a repository question, planning, reviewing, running a command, editing a file, or delegating work, read [`alerts_bi_design.md`](alerts_bi_design.md) **in full**.
+Before answering a repository question, planning, reviewing, running a command, editing a file, or delegating work, read [`alerts_bi_design.md`](docs/alerts_bi_design.md) **in full**.
 
 Do this in every new session. Do not rely on chat history, summaries, or memory. Every subagent must also read the complete design document before starting its task.
 
@@ -14,10 +14,10 @@ If the design cannot be read, stop and report that blocker. It is the canonical 
 
 After reading the design, use these documents according to the task:
 
-1. [`alerts_bi_flow.md`](alerts_bi_flow.md) — concise runtime sequence for one MVP run.
-2. [`alerts_bi_implementation_plan.md`](alerts_bi_implementation_plan.md) — implementation components, milestones, tests, and definition of done.
-3. [`Alerting_Guide_Appchi_EN.md`](Alerting_Guide_Appchi_EN.md) and [`what_is_an_incorrect_alert_EN.md`](what_is_an_incorrect_alert_EN.md) — the company standard. Read both completely for rule-engine, LLM-prompt, scoring, or alert-quality work.
-4. [`team_alert_status.md`](team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
+1. [`alerts_bi_flow.md`](docs/alerts_bi_flow.md) — concise runtime sequence for one MVP run.
+2. [`alerts_bi_implementation_plan.md`](docs/alerts_bi_implementation_plan.md) — implementation components, milestones, tests, and definition of done.
+3. [`Alerting_Guide_Appchi_EN.md`](docs/Alerting_Guide_Appchi_EN.md) and [`what_is_an_incorrect_alert_EN.md`](docs/what_is_an_incorrect_alert_EN.md) — the company standard. Read both completely for rule-engine, LLM-prompt, scoring, or alert-quality work.
+4. [`team_alert_status.md`](docs/team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
 
 For any MVP implementation, architecture, integration, or acceptance task, read the runtime flow and implementation blueprint **in full** before changing code. For rule-engine, LLM-prompt, scoring, or alert-quality work, also read both alerting guides **in full**.
 

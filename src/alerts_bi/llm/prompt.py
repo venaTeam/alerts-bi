@@ -21,6 +21,11 @@ from alerts_bi.versions import PROMPT_VERSION, RULESET_VERSION
 
 __all__ = ["BuiltPrompt", "build_prompt", "build_system_prompt"]
 
+#: Where the guides live in the tree. Only the path is relative to this: the ``BEGIN``/``END``
+#: markers below use the bare file name, so moving the guides does not alter one byte of the
+#: system prompt - which it must not, since any change to the prompt requires a new
+#: ``PROMPT_VERSION``.
+GUIDE_DIR = "docs"
 GUIDE_FILES = ("Alerting_Guide_Appchi_EN.md", "what_is_an_incorrect_alert_EN.md")
 
 #: The fixed per-alert decision procedure.
@@ -105,7 +110,7 @@ class BuiltPrompt:
 def _read_guides(repo_root: Path) -> str:
     parts = []
     for filename in GUIDE_FILES:
-        text = (repo_root / filename).read_bytes().decode("utf-8")
+        text = (repo_root / GUIDE_DIR / filename).read_bytes().decode("utf-8")
         parts.append(f"===== BEGIN {filename} =====\n{text}\n===== END {filename} =====")
     return "\n\n".join(parts)
 
