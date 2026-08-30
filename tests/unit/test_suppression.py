@@ -8,6 +8,7 @@ from alerts_bi.registry import Panel, PanelVariable, load_registry
 from alerts_bi.suppression.evaluate import (
     BLAST_RADIUS_LIMIT,
     LeafOutcome,
+    SuppressionResult,
     build_r5_findings,
     evaluate_suppression,
     interpret_panel,
@@ -62,6 +63,7 @@ def test_tokenizes_all_grafana_variable_syntaxes(text: str, name: str) -> None:
 
 def test_skips_line_and_block_comments() -> None:
     where = parse_panel_sql("SELECT * FROM t WHERE /* hidden */ node_name != 'x' -- trailing\n")
+    assert where is not None
     assert where.type == "comparison"
 
 
@@ -106,6 +108,7 @@ def test_leaves_inside_an_or_are_marked_nested() -> None:
 
 def test_trailing_order_by_and_limit_end_the_where_expression() -> None:
     where = parse_panel_sql("SELECT * FROM t WHERE node_name != 'a' ORDER BY time DESC LIMIT 100")
+    assert where is not None
     assert where.type == "comparison"
 
 
@@ -269,8 +272,10 @@ ROWS = [
 ]
 
 
-def suppressed_nodes(result: Any) -> list[str | None]:
-    return sorted(r.node_name for r in ROWS if id(r) in result.suppressed_row_ids)
+def suppressed_nodes(result: SuppressionResult) -> list[str]:
+    """Node names of the suppressed rows. A suppressed row always has a node name here;
+    the NULL-node case is asserted separately by its own test."""
+    return sorted(r.node_name or "" for r in ROWS if id(r) in result.suppressed_row_ids)
 
 
 def test_a_suppression_leaf_excludes_exactly_the_rows_the_team_named() -> None:
@@ -286,7 +291,8 @@ def test_a_row_whose_field_is_null_is_not_suppressed_by_a_negation_on_that_field
     result = evaluate_suppression(
         ROWS, [panel("SELECT * FROM t WHERE node_name != 'legacy-heartbeat-node'")]
     )
-    assert None not in suppressed_nodes(result)
+    null_node_row = next(r for r in ROWS if r.node_name is None)
+    assert id(null_node_row) not in result.suppressed_row_ids
 
 
 def test_rows_are_counted_once_regardless_of_how_many_leaves_exclude_them() -> None:
