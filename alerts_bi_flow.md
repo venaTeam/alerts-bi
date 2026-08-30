@@ -124,7 +124,7 @@ The request carries the group identity, ruleset and prompt versions, shared fiel
 
 ### 6.3 Send and validate
 
-The tool calls the on-prem OpenAI-compatible endpoint through the regular OpenAI Node SDK. It uses Chat Completions with strict JSON-schema output, temperature zero, a configurable timeout, and SDK automatic retries disabled. Each timeout, transport failure, invalid response, or other failed call consumes one of the pipeline's recorded attempts.
+The tool calls the on-prem OpenAI-compatible endpoint through the regular OpenAI Python SDK. It uses Chat Completions with strict JSON-schema output, temperature zero, a configurable timeout, and SDK automatic retries disabled. Each timeout, transport failure, invalid response, or other failed call consumes one of the pipeline's recorded attempts.
 
 The cached prompt prefix contains the approved alerting guides, the R/P catalogue, and the fixed classification procedure. The model reconstructs and judges every alert independently, uses batch neighbours only as context, cites one most-actionable principle with a deterministic tie-break, uses `other` only for clear uncatalogued violations, and defaults to `no_violation` when evidence is ambiguous. The request body contains the losslessly factored representative documents and stable per-alert IDs.
 

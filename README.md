@@ -16,12 +16,25 @@ cross-team leaderboard — by design.
 run end to end, and `alerts_bi_implementation_plan.md` describes what to build. Where this
 README and the design differ, the design wins.
 
+The implementation language is **Python** (design section 7.7). The superseded JavaScript
+implementation is preserved at the `javascript-mvp` tag as the behavioural reference for
+the port.
+
 ---
+
+## Prerequisites
+
+- **Python 3.12 or later**
+- [`uv`](https://docs.astral.sh/uv/) for dependency management and the committed lockfile
+- Docker, for the Elasticsearch, Kibana and SQL Server stack
+
+Node.js is **not** required for anything: build, tests, mock seeding and runtime are all
+Python.
 
 ## Quick start
 
 ```bash
-npm install
+uv sync
 ```
 
 ```bash
@@ -46,17 +59,17 @@ docker compose ps
 Load the mock dataset and apply the migrations:
 
 ```bash
-RESET=1 node scripts/generate-mock-alerts.mjs
+RESET=1 uv run python scripts/generate_mock_alerts.py
 ```
 
 ```bash
-npm run db:migrate
+uv run alerts-bi db migrate
 ```
 
 Run a team:
 
 ```bash
-node src/cli.js run --team checkout-api --run-at 2026-08-25T18:00:00Z --fake-llm
+uv run alerts-bi run --team checkout-api --run-at 2026-08-25T18:00:00Z --fake-llm
 ```
 
 The scorecard and the three CSV exports are written under `out/<run id prefix>/`.
@@ -70,13 +83,13 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 
 | Command | What it does |
 |---|---|
-| `run --team <id>` | Analyse one team, persist the run, render the report |
-| `report --run-id <id>` | Re-render a stored run without recomputing anything |
-| `report --team <id>` | Re-render that team's most recent completed run |
-| `db migrate` | Create the database if absent and apply pending migrations |
-| `db status` | Show which migrations are applied |
-| `db reset-test` | Drop and recreate **only** the configured disposable test database |
-| `verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
+| `alerts-bi run --team <id>` | Analyse one team, persist the run, render the report |
+| `alerts-bi report --run-id <id>` | Re-render a stored run without recomputing anything |
+| `alerts-bi report --team <id>` | Re-render that team's most recent completed run |
+| `alerts-bi db migrate` | Create the database if absent and apply pending migrations |
+| `alerts-bi db status` | Show which migrations are applied |
+| `alerts-bi db reset-test` | Drop and recreate **only** the configured disposable test database |
+| `alerts-bi verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
 
 ### `run` options
 
@@ -109,7 +122,7 @@ Elasticsearch, and nothing is rendered from in-memory pipeline results. Renderin
 separate, retryable step, so a display failure after a successful run loses nothing:
 
 ```bash
-node src/cli.js report --run-id <run id>
+uv run alerts-bi report --run-id <run id>
 ```
 
 ### Reading the numbers
@@ -149,8 +162,8 @@ never committed.
 | `LLM_TIMEOUT_MS` | Per-attempt timeout; a timeout consumes one of the three attempts |
 | `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
 
-For an on-prem cluster with a private CA, point `NODE_EXTRA_CA_CERTS` at the bundle.
-`fetch` has no per-request CA option, so a config field for it would be silently ignored.
+For an on-prem cluster with a private CA, set `ES_CA_CERT` to the bundle path; the
+Elasticsearch Python client takes it directly.
 
 Alert documents, credentials and complete LLM payloads never appear in logs. Logs carry
 identifiers, hashes, counts, timings and redacted errors. Auditable payloads are stored in
@@ -190,15 +203,15 @@ ownership** and never narrows the alerts a run counts.
 ## Testing
 
 ```bash
-npm test
+uv run pytest tests/unit
 ```
 
 ```bash
-npm run test:integration
+uv run pytest tests/integration
 ```
 
 ```bash
-npm run test:acceptance
+uv run pytest tests/acceptance
 ```
 
 Unit tests need nothing running. Integration and acceptance tests need Docker Compose up
@@ -206,7 +219,7 @@ and the mock dataset loaded; they skip with an explanatory message otherwise, ra
 failing.
 
 Integration and acceptance tests use the **disposable** `alerts_bi_test` database, which
-they recreate. `db reset-test` refuses any target that is not the configured test database
+they recreate. `alerts-bi db reset-test` refuses any target that is not the configured test database
 and additionally requires `test` in the name, so a mistyped environment variable cannot
 take out the development store.
 
@@ -218,25 +231,26 @@ validation is separate and opt-in.
 ### Acceptance verification
 
 ```bash
-node src/cli.js verify-acceptance
+uv run alerts-bi verify-acceptance
 ```
 
 Runs the four acceptance teams and compares the persisted SQL rows and the rendered CSV
 exports against `test/fixtures/expected-results.json`.
 
 That manifest is **hand-authored** from the fixture definitions in
-`scripts/acceptance-teams.mjs`, with the derivation of every number recorded alongside it.
+`scripts/acceptance_teams.py`, with the derivation of every number recorded alongside it.
 The pipeline does not generate its own oracle: an oracle produced by the code under test
 would agree with any bug that happened to be self-consistent.
 
-The full checks (`npm run lint`, `npm run format:check`, `npm run typecheck`, all three
-test suites, plus acceptance verification) are what "done" means here.
+The full checks (`uv run ruff format --check .`, `uv run ruff check .`,
+`uv run mypy src`, all three test suites, plus acceptance verification) are what "done"
+means here.
 
 ---
 
 ## The mock environment
 
-`scripts/generate-mock-alerts.mjs` seeds `appchi-v1` and `appchi-v2` from a seeded RNG on a
+`scripts/generate_mock_alerts.py` seeds `appchi-v1` and `appchi-v2` from a seeded RNG on a
 fixed clock, so the dataset is reproducible.
 
 **A normal rerun appends another copy of every row.** Use `RESET=1` for a clean reload,
@@ -245,21 +259,21 @@ endpoint that is not an explicit local mock, so a mistyped `ES_URL` cannot delet
 index.
 
 ```bash
-RESET=1 node scripts/generate-mock-alerts.mjs
+RESET=1 uv run python scripts/generate_mock_alerts.py
 ```
 
 ```bash
-STATS_ONLY=1 node scripts/generate-mock-alerts.mjs
+STATS_ONLY=1 uv run python scripts/generate_mock_alerts.py
 ```
 
 Seven teams carry realistic data across the migration phases. Four `acceptance-*` teams
 carry fixtures pinned to exact timestamps and exact expected outcomes; they exist so the
 acceptance manifest can be computed by hand.
 
-`scripts/es-scale-probe.mjs` is read-only and sizes the problem:
+`scripts/es_scale_probe.py` is read-only and sizes the problem:
 
 ```bash
-node scripts/es-scale-probe.mjs --team checkout-api --run-at 2026-08-25T18:00:00Z
+uv run python scripts/es_scale_probe.py --team checkout-api --run-at 2026-08-25T18:00:00Z
 ```
 
 Its figures are approximate HyperLogLog++ cardinalities. The pipeline never uses them: it
@@ -271,19 +285,21 @@ be approximate.
 ## Architecture
 
 ```
-src/
-  cli.js                 command line; a run always names one team
-  versions.js            frozen ruleset / prompt / parser versions
-  config/env.js          environment configuration
-  registry/              ownership registry loading and validation
+src/alerts_bi/
+  cli.py                 command line; a run always names one team
+  versions.py            frozen ruleset / prompt / parser versions
+  config.py              environment configuration
+  registry.py            ownership registry loading and validation
   es/                    Elasticsearch client and team-scoped reader
   domain/                run window, schema normalization, metric engine
   rules/                 R1-R4 and R7 core, R8-R10 readiness, aggregation, phase
   suppression/           panel SQL lexer, parser, field table, safety guards
   llm/                   grouping, request factoring, response validation, retry
-  db/                    migrations, connection pool, repositories
+  db/                    migrations, connection, repositories
   report/                HTML scorecard and the three CSV exports
   run/                   orchestrator, CLI command handlers, acceptance verification
+scripts/                 mock seeder, scale probe, Kibana setup
+tests/                   unit, integration, acceptance, fixtures
 ```
 
 Each stage is independently testable, and the orchestrator invokes them in the order the
