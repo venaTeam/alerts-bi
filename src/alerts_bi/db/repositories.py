@@ -193,7 +193,7 @@ _PANEL_PARSE_COLUMNS = (
 
 def _insert_statement(table: str, columns: Sequence[str]) -> str:
     names = ", ".join(columns)
-    placeholders = ", ".join(f"%({name})s" for name in columns)
+    placeholders = ", ".join(f":{name}" for name in columns)
     return f"INSERT INTO {table} ({names}) VALUES ({placeholders})"
 
 
@@ -233,8 +233,8 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
             "llm_batch_attempts",
             "run_panels",
         ):
-            db.execute(f"DELETE FROM {table} WHERE run_id = %(run_id)s", {"run_id": run_id})
-        db.execute("DELETE FROM runs WHERE run_id = %(run_id)s", {"run_id": run_id})
+            db.execute(f"DELETE FROM {table} WHERE run_id = :run_id", {"run_id": run_id})
+        db.execute("DELETE FROM runs WHERE run_id = :run_id", {"run_id": run_id})
 
         db.execute(
             _insert_statement("runs", _RUN_COLUMNS),
@@ -275,13 +275,13 @@ def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:
     recomputed under the same pair, so an existing row always wins.
     """
     names = ", ".join(_VERDICT_COLUMNS)
-    placeholders = ", ".join(f"%({name})s" for name in _VERDICT_COLUMNS)
+    placeholders = ", ".join(f":{name}" for name in _VERDICT_COLUMNS)
     db.execute(
         f"""
         IF NOT EXISTS (
           SELECT 1 FROM llm_verdicts
-          WHERE application = %(application)s AND key_field = %(key_field)s
-            AND prompt_version = %(prompt_version)s AND model_version = %(model_version)s
+          WHERE application = :application AND key_field = :key_field
+            AND prompt_version = :prompt_version AND model_version = :model_version
         )
         INSERT INTO llm_verdicts ({names}) VALUES ({placeholders})
         """,
@@ -291,12 +291,12 @@ def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:
 
 def insert_panel_parse_if_absent(db: Database, parse: dict[str, Any]) -> None:
     names = ", ".join(_PANEL_PARSE_COLUMNS)
-    placeholders = ", ".join(f"%({name})s" for name in _PANEL_PARSE_COLUMNS)
+    placeholders = ", ".join(f":{name}" for name in _PANEL_PARSE_COLUMNS)
     db.execute(
         f"""
         IF NOT EXISTS (
           SELECT 1 FROM panel_parses
-          WHERE sql_text_hash = %(sql_text_hash)s AND parser_version = %(parser_version)s
+          WHERE sql_text_hash = :sql_text_hash AND parser_version = :parser_version
         )
         INSERT INTO panel_parses ({names}) VALUES ({placeholders})
         """,
@@ -331,12 +331,12 @@ def find_verdicts(
         for index, (application, key_field) in enumerate(chunk):
             params[f"app_{index}"] = application
             params[f"key_{index}"] = key_field
-            predicates.append(f"(application = %(app_{index})s AND key_field = %(key_{index})s)")
+            predicates.append(f"(application = :app_{index} AND key_field = :key_{index})")
 
         rows = db.query(
             f"""
             SELECT * FROM llm_verdicts
-            WHERE prompt_version = %(prompt_version)s AND model_version = %(model_version)s
+            WHERE prompt_version = :prompt_version AND model_version = :model_version
               AND ({" OR ".join(predicates)})
             """,
             params,
@@ -350,7 +350,7 @@ def find_panel_parse(
     db: Database, sql_text_hash: str, parser_version: str
 ) -> dict[str, Any] | None:
     return db.query_one(
-        "SELECT * FROM panel_parses WHERE sql_text_hash = %(hash)s AND parser_version = %(version)s",
+        "SELECT * FROM panel_parses WHERE sql_text_hash = :hash AND parser_version = :version",
         {"hash": sql_text_hash, "version": parser_version},
     )
 
@@ -360,7 +360,7 @@ def find_panel_parse(
 
 
 def get_run(db: Database, run_id: str) -> dict[str, Any] | None:
-    return db.query_one("SELECT * FROM runs WHERE run_id = %(run_id)s", {"run_id": run_id})
+    return db.query_one("SELECT * FROM runs WHERE run_id = :run_id", {"run_id": run_id})
 
 
 def get_latest_run(db: Database, team_id: str) -> dict[str, Any] | None:
@@ -374,7 +374,7 @@ def get_latest_run(db: Database, team_id: str) -> dict[str, Any] | None:
     execution, and ``run_id`` makes the result total rather than merely usually right.
     """
     return db.query_one(
-        "SELECT TOP 1 * FROM runs WHERE team_id = %(team_id)s AND status = 'completed' "
+        "SELECT TOP 1 * FROM runs WHERE team_id = :team_id AND status = 'completed' "
         "ORDER BY run_at DESC, completed_at DESC, run_id DESC",
         {"team_id": team_id},
     )
@@ -382,7 +382,7 @@ def get_latest_run(db: Database, team_id: str) -> dict[str, Any] | None:
 
 def get_daily_metrics(db: Database, run_id: str) -> list[dict[str, Any]]:
     return db.query(
-        "SELECT * FROM daily_metrics WHERE run_id = %(run_id)s "
+        "SELECT * FROM daily_metrics WHERE run_id = :run_id "
         "ORDER BY alert_schema ASC, snapshot_date ASC",
         {"run_id": run_id},
     )
@@ -392,7 +392,7 @@ def get_rule_counts(db: Database, run_id: str) -> list[dict[str, Any]]:
     return db.query(
         """
         SELECT * FROM daily_rule_counts
-        WHERE run_id = %(run_id)s
+        WHERE run_id = :run_id
         ORDER BY alert_schema ASC, snapshot_date ASC,
                  CAST(SUBSTRING(rule_id, 2, 8) AS INT) ASC
         """,
@@ -402,7 +402,7 @@ def get_rule_counts(db: Database, run_id: str) -> list[dict[str, Any]]:
 
 def get_findings(db: Database, run_id: str) -> list[dict[str, Any]]:
     return db.query(
-        "SELECT * FROM alert_findings WHERE run_id = %(run_id)s "
+        "SELECT * FROM alert_findings WHERE run_id = :run_id "
         "ORDER BY alert_schema ASC, application ASC, key_field ASC",
         {"run_id": run_id},
     )
@@ -410,7 +410,7 @@ def get_findings(db: Database, run_id: str) -> list[dict[str, Any]]:
 
 def get_batch_attempts(db: Database, run_id: str) -> list[dict[str, Any]]:
     return db.query(
-        "SELECT * FROM llm_batch_attempts WHERE run_id = %(run_id)s "
+        "SELECT * FROM llm_batch_attempts WHERE run_id = :run_id "
         "ORDER BY batch_id ASC, attempt_number ASC",
         {"run_id": run_id},
     )
@@ -418,6 +418,6 @@ def get_batch_attempts(db: Database, run_id: str) -> list[dict[str, Any]]:
 
 def get_run_panels(db: Database, run_id: str) -> list[dict[str, Any]]:
     return db.query(
-        "SELECT * FROM run_panels WHERE run_id = %(run_id)s ORDER BY panel_id ASC",
+        "SELECT * FROM run_panels WHERE run_id = :run_id ORDER BY panel_id ASC",
         {"run_id": run_id},
     )

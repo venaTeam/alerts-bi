@@ -13,8 +13,12 @@ dependencies = [
     "elasticsearch>=8.15,<9",
     # Regular OpenAI SDK, pointed at the on-prem compatible endpoint.
     "openai>=1.55,<2",
-    # SQL Server driver. Ships wheels and needs no separately installed ODBC driver,
-    # which keeps `uv sync` sufficient to run the integration tests.
+    # Database access. SQLAlchemy Core only - hand-written SQL executed as text, no ORM:
+    # the pipeline persists rows it has already computed and reads them back to render.
+    "sqlalchemy>=2.0,<3",
+    # The DBAPI under SQLAlchemy's mssql+pymssql dialect. Chosen over pyodbc because it
+    # ships wheels and needs no separately installed ODBC driver, which keeps `uv sync`
+    # sufficient to run the integration tests.
     "pymssql>=2.3,<3",
     # Validates config/teams.json against the checked-in JSON Schema (2020-12).
     "jsonschema>=4.23,<5",

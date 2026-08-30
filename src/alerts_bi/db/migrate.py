@@ -113,7 +113,7 @@ def migrate(db: Database, directory: Path = MIGRATIONS_DIR) -> tuple[list[str], 
                     db.execute(batch)
             db.execute(
                 "INSERT INTO schema_migrations (version, checksum, applied_at) "
-                "VALUES (%(version)s, %(checksum)s, %(applied_at)s)",
+                "VALUES (:version, :checksum, :applied_at)",
                 {
                     "version": migration.version,
                     "checksum": migration.checksum,
@@ -136,7 +136,7 @@ def migrate_database(config: SqlConfig, database: str) -> tuple[list[str], list[
     quoted = quote_identifier(database)
     with connect(config, "master", autocommit=True) as master:
         exists = master.query_one(
-            "SELECT 1 AS present FROM sys.databases WHERE name = %(name)s", {"name": database}
+            "SELECT 1 AS present FROM sys.databases WHERE name = :name", {"name": database}
         )
         if exists is None:
             master.execute(f"CREATE DATABASE {quoted}")
