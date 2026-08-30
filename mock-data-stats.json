@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-08-25T18:00:00.000Z",
-  "totalRows": 39525,
+  "totalRows": 39959,
   "summary": [
     {
       "team": "payments-core",
@@ -64,6 +64,42 @@
       "v2Rows": 80,
       "v1Distinct": 10,
       "v2Distinct": 10
+    },
+    {
+      "team": "acceptance-core",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 13,
+      "v2Rows": 6,
+      "v1Distinct": 12,
+      "v2Distinct": 6
+    },
+    {
+      "team": "acceptance-batching",
+      "phase": "acceptance",
+      "quality": "good",
+      "v1Rows": 0,
+      "v2Rows": 404,
+      "v1Distinct": 0,
+      "v2Distinct": 404
+    },
+    {
+      "team": "acceptance-suppression",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 6,
+      "v2Rows": 0,
+      "v1Distinct": 6,
+      "v2Distinct": 0
+    },
+    {
+      "team": "acceptance-blast-radius",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 5,
+      "v2Rows": 0,
+      "v1Distinct": 5,
+      "v2Distinct": 0
     }
   ],
   "ruleBreakdown": [
@@ -452,6 +488,40 @@
         "pipeline"
       ],
       "v2Operator": "data-pipeline-etl"
+    },
+    {
+      "team": "acceptance-core",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-core"
+      ],
+      "v2Operator": "acc-core-v2"
+    },
+    {
+      "team": "acceptance-batching",
+      "v1": null,
+      "v2": null,
+      "v1Operators": null,
+      "v2Operator": "acc-batching"
+    },
+    {
+      "team": "acceptance-suppression",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-suppression"
+      ],
+      "v2Operator": null
+    },
+    {
+      "team": "acceptance-blast-radius",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-blast"
+      ],
+      "v2Operator": null
     }
   ],
   "unattributed": {

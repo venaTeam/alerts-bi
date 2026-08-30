@@ -1,0 +1,402 @@
+{
+  "_comment": [
+    "Hand-reviewed acceptance oracle (design section 7.5, acceptance-data contract).",
+    "",
+    "Every number here was computed BY HAND from the fixture definitions in",
+    "scripts/acceptance-teams.mjs, not emitted by the pipeline under test. The pipeline",
+    "must not generate its own oracle: an oracle derived from the code it checks would",
+    "agree with any bug that is consistent.",
+    "",
+    "Derivations are recorded in _why on each team so a reviewer can re-check the",
+    "arithmetic without re-reading the generator.",
+    "",
+    "Window: run_at 2026-08-25T18:00:00Z, so the exact half-open range",
+    "[2026-08-18T18:00:00Z, 2026-08-25T18:00:00Z) covering 8 UTC dates and 168 hours.",
+    "Buckets not listed under `daily` must be present and entirely zero.",
+    "",
+    "Verified with: node src/cli.js verify-acceptance"
+  ],
+
+  "run_at": "2026-08-25T18:00:00.000Z",
+  "window": {
+    "start": "2026-08-18T18:00:00.000Z",
+    "end": "2026-08-25T18:00:00.000Z",
+    "bucket_count": 8,
+    "covered_hours_total": 168,
+    "first_bucket": { "date": "2026-08-18", "covered_hours": 6 },
+    "last_bucket": { "date": "2026-08-25", "covered_hours": 18 }
+  },
+
+  "teams": {
+    "acceptance-core": {
+      "_why": [
+        "13 v1 rows: c01-c10 and two c11 rows on 2026-08-20, one c11 row on 2026-08-21.",
+        "11 v1 identities: the two c11 defs share obj c11-multiday, so they are one identity.",
+        "Core findings: R1 on c05, R2 on c06, R3 on the Unknown object, R4 on c08,",
+        "R7 on c09 (+1ms future) and c10 (-24h-1ms stale), R1 on the c11 row dated 08-21.",
+        "NOT flagged: c02 is an API alert with no rule URL (R4 is Grafana-only), and c03/c04",
+        "sit exactly on the two INCLUSIVE R7 boundaries.",
+        "So 7 v1 identities are rule_flagged and 4 (c01-c04) go to the model.",
+        "flagged_by_rule rows: 6 on 08-20 and 1 on 08-21 = 7.",
+        "distinct/day = (11 on 08-20 + 1 on 08-21) / 7 = 12/7.",
+        "6 v2 identities; only v06 has a core finding (R2). Readiness: v01 ready, v04 ready",
+        "(a non-critical R9 does not block), v06 ready (a core finding is not a readiness",
+        "gap); v02 (R8), v03 (critical R9) and v05 (R10) are not => 3/6 = 50%.",
+        "Both schemas present => phase_1."
+      ],
+      "phase_derived": "phase_1",
+      "phase2_readiness_pct": 50,
+      "identity_states": { "rule_flagged": 8, "assessed_good": 9 },
+      "schemas": {
+        "v1": {
+          "identities": 11,
+          "totals": {
+            "alerts": 13,
+            "distinct_sum": 12,
+            "distinct_per_day": 1.7142857142857142,
+            "alerts_per_hour": 0.07738095238095238,
+            "flagged_by_rule": 7,
+            "flagged_by_rule_distinct_sum": 7,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 4,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 12,
+            "node_name_denominator": 12,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 12,
+            "key_inflation_denominator": 12,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 12,
+              "distinct_alerts": 11,
+              "alerts_per_hour": 0.5,
+              "flagged_by_rule": 6,
+              "flagged_by_rule_distinct": 6,
+              "assessed_good": 4,
+              "unassessed": 0,
+              "suppressed": 0,
+              "node_name_numerator": 11,
+              "node_name_denominator": 11,
+              "key_inflation_numerator": 11,
+              "key_inflation_denominator": 11
+            },
+            "2026-08-21": {
+              "covered_hours": 24,
+              "alerts": 1,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.041666666666666664,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 0,
+              "unassessed": 0,
+              "suppressed": 0,
+              "node_name_numerator": 1,
+              "node_name_denominator": 1,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            }
+          },
+          "rule_counts": {
+            "2026-08-20": {
+              "R1": [1, 1],
+              "R2": [1, 1],
+              "R3": [1, 1],
+              "R4": [1, 1],
+              "R7": [2, 2]
+            },
+            "2026-08-21": { "R1": [1, 1] }
+          }
+        },
+        "v2": {
+          "identities": 6,
+          "totals": {
+            "alerts": 6,
+            "distinct_sum": 6,
+            "distinct_per_day": 0.8571428571428571,
+            "alerts_per_hour": 0.03571428571428571,
+            "flagged_by_rule": 1,
+            "flagged_by_rule_distinct_sum": 1,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 4,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 6,
+            "key_inflation_denominator": 6,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 6,
+              "distinct_alerts": 6,
+              "alerts_per_hour": 0.25,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "phase2_gaps": 4,
+              "suppressed": 0,
+              "node_name_numerator": 0,
+              "node_name_denominator": 0,
+              "key_inflation_numerator": 6,
+              "key_inflation_denominator": 6
+            }
+          },
+          "rule_counts": {
+            "2026-08-20": {
+              "R2": [1, 1],
+              "R8": [1, 1],
+              "R9": [2, 2],
+              "R10": [1, 1]
+            }
+          }
+        }
+      }
+    },
+
+    "acceptance-batching": {
+      "_why": [
+        "401 v2 identities share one alert_rule_url and 3 API alerts carry none, so there",
+        "are exactly two groups: one by alert_rule_url and one by application. They are",
+        "never packed together.",
+        "The 401-alert group exceeds the 200 cap, so it splits into balanced partitions of",
+        "134, 134 and 133 - not 200, 200 and 1. Total batches: 4.",
+        "No core findings anywhere (the API alerts have no rule URL, which R4 does not",
+        "penalise), so all 404 identities are assessed.",
+        "Every alert has impact and a valid runbook and none matches R10, so readiness is",
+        "100% and, with no v1 identities, the phase is done."
+      ],
+      "phase_derived": "done",
+      "phase2_readiness_pct": 100,
+      "identity_states": { "assessed_good": 404 },
+      "llm_batches": {
+        "total": 4,
+        "partition_sizes_by_group": {
+          "https://grafana.internal/d/acc-batch-big": [134, 134, 133],
+          "acc-batch-api-app": [3]
+        }
+      },
+      "schemas": {
+        "v1": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        },
+        "v2": {
+          "identities": 404,
+          "totals": {
+            "alerts": 404,
+            "distinct_sum": 404,
+            "distinct_per_day": 57.714285714285715,
+            "alerts_per_hour": 2.4047619047619047,
+            "flagged_by_rule": 0,
+            "flagged_by_rule_distinct_sum": 0,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 404,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 404,
+            "key_inflation_denominator": 404,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 404,
+              "distinct_alerts": 404,
+              "alerts_per_hour": 16.833333333333332,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 404,
+              "unassessed": 0,
+              "phase2_gaps": 0,
+              "suppressed": 0
+            }
+          },
+          "rule_counts": {}
+        }
+      }
+    },
+
+    "acceptance-suppression": {
+      "_why": [
+        "6 v1 rows on 2026-08-20, one identity each.",
+        "Panel A excludes s01 (node_name = junk-node) and s02 (message LIKE %canary%).",
+        "Panel B excludes s01 only; its node_name != or-nested-node leaf sits inside an OR",
+        "and its node_name != $queryNodes leaf uses a query variable that is never",
+        "executed, so both are unmeasured rather than applied.",
+        "Multi-panel unanimity therefore suppresses s01 alone: s02 is visible in panel B,",
+        "and a row visible in any panel is not hidden from the team.",
+        "suppression_unmeasured = 2 leaves, both from panel B.",
+        "s01 becomes core R5, so 1 identity is rule_flagged and the other 5 are assessed.",
+        "No v2 identities => phase_0 and null readiness."
+      ],
+      "phase_derived": "phase_0",
+      "phase2_readiness_pct": null,
+      "identity_states": { "rule_flagged": 1, "assessed_good": 5 },
+      "suppression": {
+        "suppressed_rows": 1,
+        "unmeasured_leaves": 2,
+        "suppressed_node_names": ["junk-node"],
+        "not_suppressed_node_names": [
+          "real-node-1",
+          "or-nested-node",
+          "query-var-node",
+          "real-node-2",
+          "real-node-3"
+        ]
+      },
+      "schemas": {
+        "v1": {
+          "identities": 6,
+          "totals": {
+            "alerts": 6,
+            "distinct_sum": 6,
+            "distinct_per_day": 0.8571428571428571,
+            "alerts_per_hour": 0.03571428571428571,
+            "flagged_by_rule": 1,
+            "flagged_by_rule_distinct_sum": 1,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 1,
+            "suppression_unmeasured": 2,
+            "node_name_numerator": 6,
+            "node_name_denominator": 6,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 6,
+            "key_inflation_denominator": 6,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-18": {
+              "covered_hours": 6,
+              "alerts": 0,
+              "distinct_alerts": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 2
+            },
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 6,
+              "distinct_alerts": 6,
+              "alerts_per_hour": 0.25,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "suppressed": 1,
+              "suppression_unmeasured": 0,
+              "node_name_numerator": 6,
+              "node_name_denominator": 6,
+              "key_inflation_numerator": 6,
+              "key_inflation_denominator": 6
+            }
+          },
+          "rule_counts": { "2026-08-20": { "R5": [1, 1] } }
+        },
+        "v2": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        }
+      }
+    },
+
+    "acceptance-blast-radius": {
+      "_why": [
+        "5 v1 rows on 2026-08-20. The single panel excludes 3 of the 5 node names, which is",
+        "60% of the team's owned rows and above the 50% guard, so the leaf is NOT applied:",
+        "it becomes unmeasured and routed to human review.",
+        "Nothing is suppressed and nothing is rule_flagged, so all 5 identities are",
+        "assessed. suppression_unmeasured = 1 leaf.",
+        "No v2 identities => phase_0 and null readiness."
+      ],
+      "phase_derived": "phase_0",
+      "phase2_readiness_pct": null,
+      "identity_states": { "assessed_good": 5 },
+      "suppression": { "suppressed_rows": 0, "unmeasured_leaves": 1 },
+      "schemas": {
+        "v1": {
+          "identities": 5,
+          "totals": {
+            "alerts": 5,
+            "distinct_sum": 5,
+            "distinct_per_day": 0.7142857142857143,
+            "alerts_per_hour": 0.02976190476190476,
+            "flagged_by_rule": 0,
+            "flagged_by_rule_distinct_sum": 0,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 1,
+            "node_name_numerator": 5,
+            "node_name_denominator": 5,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 5,
+            "key_inflation_denominator": 5,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-18": {
+              "covered_hours": 6,
+              "alerts": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 1
+            },
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 5,
+              "distinct_alerts": 5,
+              "alerts_per_hour": 0.20833333333333334,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 0
+            }
+          },
+          "rule_counts": {}
+        },
+        "v2": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        }
+      }
+    }
+  }
+}

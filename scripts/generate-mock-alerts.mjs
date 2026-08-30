@@ -6,6 +6,7 @@
 // decision (design doc section 6) — not part of the BI pipeline itself.
 
 import { createHash, randomUUID } from 'node:crypto';
+import { acceptanceTeams } from './acceptance-teams.mjs';
 
 const ES_URL = process.env.ES_URL || 'http://localhost:9200';
 const NOW = new Date('2026-08-25T18:00:00Z').getTime();
@@ -71,14 +72,43 @@ const PLACEHOLDER_VALUES = ['Unknown', 'Test', 'Default', 'N/A'];
 // def: { application, obj, node_name, message, severity, provider, alert_rule_url,
 //        badRule: [..], refireCount, intervalHours, resolves, environment, impact,
 //        runbook_url, status_v2, operatorPick }
+// Acceptance defs pin their rows exactly instead of deriving them from a repeat
+// interval, so an expected-results manifest can be hand-computed from the definition
+// rather than reverse-engineered from generated output.
+//
+//   rowsAt:      explicit ISO timestamps, one row each
+//   timeCreated: 'valid' (default) | 'equal' | 'oldest' | 'future' | 'stale' | null
+//
+// 'equal' and 'oldest' are the two INCLUSIVE R7 boundaries and must not be flagged;
+// 'future' and 'stale' sit one millisecond outside them and must be.
+const TWENTY_FOUR_HOURS = 24 * HOUR;
+function timeCreatedFor(def, tsMs) {
+  switch (def.timeCreated) {
+    case null:
+      return null;
+    case 'equal':
+      return new Date(tsMs).toISOString();
+    case 'oldest':
+      return new Date(tsMs - TWENTY_FOUR_HOURS).toISOString();
+    case 'future':
+      return new Date(tsMs + 1).toISOString();
+    case 'stale':
+      return new Date(tsMs - TWENTY_FOUR_HOURS - 1).toISOString();
+    default:
+      return new Date(tsMs).toISOString();
+  }
+}
+
 function expandV1(team, def) {
   const rows = [];
   const operator = def.operatorPick || pick(team.v1Operators);
+  const explicit = def.rowsAt ? def.rowsAt.map((iso) => Date.parse(iso)) : null;
   const { n, stepMs } = v1Repeats(def);
   const endOffset = def.recencyDays != null ? def.recencyDays * DAY : int(0, 3) * DAY;
   const lastTs = NOW - endOffset;
-  for (let i = 0; i < n; i++) {
-    const ts = lastTs - (n - 1 - i) * stepMs;
+  const count = explicit ? explicit.length : n;
+  for (let i = 0; i < count; i++) {
+    const ts = explicit ? explicit[i] : lastTs - (n - 1 - i) * stepMs;
     const invalidTime = def.badRule?.includes(7);
     rows.push({
       index: 'appchi-v1',
@@ -90,8 +120,15 @@ function expandV1(team, def) {
         message: def.message,
         severity: def.severity || 'error',
         operator,
-        key_field: v1KeyField(def.application, def.obj, def.node_name),
-        time_created: invalidTime ? (i === n - 1 ? null : new Date(ts).toISOString()) : new Date(ts).toISOString(),
+        key_field: def.key_field || v1KeyField(def.application, def.obj, def.node_name),
+        time_created:
+          def.timeCreated !== undefined
+            ? timeCreatedFor(def, ts)
+            : invalidTime
+              ? i === count - 1
+                ? null
+                : new Date(ts).toISOString()
+              : new Date(ts).toISOString(),
         node_name: def.node_name || null,
         network: def.network || null,
         alert_rule_url: def.alert_rule_url || null,
@@ -122,9 +159,11 @@ function expandV2(team, def) {
     alert_rule_url: def.alert_rule_url || null,
     provider: def.provider || 'grafana',
   };
-  for (let i = 0; i < n; i++) {
-    const ts = lastTs - (n - 1 - i) * stepMs;
-    const status = def.resolves && i === n - 1 ? 'resolved' : 'firing';
+  const explicit = def.rowsAt ? def.rowsAt.map((iso) => Date.parse(iso)) : null;
+  const count = explicit ? explicit.length : n;
+  for (let i = 0; i < count; i++) {
+    const ts = explicit ? explicit[i] : lastTs - (n - 1 - i) * stepMs;
+    const status = def.resolves && i === count - 1 ? 'resolved' : 'firing';
     const doc = { ...baseDoc, status };
     rows.push({
       index: 'appchi-v2',
@@ -133,7 +172,7 @@ function expandV2(team, def) {
         '@timestamp': new Date(ts).toISOString(),
         ...doc,
         operator,
-        key_field: v2KeyField({ ...doc, operator }),
+        key_field: def.key_field || v2KeyField({ ...doc, operator }),
         time_created: new Date(ts).toISOString(),
       },
     });
@@ -351,6 +390,12 @@ teams.push({
   ],
 });
 
+// Acceptance fixture teams (design section 7.5, acceptance-data contract). Appended LAST
+// on purpose: expansion consumes the seeded RNG in team order, so adding these at the end
+// leaves every realistic team's generated data byte-stable. Acceptance defs pin their own
+// operator and timestamps, so they consume no RNG draws themselves.
+teams.push(...acceptanceTeams);
+
 // Unattributed orphans — match no team's registry (design doc section 6: must be reported explicitly)
 const unattributed = {
   name: 'Unattributed',
@@ -443,7 +488,78 @@ for (const def of unattributed.v2) {
 // ================= BULK LOAD =================
 import { writeFileSync } from 'node:fs';
 
+// Explicit mappings so a clean reload is reproducible. Without them the first document
+// decides the mapping dynamically, which makes a reloaded index depend on insertion
+// order. `operator` and `key_field` must be keyword for exact, case-sensitive term
+// matching - the whole ownership model rests on that.
+const INDEX_MAPPINGS = {
+  'appchi-v1': {
+    '@timestamp': { type: 'date' },
+    id: { type: 'keyword' },
+    application: { type: 'keyword' },
+    object: { type: 'keyword' },
+    message: { type: 'text', fields: { raw: { type: 'keyword', ignore_above: 1024 } } },
+    severity: { type: 'keyword' },
+    operator: { type: 'keyword' },
+    key_field: { type: 'keyword' },
+    time_created: { type: 'date' },
+    node_name: { type: 'keyword' },
+    network: { type: 'keyword' },
+    alert_rule_url: { type: 'keyword' },
+    provider: { type: 'keyword' },
+  },
+  'appchi-v2': {
+    '@timestamp': { type: 'date' },
+    id: { type: 'keyword' },
+    application: { type: 'keyword' },
+    component: { type: 'keyword' },
+    message: { type: 'text', fields: { raw: { type: 'keyword', ignore_above: 1024 } } },
+    severity: { type: 'keyword' },
+    status: { type: 'keyword' },
+    impact: { type: 'text', fields: { raw: { type: 'keyword', ignore_above: 1024 } } },
+    runbook_url: { type: 'keyword' },
+    environment: { type: 'keyword' },
+    site: { type: 'keyword' },
+    operator: { type: 'keyword' },
+    key_field: { type: 'keyword' },
+    time_created: { type: 'date' },
+    node_name: { type: 'keyword' },
+    network: { type: 'keyword' },
+    alert_rule_url: { type: 'keyword' },
+    provider: { type: 'keyword' },
+  },
+};
+
+// RESET=1 deletes and recreates both mock indices before loading. The acceptance contract
+// requires a clean reload, because a normal rerun APPENDS another copy of every row.
+//
+// Guarded: this refuses to run against anything but an explicitly local endpoint, so a
+// mistyped ES_URL cannot delete a real index.
+const LOCAL_ES = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
+async function resetIndices() {
+  if (!LOCAL_ES.test(ES_URL)) {
+    throw new Error(
+      `refusing to reset indices at ${ES_URL}: RESET=1 is only allowed against an explicit local mock endpoint`,
+    );
+  }
+  for (const [index, properties] of Object.entries(INDEX_MAPPINGS)) {
+    await fetch(`${ES_URL}/${index}`, { method: 'DELETE' });
+    const res = await fetch(`${ES_URL}/${index}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        settings: { number_of_shards: 1, number_of_replicas: 0 },
+        mappings: { properties },
+      }),
+    });
+    if (!res.ok) throw new Error(`could not create ${index}: ${await res.text()}`);
+    console.log(`recreated ${index} with explicit mappings`);
+  }
+}
+
 async function bulkLoad() {
+  if (!process.env.STATS_ONLY && process.env.RESET) await resetIndices();
   if (!process.env.STATS_ONLY) {
     const CHUNK = 300;
     for (let i = 0; i < bulkLines.length; i += CHUNK) {

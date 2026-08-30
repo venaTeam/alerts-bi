@@ -37,6 +37,7 @@ export async function runCommand(command, flags) {
 
   if (command === 'run') return commandRun(config, flags);
   if (command === 'report') return commandReport(config, flags);
+  if (command === 'verify-acceptance') return commandVerify(flags);
 
   process.stderr.write(`unknown command: ${command}\n`);
   return 2;
@@ -146,4 +147,41 @@ async function commandReport(config, flags) {
   } finally {
     await pool.close();
   }
+}
+
+/**
+ * Compare persisted SQL rows and rendered CSV exports against the hand-reviewed
+ * acceptance manifest.
+ *
+ * @param {Record<string, string|boolean>} flags
+ * @returns {Promise<number>}
+ */
+async function commandVerify(flags) {
+  const { verifyAcceptance } = await import('./verify.js');
+  const result = await verifyAcceptance({
+    manifestPath: stringFlag(flags, 'manifest'),
+    outDir: stringFlag(flags, 'out'),
+    database: stringFlag(flags, 'database'),
+  });
+
+  if (result.ok) {
+    process.stdout.write(`acceptance verification passed: ${result.checks} checks
+`);
+    return 0;
+  }
+
+  process.stderr.write(
+    `acceptance verification FAILED: ${result.failures.length} of ${result.checks} checks
+
+`,
+  );
+  for (const failure of result.failures) {
+    process.stderr.write(
+      `  ${failure.where}
+    expected: ${JSON.stringify(failure.expected)}
+    actual:   ${JSON.stringify(failure.actual)}
+`,
+    );
+  }
+  return 1;
 }

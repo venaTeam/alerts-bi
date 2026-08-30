@@ -28,6 +28,7 @@ Usage:
   alerts-bi db migrate [--database <name>]
   alerts-bi db status [--database <name>]
   alerts-bi db reset-test
+  alerts-bi verify-acceptance [--manifest <path>] [--out <dir>]
 
 Options:
   --team        Registry team_id to analyse. Required for a run; never defaults.
@@ -152,7 +153,8 @@ export async function main(argv) {
     case 'db':
       return commandDb(positional.slice(1), flags);
     case 'run':
-    case 'report': {
+    case 'report':
+    case 'verify-acceptance': {
       const { runCommand } = await import('./run/commands.js');
       return runCommand(command, flags);
     }
