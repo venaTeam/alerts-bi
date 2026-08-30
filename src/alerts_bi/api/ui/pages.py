@@ -56,6 +56,7 @@ def index_page(teams: list[TeamOut]) -> str:
     <option value="off">off — eligible identities become unassessed</option>
   </select>
   <button type="submit">Run</button>
+  <p class="failure" id="failure" role="alert"></p>
 </form>
 <p class="note">A run reads 168 hours for one team, so it can take a while; the response
 arrives when it finishes. Runs are serialized — a second request while one is running gets
