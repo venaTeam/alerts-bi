@@ -22,6 +22,11 @@ dependencies = [
     "pymssql>=2.3,<3",
     # Validates config/teams.json against the checked-in JSON Schema (2020-12).
     "jsonschema>=4.23,<5",
+    # HTTP trigger surface (design section 7.8): request validation, generated OpenAPI,
+    # and the base the approved interactive frontend is expected to build on.
+    "fastapi>=0.115,<1",
+    # ASGI server for it. Nothing else in the project runs a server.
+    "uvicorn>=0.32,<1",
 ]
 
 [project.scripts]
@@ -33,6 +38,9 @@ dev = [
     "ruff>=0.8,<0.13",
     "mypy>=1.13,<2",
     "types-jsonschema>=4.23",
+    # FastAPI's TestClient drives the app over httpx. It arrives transitively through the
+    # OpenAI SDK too, but the tests depend on it directly, so it is declared directly.
+    "httpx>=0.27,<1",
 ]
 
 [build-system]

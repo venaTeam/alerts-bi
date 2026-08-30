@@ -233,7 +233,10 @@ def _command_serve(args: argparse.Namespace, config: AppConfig) -> int:
             f"warning: binding to {args.host} exposes an unauthenticated endpoint that "
             "triggers Elasticsearch reads and SQL writes to that network\n"
         )
-    sys.stdout.write(f"alerts-bi serving on http://{args.host}:{args.port}  (ctrl-c to stop)\n")
+    sys.stdout.write(
+        f"alerts-bi serving on http://{args.host}:{args.port}  (ctrl-c to stop)\n"
+        f"  interactive API docs: http://{args.host}:{args.port}/docs\n"
+    )
     serve(
         config,
         host=args.host,

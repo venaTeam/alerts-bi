@@ -132,23 +132,31 @@ scorecard.
 | `GET /runs/<run_id>` | Re-render that run's scorecard from SQL |
 | `GET /runs/latest?team=<id>` | The team's most recent completed run |
 | `GET /runs/<run_id>/<file>.csv` | One of the three CSV exports |
+| `GET /docs`, `/redoc`, `/openapi.json` | Generated API documentation and schema |
 
-`POST /runs` takes `team` (required), `run_at` (optional ISO 8601) and `llm`
-(`live`, `fake` or `off`, mirroring the CLI's default, `--fake-llm` and `--no-llm`).
-Parameters may arrive in the query string, as a form post, or as a JSON body. Send
-`Accept: application/json` to get a summary with links instead of HTML.
+`POST /runs` takes a JSON body: `team` (required), `run_at` (optional ISO 8601) and `llm`
+(`live`, `fake` or `off`, mirroring the CLI's default, `--fake-llm` and `--no-llm`). Send
+`Accept: application/json` to get a summary with links instead of the scorecard HTML.
 
 ```bash
-curl -X POST -H "Accept: application/json" "http://127.0.0.1:8000/runs?team=checkout-api&run_at=2026-08-25T18:00:00Z&llm=fake"
+curl -X POST -H "Content-Type: application/json" -H "Accept: application/json" -d '{"team":"checkout-api","run_at":"2026-08-25T18:00:00Z","llm":"fake"}' http://127.0.0.1:8000/runs
 ```
 
 ```bash
-curl -o scorecard.html -X POST "http://127.0.0.1:8000/runs?team=checkout-api&llm=fake"
+curl -o scorecard.html -X POST -H "Content-Type: application/json" -d '{"team":"checkout-api","llm":"fake"}' http://127.0.0.1:8000/runs
 ```
+
+The request and response shapes are declared as Pydantic models, so the OpenAPI document is
+generated from the code rather than maintained beside it: interactive documentation at
+`/docs` and `/redoc`, the schema at `/openapi.json`.
 
 The surface adds no analysis. It loads the registry, calls the same `execute_run` and
 `persist_run` the CLI calls, writes the same four files under `out/`, and renders reports
 from committed SQL rows. A run still names one team and never defaults to all of them.
+
+Built with **FastAPI** on **uvicorn**. The run endpoint is a plain `def`, so FastAPI
+dispatches its minutes of blocking Elasticsearch and SQL work to the thread pool instead of
+stalling the event loop.
 
 Runs are **serialized**: a second request while one is running gets `409`, because two runs
 of the same team and clock derive one deterministic `run_id` and would race to replace each
@@ -207,7 +215,7 @@ never committed.
 |---|---|
 | `ES_URL`, `ES_USERNAME`, `ES_PASSWORD` | Elasticsearch endpoint and basic auth |
 | `ES_PAGE_SIZE` | Page size for point-in-time pagination |
-| `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` | SQL Server connection |
+| `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` | SQL Server connection, via SQLAlchemy over `mssql+pymssql` |
 | `SQL_DATABASE` | Persistent store, default `alerts_bi_dev` |
 | `SQL_TEST_DATABASE` | Disposable test database, default `alerts_bi_test` |
 | `LLM_ENABLED` | Must be true for a run to call the on-prem model |
