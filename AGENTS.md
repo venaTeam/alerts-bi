@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-08-30 (MVP in Python, merged to `main`)
 
+This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
+
 ## Mandatory first action
 
 Before answering a repository question, planning, reviewing, running a command, editing a file, or delegating work, read [`alerts_bi_design.md`](docs/alerts_bi_design.md) **in full**.
@@ -185,8 +187,10 @@ Implementation is not complete until the relevant unit, integration, and accepta
 
 Run formatting, linting, type checks, unit tests, integration tests, migrations, and a clean mock acceptance run when those commands exist. Report commands and results accurately. Never claim live LLM, production Elasticsearch, or full acceptance validation unless it ran successfully.
 
-## Keep project instructions synchronized
+## One place for these instructions
 
-[`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) must remain behaviorally equivalent. When project-wide guidance changes, update both files in the same change.
+**This file is the only copy.** [`CLAUDE.md`](CLAUDE.md) is a short pointer that imports it, so there is nothing to keep in sync: project-wide guidance changes here and only here.
+
+Do not paste guidance back into `CLAUDE.md`. Two copies drifting apart is what this arrangement removes, and `tests/unit/test_instruction_files.py` fails if the pointer grows back into a duplicate.
 
 When a product or architecture decision is made, update `alerts_bi_design.md` in the same session, move resolved questions into the relevant section, and update its `Last updated` date. Update the flow, blueprint, fixture documentation, and expected-results manifest when the decision changes their behavior.
