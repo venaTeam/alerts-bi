@@ -65,8 +65,10 @@ const v2Repeats = (def) => repeats(def, V2_REPEAT_MS);
 
 // ---- shared bad-alert content pools (what_is_an_incorrect_alert_EN.md) ----
 const RULE1_GENERIC = ['Error Occurred', 'Something went wrong', 'Unable to get data', 'Alert triggered', 'Issue detected'];
-const RULE2_HEARTBEAT = ['i am alive', 'service started', 'healthy', 'OK', 'completed successfully', 'process running'];
-const PLACEHOLDER_VALUES = ['Unknown', 'Test', 'Default', 'N/A'];
+// The R2 and R3 catalogues used to be duplicated here and were never read. They are gone
+// on purpose: a second copy of a versioned catalogue invites someone to edit it and
+// believe they changed behaviour. The authoritative lists live in src/rules/catalogs.js,
+// and fixture defs that need a catalogue value write the literal string.
 
 // ---- alert-def -> row expansion ----
 // def: { application, obj, node_name, message, severity, provider, alert_rule_url,

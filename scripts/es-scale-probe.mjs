@@ -1,47 +1,103 @@
-// Measures the numbers that size the alerts BI: how many DISTINCT alerts exist, how fast
-// their keys churn, and how much of the distinct count is node_name inflation.
+// Measures the numbers that size the alerts BI, and reports the two approved
+// data-quality diagnostics from design section 3.7 for one selected team.
 //
 // Read-only — issues aggregations only, never writes. Safe to point at production ECK.
 //
-//   ES_URL=https://eck.internal:9200 ES_AUTH=user:pass node scripts/es-scale-probe.mjs
-//   ES_URL=... DAYS=30 node scripts/es-scale-probe.mjs
+//   node scripts/es-scale-probe.mjs --team checkout-api
+//   node scripts/es-scale-probe.mjs --team acceptance-core --run-at 2026-08-25T18:00:00Z
+//   ES_URL=https://eck.internal:9200 ES_AUTH=user:pass node scripts/es-scale-probe.mjs --team X
+//   node scripts/es-scale-probe.mjs --all-teams        (sizing only, no ownership scope)
 //
-// "Distinct alert" throughout means a distinct **application + key_field** pair, which is
-// the primary key of an alert (design doc section 1.1). key_field ALONE is not sufficient:
-// its application+object+node_name form is only a default, and a sender may set its own,
-// so the same key_field value can occur under two applications.
+// SCOPE. A run of the BI itself never reads more than one team, so this probe defaults to
+// the same discipline: pass --team and it filters by that team's registry operators
+// exactly as the pipeline does. --all-teams is available for capacity sizing only, and
+// its output is explicitly labelled as not being any team's numbers.
 //
-// Every count is built from terms + cardinality on indexed fields — no painless scripts,
-// so this still runs on clusters with inline scripting disabled.
+// PRECISION. Every count here is built from terms + cardinality, and cardinality is
+// HyperLogLog++ and approximate above its precision threshold. These are SIZING figures.
+// The pipeline never uses them: it pages every matching row and counts identities exactly,
+// because a reported metric may not be approximate.
 //
-// Answers, per schema:
-//   1. distinct alerts over the window, and per day
-//   2. key reuse ratio (sum of daily distincts / window distinct)  <- sizes the LLM cache
-//   3. node_name inflation: distinct alerts vs. distinct application+object/component
-//   4. which applications mint the most node_name values
+// Reported per schema, matching the approved definitions:
+//   node_name_ratio      distinct (application, object/component, node_name)
+//                        over distinct (application, object/component),
+//                        using ONLY rows with a nonempty node_name on BOTH sides
+//   key_inflation_ratio  distinct (application, key_field)
+//                        over distinct (application, object/component), over ALL rows
+// A zero denominator yields null, never zero.
+
+import { readFileSync } from 'node:fs';
 
 const ES = process.env.ES_URL || 'http://localhost:9200';
-const DAYS = Number(process.env.DAYS || 30);
+const DAYS = Number(process.env.DAYS || 7);
 const AUTH = process.env.ES_AUTH;
-
-// cardinality is HyperLogLog++ and approximate above its precision threshold.
-// 40000 is the maximum ES accepts. Summing per-application sketches keeps each one
-// well under that in most cases, but treat totals as sizing figures, not metrics.
 const PRECISION = 40000;
+
+const args = process.argv.slice(2);
+const teamFlagIndex = args.indexOf('--team');
+const TEAM = teamFlagIndex === -1 ? null : args[teamFlagIndex + 1];
+const ALL_TEAMS = args.includes('--all-teams');
+
+// --run-at freezes the window end, matching how a real run captures run_at once. Without
+// it the probe uses a live clock, which finds nothing in a fixed-clock mock dataset.
+const runAtIndex = args.indexOf('--run-at');
+const RUN_AT = runAtIndex === -1 ? null : args[runAtIndex + 1];
+if (RUN_AT && Number.isNaN(Date.parse(RUN_AT))) {
+  console.error(`--run-at ${RUN_AT} is not a valid ISO 8601 instant`);
+  process.exit(2);
+}
+const WINDOW = RUN_AT
+  ? {
+      gte: new Date(Date.parse(RUN_AT) - DAYS * 24 * 3600000).toISOString(),
+      lt: new Date(Date.parse(RUN_AT)).toISOString(),
+    }
+  : { gte: `now-${DAYS}d`, lte: 'now' };
+
+if (!TEAM && !ALL_TEAMS) {
+  console.error('usage: node scripts/es-scale-probe.mjs --team <team_id> | --all-teams');
+  console.error('  --team      scope to one registry team, exactly as a real run does');
+  console.error('  --all-teams company-wide sizing only; not any team\'s reported numbers');
+  process.exit(2);
+}
+
+/** @type {{v1: string[], v2: string[]}} */
+let operators = { v1: [], v2: [] };
+if (TEAM) {
+  const registry = JSON.parse(readFileSync('config/teams.json', 'utf8'));
+  const entry = registry.teams.find((t) => t.team_id === TEAM);
+  if (!entry) {
+    console.error(`team "${TEAM}" is not in config/teams.json`);
+    process.exit(2);
+  }
+  operators = { v1: entry.v1_operators, v2: entry.v2_operator ? [entry.v2_operator] : [] };
+}
 
 async function es(index, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH) headers.Authorization = `Basic ${Buffer.from(AUTH).toString('base64')}`;
-  const res = await fetch(`${ES}/${index}/_search`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch(`${ES}/${index}/_search`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(`${index}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-const range = { range: { '@timestamp': { gte: `now-${DAYS}d`, lte: 'now' } } };
+/**
+ * @param {string[]} teamOperators
+ * @returns {object}
+ */
+function query(teamOperators) {
+  /** @type {object[]} */
+  const filter = [{ range: { '@timestamp': WINDOW } }];
+  if (!ALL_TEAMS) filter.push({ terms: { operator: teamOperators } });
+  return { bool: { filter } };
+}
 
-// Distinct (application, X) pairs, without scripting: bucket by application, count
-// distinct X inside each bucket, sum the buckets. Exact on the pairing, approximate
-// only within each application's sketch.
+// Distinct (application, X) pairs without scripting: bucket by application, count distinct
+// X inside each bucket, sum the buckets. Exact on the pairing, approximate only within
+// each application's sketch.
 function pairAgg(field, appBuckets) {
   return {
     by_app: {
@@ -53,48 +109,115 @@ function pairAgg(field, appBuckets) {
 const sumPairs = (agg) => agg.buckets.reduce((a, b) => a + b.d.value, 0);
 const truncated = (agg) => (agg.sum_other_doc_count ?? 0) > 0;
 
-async function probe(index, componentField) {
-  console.log(`\n${'='.repeat(72)}\n${index}  (last ${DAYS} days)\n${'='.repeat(72)}`);
+/**
+ * A zero denominator is "no eligible rows", which is a different statement from a ratio
+ * of zero and must never be printed as one.
+ */
+const ratio = (numerator, denominator) =>
+  denominator === 0 ? null : numerator / denominator;
+const show = (value, digits = 3) => (value === null ? 'null (no eligible rows)' : value.toFixed(digits));
 
-  // how many applications are there? sizes every terms agg below
-  const appCount = await es(index, {
-    size: 0, track_total_hits: true, query: range,
+async function probe(index, componentField, teamOperators) {
+  const scope = ALL_TEAMS ? 'ALL TEAMS (sizing only)' : `team ${TEAM}`;
+  const when = RUN_AT ? `${DAYS}d ending ${RUN_AT}` : `last ${DAYS} days, live clock`;
+  console.log(`\n${'='.repeat(72)}\n${index}  (${when}, ${scope})\n${'='.repeat(72)}`);
+
+  if (!ALL_TEAMS && teamOperators.length === 0) {
+    console.log('  no configured operators for this schema — a real run skips the query entirely');
+    return;
+  }
+
+  const q = query(teamOperators);
+
+  const head = await es(index, {
+    size: 0,
+    track_total_hits: true,
+    query: q,
     aggs: { apps: { cardinality: { field: 'application', precision_threshold: PRECISION } } },
   });
-  const rows = appCount.hits.total.value;
-  const apps = appCount.aggregations.apps.value;
-  const appBuckets = Math.max(apps * 2, 100); // headroom so no application is dropped
+  const rows = head.hits.total.value;
+  const apps = head.aggregations.apps.value;
+  const appBuckets = Math.max(apps * 2, 100);
 
-  const totals = await es(index, {
-    size: 0, query: range,
+  if (rows === 0) {
+    console.log('  no rows in this window');
+    return;
+  }
+
+  // All-rows aggregates: the key-inflation numerator and denominator.
+  const all = await es(index, {
+    size: 0,
+    query: q,
     aggs: {
       keys: pairAgg('key_field', appBuckets).by_app,
-      defs: pairAgg(componentField, appBuckets).by_app,
-      nodes: pairAgg('node_name', appBuckets).by_app,
+      scopes: pairAgg(componentField, appBuckets).by_app,
     },
   });
-  const keys = sumPairs(totals.aggregations.keys);
-  const defs = sumPairs(totals.aggregations.defs);
-  const nodes = sumPairs(totals.aggregations.nodes);
+  const keyNumerator = sumPairs(all.aggregations.keys);
+  const keyDenominator = sumPairs(all.aggregations.scopes);
 
-  if (truncated(totals.aggregations.keys)) {
+  // Node-eligible aggregates: ONLY rows with a nonempty node_name, on BOTH sides. A
+  // scope that never supplies a node name must not inflate the denominator.
+  const nodeQuery = {
+    bool: {
+      filter: [...q.bool.filter, { exists: { field: 'node_name' } }],
+      must_not: [{ term: { node_name: '' } }],
+    },
+  };
+  const nodeAgg = await es(index, {
+    size: 0,
+    track_total_hits: true,
+    query: nodeQuery,
+    aggs: {
+      // distinct (application, component, node_name): bucket by application, then by
+      // component, then count node names.
+      by_app: {
+        terms: { field: 'application', size: appBuckets },
+        aggs: {
+          by_component: {
+            terms: { field: componentField, size: 10000 },
+            aggs: { nodes: { cardinality: { field: 'node_name', precision_threshold: PRECISION } } },
+          },
+        },
+      },
+      scopes: pairAgg(componentField, appBuckets).by_app,
+    },
+  });
+
+  let nodeNumerator = 0;
+  for (const appBucket of nodeAgg.aggregations.by_app.buckets) {
+    for (const componentBucket of appBucket.by_component.buckets) {
+      nodeNumerator += componentBucket.nodes.value;
+    }
+  }
+  const nodeDenominator = sumPairs(nodeAgg.aggregations.scopes);
+  const nodeEligibleRows = nodeAgg.hits.total.value;
+
+  if (truncated(all.aggregations.keys)) {
     console.log(`  !! terms agg truncated — more than ${appBuckets} applications. Counts are LOW.`);
   }
 
   console.log(`  rows in window                     : ${rows.toLocaleString()}`);
   console.log(`  distinct applications              : ${apps.toLocaleString()}`);
-  console.log(`  DISTINCT ALERTS (application+key)  : ${keys.toLocaleString()}`);
-  console.log(`  distinct application+${componentField.padEnd(10)}    : ${defs.toLocaleString()}   <- alert definitions, node-independent`);
-  console.log(`  distinct application+node_name     : ${nodes.toLocaleString()}`);
-  console.log(`  rows per distinct alert            : ${(rows / Math.max(keys, 1)).toFixed(1)}`);
-  console.log(`  NODE INFLATION FACTOR              : ${(keys / Math.max(defs, 1)).toFixed(1)}x`);
-  if (keys / Math.max(defs, 1) > 3) {
-    console.log(`     ^ high — much of the distinct count is node_name churn, not alert inventory.`);
-  }
+  console.log(`  distinct alerts (application+key)  : ${keyNumerator.toLocaleString()}`);
+  console.log(`  rows per distinct alert            : ${(rows / Math.max(keyNumerator, 1)).toFixed(1)}`);
+  console.log('');
+  console.log(`  node_name_ratio                    : ${show(ratio(nodeNumerator, nodeDenominator))}`);
+  console.log(`     numerator  (app,${componentField},node) : ${nodeNumerator.toLocaleString()}`);
+  console.log(`     denominator(app,${componentField})      : ${nodeDenominator.toLocaleString()}   [nonempty-node rows only: ${nodeEligibleRows.toLocaleString()}]`);
+  console.log(`  key_inflation_ratio                : ${show(ratio(keyNumerator, keyDenominator))}`);
+  console.log(`     numerator  (app,key_field)      : ${keyNumerator.toLocaleString()}`);
+  console.log(`     denominator(app,${componentField})      : ${keyDenominator.toLocaleString()}   [all rows]`);
+  console.log('');
+  console.log('  Read together: both high suggests node names drive key inflation; high key');
+  console.log('  inflation with a low node ratio points at other identity fields; a high node');
+  console.log('  ratio with low key inflation means many nodes exist without equivalent key');
+  console.log('  growth. Neither ratio contributes to flagged.');
 
-  // --- distinct per day, to measure key churn ---
+  // Distinct per day, which is how every distinct figure is published.
   const daily = await es(index, {
-    size: 0, query: range,
+    size: 0,
+    query: q,
     aggs: {
       per_day: {
         date_histogram: { field: '@timestamp', calendar_interval: 'day', min_doc_count: 1 },
@@ -106,29 +229,18 @@ async function probe(index, componentField) {
   if (buckets.length) {
     const perDay = buckets.map((b) => sumPairs(b.by_app));
     const sumDays = perDay.reduce((a, b) => a + b, 0);
-    const avgDay = sumDays / perDay.length;
-    console.log(`\n  distinct alerts per day            : avg ${Math.round(avgDay).toLocaleString()}  (min ${Math.min(...perDay).toLocaleString()}, max ${Math.max(...perDay).toLocaleString()})`);
-    console.log(`  sum of daily distincts             : ${sumDays.toLocaleString()}`);
-    console.log(`  distinct over whole window         : ${keys.toLocaleString()}`);
-    console.log(`  KEY REUSE RATIO                    : ${(sumDays / Math.max(keys, 1)).toFixed(1)}x  (over ${buckets.length} days with data)`);
-    console.log(`     ~${buckets.length}x -> the same keys recur daily; the verdict cache hits and classification is cheap.`);
-    console.log(`     ~1x  -> keys are nearly all new each day; the cache never hits and every run pays full price.`);
-  }
-
-  // --- where node_name is minting the most keys ---
-  const off = totals.aggregations.nodes.buckets.filter((b) => b.d.value > 1)
-    .sort((a, b) => b.d.value - a.d.value);
-  if (off.length) {
-    console.log(`\n  applications with the most distinct node_name values:`);
-    for (const b of off.slice(0, 10)) {
-      console.log(`     ${String(b.key).padEnd(28)} ${String(b.d.value).padStart(7)} nodes  (${b.doc_count.toLocaleString()} rows)`);
-    }
-    console.log(`     ^ hash- or random-suffixed pod names here confirm the inflation (design doc 7.3.1).`);
+    console.log('');
+    console.log(`  sum of daily distincts             : ${sumDays.toLocaleString()} over ${buckets.length} day(s) with data`);
+    console.log(`  distinct alerts per day            : ${(sumDays / 7).toFixed(2)}   [sum / 7, the published rate]`);
+    console.log(`  distinct over the whole window     : ${keyNumerator.toLocaleString()}   [internal dedup only, never published]`);
+    console.log(`  key reuse ratio                    : ${(sumDays / Math.max(keyNumerator, 1)).toFixed(1)}x`);
+    console.log('     ~1x -> keys are nearly all new each day, so a cross-run verdict cache rarely hits.');
   }
 }
 
-await probe('appchi-v1', 'object');
-await probe('appchi-v2', 'component');
+await probe('appchi-v1', 'object', operators.v1);
+await probe('appchi-v2', 'component', operators.v2);
 
-console.log(`\nNote: cardinality is approximate above ${PRECISION.toLocaleString()} per bucket. Good enough for sizing;`);
-console.log(`for exact reported metrics use a composite aggregation over [application, key_field].`);
+console.log(`\nEvery figure above is APPROXIMATE: cardinality is HyperLogLog++ above ${PRECISION.toLocaleString()}`);
+console.log('per bucket. This probe sizes the problem; it is not the measurement contract.');
+console.log('The pipeline pages every matching row and counts identities exactly.');
