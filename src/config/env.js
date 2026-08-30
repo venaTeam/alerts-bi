@@ -72,7 +72,6 @@ function bool(name, fallback) {
  * @property {string} url
  * @property {string} username
  * @property {string} password
- * @property {string} caCert
  * @property {number} requestTimeoutMs
  * @property {number} pageSize
  */
@@ -135,7 +134,6 @@ export function loadConfig() {
       url: str('ES_URL', 'http://localhost:9200').replace(/\/+$/, ''),
       username: str('ES_USERNAME'),
       password: str('ES_PASSWORD'),
-      caCert: str('ES_CA_CERT'),
       requestTimeoutMs: num('ES_REQUEST_TIMEOUT_MS', 60000),
       pageSize: num('ES_PAGE_SIZE', 1000),
     },
