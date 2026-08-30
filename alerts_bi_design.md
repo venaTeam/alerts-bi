@@ -1,7 +1,7 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled — see section 7 for what remains
-**Last updated:** 2026-08-29
+**Status:** MVP design settled and implemented — see section 7 for what remains
+**Last updated:** 2026-08-30
 
 ---
 
@@ -588,7 +588,7 @@ The version fields on the run record exist so that a movement in a team's number
 
 ## 7. Open questions
 
-The MVP design is settled. What remains is batching validation, some measurements, the post-MVP frontend and history backfill, the rule-6 deferrals, and a record of what was deliberately left out.
+The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, the post-MVP frontend and history backfill, the rule-6 deferrals, a record of what was deliberately left out, and the boundaries settled during implementation.
 
 ### 7.1 Rule-grouped batching validation (5.1)
 
@@ -630,12 +630,29 @@ Recorded here so they read as choices rather than oversights.
 
 ### 7.5 Repository housekeeping
 
-The mock and its documentation were built against earlier versions of this design and have drifted.
+The mock and its documentation were built against earlier versions of this design and had drifted.
 
 * [`scripts/generate-mock-alerts.mjs`](scripts/generate-mock-alerts.mjs) generates rule-6 spam data and multi-month spans that a 7-day, no-comparison run never reads. Not wrong — ahead of what the MVP consumes — but it means the mock exercises paths the pipeline does not have.
-* [`team_alert_status.md`](team_alert_status.md) describes per-team phase and quality against the withdrawn pairing metric and the old phase table (section 3.4).
-* Neither carries `alert_rule_url` groupings dense enough to test 7.1 properly. Testing the grouping bet needs mock rules with **many** distinct alerts each, which the current generator does not reliably produce.
+* [`team_alert_status.md`](team_alert_status.md) described per-team phase and quality against the withdrawn pairing metric and the old phase table (section 3.4).
+* Neither carried `alert_rule_url` groupings dense enough to test 7.1 properly. Testing the grouping bet needs mock rules with **many** distinct alerts each, which the original generator did not reliably produce.
 
 Reconcile before building the pipeline against the mock, or the first thing the pipeline proves will be that the fixtures are stale.
+
+**Reconciled 2026-08-30.** The generator was extended rather than replaced, and four `acceptance-*` teams were appended after the seven realistic ones — appended last on purpose, so the seeded RNG draws consumed by the existing teams are unchanged and their generated data stays byte-stable. They are defined in [`scripts/acceptance-teams.mjs`](scripts/acceptance-teams.mjs) and cover the paths the original fixtures could not reach: both inclusive R7 boundaries and one millisecond outside each, an API alert with no rule URL that must not match R4, a multi-date identity whose finding must stay on the date that matched, all three v2 readiness rules including a non-critical R9 that must not reduce readiness, a 401-alert rule-URL group that must split 134/134/133, a missing-URL application group that must never merge with it, multi-panel suppression disagreement, an `OR`-nested leaf, an unresolved `query` variable, and a 60% blast radius. The generator also gained explicit index mappings and a guarded `RESET=1` clean reload; `team_alert_status.md` was rewritten against the settled phase and rule definitions; and [`scripts/es-scale-probe.mjs`](scripts/es-scale-probe.mjs) now reports the two approved diagnostics with their operands, scoped to one selected team.
+
+**Rule 6 data remains in the mock and is simply not consumed**, which is the intended state: the rule stays documented and its fixtures stay generated, so switching R6 on later does not require re-seeding.
+
+### 7.6 Boundaries settled during implementation
+
+The MVP build hit eight cases this document did not fix. None changes an approved decision; each resolves an unstated edge in the direction the surrounding decision already points. Recorded here so they read as choices rather than as accidents of code.
+
+* **An absent or unparseable v1 `time_created` matches R7** (2026-08-30). Section 4 says the MVP "checks validity rather than presence", which resolves how to treat a *present* value. A missing value cannot fall inside the inclusive interval, and characteristic 7 of `what_is_an_incorrect_alert_EN.md` calls a missing event timestamp a bad alert outright, so absence is flagged with its own evidence reason rather than passing silently.
+* **Suppression uses positive-match semantics, not SQL three-valued logic** (2026-08-30). Strict SQL would also filter a row whose `node_name` is `NULL` out of a panel carrying `node_name != 'X'`, because the comparison is `UNKNOWN`. That is an artefact of NULL handling, not a team's written admission that an alert is worthless, and honouring it would mark every node-less alert of every team that writes a single node exclusion. A leaf therefore excludes a row only when the row's value actually matches the excluded value. This biases toward false negatives, which is the direction section 5.1's guardrail 2 demands.
+* **Suppression value matching is case-sensitive** (2026-08-30). SQL Server's default collation is case-insensitive, so this is a deliberate divergence from what the panel would do. Both sides of the comparison are written by the same team and match exactly in practice, and case-insensitivity could only ever *widen* the suppression set — the one direction that marks good alerts bad.
+* **`suppression_unmeasured` is allocated to the schema's first daily bucket** (2026-08-30). It counts leaves, and a leaf has no date. Repeating the run-level value on all eight rows would make the daily column sum to eight times the truth; placing it once means summing the column yields the run total exactly.
+* **`run_id` is deterministic**, derived from (`team_id`, `run_at`, `window_start`, registry SHA-256, `ruleset_version`, `prompt_version`, `model_version`, application version) (2026-08-30). Re-running the same team over the same frozen `run_at` therefore replaces its own rows rather than accumulating near-identical runs, which is what makes a restarted run safe. Any genuine difference — a different clock, an edited registry, a version bump — produces a different id, so overlapping runs still coexist as section 6 requires.
+* **V2 readiness gaps are read off the representative row, not unioned over the window** (2026-08-30). Readiness describes an identity's *current* state: an alert enriched on Tuesday is ready on Friday, and a gap it no longer has must not still be reported. Deterministic core findings keep the opposite treatment — any core finding anywhere in the window counts — because those describe events that actually happened.
+* **Stored finding evidence is summarized per rule, not per row** (2026-08-30). Each identity stores one evidence entry per matched rule with a matched-row count and one sample. A v1 alert re-firing every five minutes would otherwise store thousands of near-identical evidence objects for no added information.
+* **Derived rates are stored as `DECIMAL(18,6)`** (2026-08-30). Acceptance comparison therefore allows half a unit in the last stored place, so the manifest can record exact arithmetic (`1/24`) while the store holds `0.041667`. Counts and operands are integers and are compared exactly.
 
 **Acceptance-data contract** (decided 2026-08-29): give the existing seeded generator a fixed default clock for acceptance runs and require a clean index reload. Reconcile its R1-R10 cases with the exact rules above; add dense rule-URL groups, missing-URL application groups, groups larger than 200, suppression safety cases, and retry cases. Check in a hand-reviewed `test/fixtures/expected-results.json` containing each mock team's daily raw/distinct counts, hourly rates, diagnostic operands and ratios, per-rule row/distinct counts, LLM batch membership, quality states, suppression results, readiness, and phase. The pipeline under test must not generate its own oracle. A verification command compares persisted SQL rows and CSV exports to this manifest; HTML acceptance tests check required structure and content rather than incidental formatting.

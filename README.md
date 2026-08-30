@@ -1,0 +1,321 @@
+# Alerts BI
+
+Measures one team's alerting for one week and hands that team a concrete list of what to
+fix.
+
+A run selects **one** team, reads its last 168 hours from Elasticsearch, applies the
+deterministic rule set, measures how much of its own inventory the team hides from its
+dashboards, asks an on-prem model about everything the rules could not decide, persists the
+result to SQL Server, and renders a scorecard from the stored rows.
+
+**The tool reports numbers; people draw conclusions.** Every figure is a statement about a
+single week. There is no comparison against a previous run, no trend, no baseline and no
+cross-team leaderboard — by design.
+
+`alerts_bi_design.md` is the canonical specification. `alerts_bi_flow.md` describes one
+run end to end, and `alerts_bi_implementation_plan.md` describes what to build. Where this
+README and the design differ, the design wins.
+
+---
+
+## Quick start
+
+```bash
+npm install
+```
+
+```bash
+cp .env.example .env
+```
+
+Set `MSSQL_SA_PASSWORD` and `SQL_PASSWORD` to the same value in `.env` — SQL Server
+requires at least 8 characters with upper, lower, digit and symbol. The Compose file
+refuses to start without it rather than falling back to a default password.
+
+```bash
+docker compose up -d
+```
+
+That starts Elasticsearch 8.15 (`localhost:9200`), Kibana (`localhost:5601`) and SQL
+Server 2022 (`localhost:1433`). Wait for all three to report healthy:
+
+```bash
+docker compose ps
+```
+
+Load the mock dataset and apply the migrations:
+
+```bash
+RESET=1 node scripts/generate-mock-alerts.mjs
+```
+
+```bash
+npm run db:migrate
+```
+
+Run a team:
+
+```bash
+node src/cli.js run --team checkout-api --run-at 2026-08-25T18:00:00Z --fake-llm
+```
+
+The scorecard and the three CSV exports are written under `out/<run id prefix>/`.
+
+`--run-at` is needed against the mock because its dataset is generated on a fixed clock
+(2026-08-25T18:00:00Z). A production run omits it and uses the current time.
+
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `run --team <id>` | Analyse one team, persist the run, render the report |
+| `report --run-id <id>` | Re-render a stored run without recomputing anything |
+| `report --team <id>` | Re-render that team's most recent completed run |
+| `db migrate` | Create the database if absent and apply pending migrations |
+| `db status` | Show which migrations are applied |
+| `db reset-test` | Drop and recreate **only** the configured disposable test database |
+| `verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
+
+### `run` options
+
+| Flag | Meaning |
+|---|---|
+| `--team <id>` | Required. A run never defaults to all teams. |
+| `--run-at <iso>` | Freeze `run_at`. Defaults to now. |
+| `--out <dir>` | Output directory. Default `out/<run id prefix>`. |
+| `--fake-llm` | Use the deterministic fake client instead of the on-prem model. |
+| `--no-llm` | Skip assessment entirely; eligible identities become `unassessed`. |
+| `--registry <path>` | Registry file. Default `config/teams.json`. |
+| `--database <name>` | Target database. Default `SQL_DATABASE`. |
+
+`--fake-llm` stamps its own `model_version` onto the run record, so a mock run can never be
+mistaken for a live one.
+
+---
+
+## What a run produces
+
+Exactly four files, and no others:
+
+- `scorecard.html` — self-contained, no scripts and no external resources
+- `daily_metrics.csv`
+- `rule_counts.csv`
+- `alert_worklist.csv`
+
+All four are rendered **only from committed SQL rows**. Nothing is recomputed from
+Elasticsearch, and nothing is rendered from in-memory pipeline results. Rendering is a
+separate, retryable step, so a display failure after a successful run loses nothing:
+
+```bash
+node src/cli.js report --run-id <run id>
+```
+
+### Reading the numbers
+
+Two counts always travel together. `alerts` is the raw row count — pipeline and dashboard
+load. `distinct_alerts` is the count of distinct `application + key_field` identities — how
+many things actually fired. One stuck v1 alert is roughly 288 rows a day and one distinct
+alert; a team genuinely flooding the pipeline looks completely different. A team needs the
+first number to care and the second to act.
+
+**Every distinct figure is published as a per-day rate**, never as a window total, because
+a 7-day total is 7× a 1-day total for arithmetic reasons alone.
+
+**v1 and v2 row counts are never added together.** v1 re-fires a still-active alert every
+5 minutes and v2 every 12 hours, so moving one alert between schemas divides its row count
+by 144 without anyone improving anything.
+
+`good` is `assessed_good`. It is never `alerts - flagged`, because that would count
+everything nobody examined as fine. `unassessed` is reported next to it and should be zero.
+
+---
+
+## Configuration
+
+All configuration is environment-based; see `.env.example` for the full list. `.env` is
+never committed.
+
+| Variable | Purpose |
+|---|---|
+| `ES_URL`, `ES_USERNAME`, `ES_PASSWORD` | Elasticsearch endpoint and basic auth |
+| `ES_PAGE_SIZE` | Page size for point-in-time pagination |
+| `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` | SQL Server connection |
+| `SQL_DATABASE` | Persistent store, default `alerts_bi_dev` |
+| `SQL_TEST_DATABASE` | Disposable test database, default `alerts_bi_test` |
+| `LLM_ENABLED` | Must be true for a run to call the on-prem model |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | On-prem OpenAI-compatible endpoint |
+| `LLM_TIMEOUT_MS` | Per-attempt timeout; a timeout consumes one of the three attempts |
+| `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
+
+For an on-prem cluster with a private CA, point `NODE_EXTRA_CA_CERTS` at the bundle.
+`fetch` has no per-request CA option, so a config field for it would be silently ignored.
+
+Alert documents, credentials and complete LLM payloads never appear in logs. Logs carry
+identifiers, hashes, counts, timings and redacted errors. Auditable payloads are stored in
+SQL only.
+
+---
+
+## The team registry
+
+Ownership is **supplied, never inferred**. `config/teams.json` maps each team to its exact
+v1 `operator` values and its v2 `operator`, and is validated in full against
+`config/teams.schema.json` before any Elasticsearch query runs.
+
+```json
+{
+  "team_id": "checkout-api",
+  "display_name": "Checkout API",
+  "v1_operators": ["checkout", "Checkout-API"],
+  "v2_operator": "checkout-api",
+  "panels": [{ "panel_id": "checkout-api-v1-main", "schema": "v1", "sql": "SELECT ..." }]
+}
+```
+
+Operator matching is exact and **case-sensitive**, which is why a team using both
+`checkout` and `Checkout-API` must list both. No operator may belong to two teams, though
+one team may carry the same string as both its v1 and v2 operator. Every run records the
+registry version, the SHA-256 of the complete registry file, and an immutable snapshot of
+the selected entry, so the ownership used is reproducible even after the registry is
+edited.
+
+Panels are optional and are used for exactly one thing: finding the predicates by which a
+team filters its own alerts out of its own dashboards. **A panel never establishes
+ownership** and never narrows the alerts a run counts.
+
+---
+
+## Testing
+
+```bash
+npm test
+```
+
+```bash
+npm run test:integration
+```
+
+```bash
+npm run test:acceptance
+```
+
+Unit tests need nothing running. Integration and acceptance tests need Docker Compose up
+and the mock dataset loaded; they skip with an explanatory message otherwise, rather than
+failing.
+
+Integration and acceptance tests use the **disposable** `alerts_bi_test` database, which
+they recreate. `db reset-test` refuses any target that is not the configured test database
+and additionally requires `test` in the name, so a mistyped environment variable cannot
+take out the development store.
+
+Tests never call the network for LLM assessment. They use a deterministic fake client
+scripted by `(batch_id, attempt)`, which is what makes "the second attempt succeeds" and
+"all three attempts fail" expressible without timing or randomness. Live endpoint
+validation is separate and opt-in.
+
+### Acceptance verification
+
+```bash
+node src/cli.js verify-acceptance
+```
+
+Runs the four acceptance teams and compares the persisted SQL rows and the rendered CSV
+exports against `test/fixtures/expected-results.json`.
+
+That manifest is **hand-authored** from the fixture definitions in
+`scripts/acceptance-teams.mjs`, with the derivation of every number recorded alongside it.
+The pipeline does not generate its own oracle: an oracle produced by the code under test
+would agree with any bug that happened to be self-consistent.
+
+The full checks (`npm run lint`, `npm run format:check`, `npm run typecheck`, all three
+test suites, plus acceptance verification) are what "done" means here.
+
+---
+
+## The mock environment
+
+`scripts/generate-mock-alerts.mjs` seeds `appchi-v1` and `appchi-v2` from a seeded RNG on a
+fixed clock, so the dataset is reproducible.
+
+**A normal rerun appends another copy of every row.** Use `RESET=1` for a clean reload,
+which deletes and recreates both indices with explicit mappings. The reset refuses any
+endpoint that is not an explicit local mock, so a mistyped `ES_URL` cannot delete a real
+index.
+
+```bash
+RESET=1 node scripts/generate-mock-alerts.mjs
+```
+
+```bash
+STATS_ONLY=1 node scripts/generate-mock-alerts.mjs
+```
+
+Seven teams carry realistic data across the migration phases. Four `acceptance-*` teams
+carry fixtures pinned to exact timestamps and exact expected outcomes; they exist so the
+acceptance manifest can be computed by hand.
+
+`scripts/es-scale-probe.mjs` is read-only and sizes the problem:
+
+```bash
+node scripts/es-scale-probe.mjs --team checkout-api --run-at 2026-08-25T18:00:00Z
+```
+
+Its figures are approximate HyperLogLog++ cardinalities. The pipeline never uses them: it
+pages every matching row and counts identities exactly, because a reported metric may not
+be approximate.
+
+---
+
+## Architecture
+
+```
+src/
+  cli.js                 command line; a run always names one team
+  versions.js            frozen ruleset / prompt / parser versions
+  config/env.js          environment configuration
+  registry/              ownership registry loading and validation
+  es/                    Elasticsearch client and team-scoped reader
+  domain/                run window, schema normalization, metric engine
+  rules/                 R1-R4 and R7 core, R8-R10 readiness, aggregation, phase
+  suppression/           panel SQL lexer, parser, field table, safety guards
+  llm/                   grouping, request factoring, response validation, retry
+  db/                    migrations, connection pool, repositories
+  report/                HTML scorecard and the three CSV exports
+  run/                   orchestrator, CLI command handlers, acceptance verification
+```
+
+Each stage is independently testable, and the orchestrator invokes them in the order the
+flow document fixes.
+
+### Things worth knowing before changing anything
+
+- **The window is exact and half-open.** `run_at` is captured once; the range is
+  `[run_at - 168h, run_at)`. A mid-day run touches eight UTC dates, so the first and last
+  daily buckets are partial and carry their real covered hours.
+- **The run id is deterministic**, derived from team, window, registry hash and versions.
+  Re-running the same team over a frozen `run_at` replaces its own rows rather than
+  accumulating near-duplicates.
+- **Core rules run on every raw row**, then aggregate to identity. Findings stay on the
+  rows that matched and are never projected onto other rows or dates.
+- **Any core finding anywhere in the window withholds the whole identity from the model.**
+  V2 readiness gaps do not.
+- **A batch gets three total attempts**, retried byte-for-byte as a whole. After the third
+  failure every alert in it becomes `unassessed` with the shared reason. Alerts are never
+  retried individually, and a partial response is never accepted.
+- **Suppression resolves every ambiguity to `unmeasured`.** It feeds `flagged`, so a
+  scoping predicate misread as suppression would mark good alerts bad — the most expensive
+  error this design can make.
+
+---
+
+## Not in the MVP
+
+Deliberately, and recorded in design section 7.4: any comparison between runs, a cross-team
+leaderboard, R6 spam detection, historical backfill, the interactive frontend, the
+company-wide unattributed-alert audit, panel discovery or live Grafana variable retrieval,
+and a BI-side migration-invariant alert identity.
+
+The approved next steps, in order: the interactive frontend over persisted runs, then
+deterministic historical backfill oldest-first with no LLM calls.
