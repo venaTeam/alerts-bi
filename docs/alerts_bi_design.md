@@ -620,7 +620,7 @@ Recorded here so they read as choices rather than oversights.
 * **`query` template variables inside suppression predicates** (section 5.2) — counted as unmeasured rather than resolved by executing a team's SQL.
 * **Panel discovery or live variable retrieval via the Grafana API** (section 5.2) — panels and frozen variable definitions are collected by the standardization team instead.
 * **Cross-team leaderboard** (sections 2, 6) — deferred; the MVP produces one independently timed team scorecard per run.
-* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29). The MVP remains a generated self-contained HTML scorecard plus the three approved CSV exports; detailed frontend scope is designed after the MVP.
+* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29). The MVP remains a generated self-contained HTML scorecard plus the three approved CSV exports; detailed frontend scope is designed after the MVP. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.8, which records what it deliberately does not do.
 * **Company-wide attribution audit and `Unattributed` work list** (sections 3.1, 6) — deferred because it requires enumerating operators across all alerts, which conflicts with the MVP's team-filtered queries. The future audit enumerates every operator/application value, subtracts all registered operators and reports the remainder with volumes; application may suggest an owner but never assigns one automatically.
 * **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch.
 * **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards.
@@ -672,3 +672,20 @@ Language-neutral assets carried over untouched: the SQL migrations, the registry
 Two behaviours are now pinned by tests precisely because the port could have changed them silently: `tests/unit/test_catalog_text.py` fixes the exact wording of every principle and phase label, and `tests/unit/test_timefmt.py` fixes the one instant format that every identifier depends on.
 
 **Acceptance-data contract** (decided 2026-08-29): give the existing seeded generator a fixed default clock for acceptance runs and require a clean index reload. Reconcile its R1-R10 cases with the exact rules above; add dense rule-URL groups, missing-URL application groups, groups larger than 200, suppression safety cases, and retry cases. Check in a hand-reviewed `test/fixtures/expected-results.json` containing each mock team's daily raw/distinct counts, hourly rates, diagnostic operands and ratios, per-rule row/distinct counts, LLM batch membership, quality states, suppression results, readiness, and phase. The pipeline under test must not generate its own oracle. A verification command compares persisted SQL rows and CSV exports to this manifest; HTML acceptance tests check required structure and content rather than incidental formatting.
+
+### 7.8 HTTP trigger surface
+
+**A local HTTP surface may start a run and return its scorecard** (decided 2026-08-30, at the product owner's direction).
+
+This is a convenience wrapper, not the deferred frontend of section 7.4. It exists because starting a run should not require a shell in the repository, and it is scoped so that nothing measured changes:
+
+* It performs no analysis of its own. Every endpoint loads the registry, calls the same `execute_run` and `persist_run` the command line calls, or renders a stored run from committed SQL rows. There is no second code path that could drift from the CLI.
+* A run still names one team and never defaults to all of them; an absent team is an error rather than a fan-out.
+* `run_at` is still captured once per run, and the four approved output files are still written exactly as the CLI writes them. Reports are still rendered only from committed SQL.
+* Runs are serialized. Two concurrent requests for one team and clock derive the same deterministic `run_id` and would race to replace each other's rows, so a second concurrent run is refused with `409` rather than queued.
+
+It is built on the standard library's HTTP server. The approved frontend has not been designed, and choosing its framework here would pre-empt that design for no benefit this surface needs; when the frontend is designed, this file is the seam it replaces or grows from.
+
+**There is no authentication**, and every request triggers real Elasticsearch reads and real SQL writes. The listener therefore binds to loopback by default. Widening it with `--host` exposes an unauthenticated write endpoint to that network, and the command line says so when asked to.
+
+**Fixed while building it**: `get_latest_run` ordered only by `run_at DESC`. A team re-run over the same frozen clock — after a registry edit, a ruleset bump or a code change — produces distinct runs with equal `run_at`, leaving them tied, and a tie resolves to whichever row SQL Server happens to return. "Latest" could therefore mean the oldest, which it did. It now orders by `run_at DESC, completed_at DESC, run_id DESC`. This also affected `alerts-bi report --team`, which uses the same query.
