@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-08-30 (MVP implemented)
+**Last updated:** 2026-08-30 (MVP implemented in Python)
 
 ## Mandatory first action
 
@@ -42,11 +42,13 @@ Required toolchain:
 
 Keep production dependencies minimal. Nothing in the build, tests, mock seeding or runtime may require Node.js.
 
-The superseded JavaScript implementation is preserved at the `javascript-mvp` tag and stays the behavioural reference until Python passes unit, integration and acceptance testing. `test/fixtures/expected-results.json` is not regenerated for the port: it is the hand-authored oracle, and leaving it untouched is what lets it detect a behavioural difference between the two implementations.
+The superseded JavaScript implementation is preserved at the `javascript-mvp` tag. It was the behavioural reference for the port and is no longer in the tree. `test/fixtures/expected-results.json` was not regenerated for the port: it is the hand-authored oracle, and leaving it untouched is what let it detect a behavioural difference between the two implementations. Do not regenerate it now either.
+
+The two implementations were compared row for row on the same fixture; the result and the two deliberate remaining differences are recorded in design section 7.7. Two behaviours are pinned by tests because the port could have changed them silently: the exact wording of every LLM principle and phase label (`tests/unit/test_catalog_text.py`), and the single instant format every hashed identifier depends on (`tests/unit/test_timefmt.py`). Do not "tidy" either without changing the version that describes it.
 
 ## Current repository state
 
-The MVP is implemented and is being ported from JavaScript to Python on the `rewrite/python` branch. The repository contains the settled design, runtime flow, implementation blueprint, alerting guides, the application under `src/`, SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, and unit, integration and acceptance suites. `README.md` carries the operating instructions. Verify the current tree before relying on this statement, and check which language the tree currently holds.
+The MVP is implemented in Python on the `rewrite/python` branch; the port from JavaScript is complete and the JavaScript implementation has been removed. The repository contains the settled design, runtime flow, implementation blueprint, alerting guides, the `alerts_bi` package under `src/`, SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts, and unit, integration and acceptance suites. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 

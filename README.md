@@ -17,8 +17,9 @@ run end to end, and `alerts_bi_implementation_plan.md` describes what to build. 
 README and the design differ, the design wins.
 
 The implementation language is **Python** (design section 7.7). The superseded JavaScript
-implementation is preserved at the `javascript-mvp` tag as the behavioural reference for
-the port.
+implementation was the behavioural reference for the port and is preserved at the
+`javascript-mvp` tag. Both were run over the same fixture and compared row for row before
+it was removed; design section 7.7 records the result.
 
 ---
 
