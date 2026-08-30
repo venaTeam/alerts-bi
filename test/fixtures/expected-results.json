@@ -3,7 +3,7 @@
     "Hand-reviewed acceptance oracle (design section 7.5, acceptance-data contract).",
     "",
     "Every number here was computed BY HAND from the fixture definitions in",
-    "scripts/acceptance-teams.mjs, not emitted by the pipeline under test. The pipeline",
+    "scripts/acceptance_teams.py, not emitted by the pipeline under test. The pipeline",
     "must not generate its own oracle: an oracle derived from the code it checks would",
     "agree with any bug that is consistent.",
     "",
@@ -14,7 +14,7 @@
     "[2026-08-18T18:00:00Z, 2026-08-25T18:00:00Z) covering 8 UTC dates and 168 hours.",
     "Buckets not listed under `daily` must be present and entirely zero.",
     "",
-    "Verified with: node src/cli.js verify-acceptance"
+    "Verified with: uv run alerts-bi verify-acceptance"
   ],
 
   "run_at": "2026-08-25T18:00:00.000Z",

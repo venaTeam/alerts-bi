@@ -299,8 +299,13 @@ src/alerts_bi/
   report/                HTML scorecard and the three CSV exports
   run/                   orchestrator, CLI command handlers, acceptance verification
 scripts/                 mock seeder, scale probe, Kibana setup
-tests/                   unit, integration, acceptance, fixtures
+tests/                   unit, integration and acceptance suites
+test/fixtures/           the hand-authored acceptance oracle
 ```
+
+`test/fixtures/` is deliberately not folded into `tests/`: the manifest is a reviewed
+input to the acceptance check, not part of the suite that reads it, and its path is quoted
+in the design and in the manifest's own header.
 
 Each stage is independently testable, and the orchestrator invokes them in the order the
 flow document fixes.
