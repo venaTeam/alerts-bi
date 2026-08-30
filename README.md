@@ -12,9 +12,10 @@ result to SQL Server, and renders a scorecard from the stored rows.
 single week. There is no comparison against a previous run, no trend, no baseline and no
 cross-team leaderboard — by design.
 
-`alerts_bi_design.md` is the canonical specification. `alerts_bi_flow.md` describes one
-run end to end, and `alerts_bi_implementation_plan.md` describes what to build. Where this
-README and the design differ, the design wins.
+[`docs/alerts_bi_design.md`](docs/alerts_bi_design.md) is the canonical specification.
+[`docs/alerts_bi_flow.md`](docs/alerts_bi_flow.md) describes one run end to end, and
+[`docs/alerts_bi_implementation_plan.md`](docs/alerts_bi_implementation_plan.md) describes
+what to build. Where this README and the design differ, the design wins.
 
 The implementation language is **Python** (design section 7.7). The superseded JavaScript
 implementation was the behavioural reference for the port and is preserved at the
@@ -300,6 +301,7 @@ src/alerts_bi/
   report/                HTML scorecard and the three CSV exports
   run/                   orchestrator, CLI command handlers, acceptance verification
 scripts/                 mock seeder, scale probe, Kibana setup
+docs/                    design, runtime flow, blueprint, alerting guides, fixture notes
 tests/                   unit, integration and acceptance suites
 test/fixtures/           the hand-authored acceptance oracle
 ```

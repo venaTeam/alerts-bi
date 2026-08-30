@@ -1,6 +1,6 @@
 """Generates the mock multi-team alert dataset and bulk-loads it into the local mock.
 
-Covers the v1 (Appchi) and v2 (Appchi V2) schemas described in alerts_bi_design.md section
+Covers the v1 (Appchi) and v2 (Appchi V2) schemas described in docs/alerts_bi_design.md section
 1.3. This is throwaway test-data tooling for the "mock environment first" decision (design
 section 6) - not part of the BI pipeline itself.
 
@@ -43,7 +43,7 @@ DAY = timedelta(days=1)
 #: generator's, so the realistic teams' data is unchanged by the port.
 RNG = Random(20260825)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # ---- notification-policy repeat intervals (design doc section 1.1) ----
 # v1 re-fires a still-active Grafana alert every 5 MINUTES; v2 every 12 HOURS.
@@ -333,7 +333,7 @@ def bulk_load(rows: list[dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    definitions = json.loads((Path(__file__).resolve().parent / "mock_teams.json").read_bytes())
+    definitions = json.loads((SCRIPT_DIR / "mock_teams.json").read_bytes())
     teams: list[dict[str, Any]] = list(definitions["teams"])
     unattributed = definitions["unattributed"]
 
@@ -454,7 +454,11 @@ def main() -> None:
     _print_summary(summary)
     print(f"Unattributed: v1={unattributed_v1} v2={unattributed_v2}")
 
-    stats_path = Path(os.environ.get("STATS_PATH", REPO_ROOT / "mock-data-stats.json"))
+    # Written next to mock_teams.json, the definitions it summarizes, rather than to the
+    # repository root. Deliberately not under test/fixtures/: that directory holds the
+    # hand-authored acceptance oracle, and a generated file beside it invites exactly the
+    # confusion the "never generate the oracle" rule exists to prevent.
+    stats_path = Path(os.environ.get("STATS_PATH", SCRIPT_DIR / "mock-data-stats.json"))
     stats_path.write_text(
         json.dumps(
             {
