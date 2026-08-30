@@ -6,8 +6,8 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-import pymssql
 import pytest
+from sqlalchemy.exc import DatabaseError
 
 from alerts_bi.config import load_config
 from alerts_bi.db.connection import Database, connect, quote_identifier
@@ -95,7 +95,7 @@ def test_re_persisting_the_same_run_id_replaces_its_rows(db: Database) -> None:
 def test_persistence_is_atomic_a_bad_child_row_leaves_no_run_behind(db: Database) -> None:
     run = sample_run(run_id="e" * 64)
     # Violates ck_daily_metrics_distinct: distinct_alerts must not exceed alerts.
-    with pytest.raises(pymssql.Error, match="ck_daily_metrics_distinct|CHECK constraint"):
+    with pytest.raises(DatabaseError, match="ck_daily_metrics_distinct|CHECK constraint"):
         persist_run(
             db,
             PersistencePayload(
@@ -117,7 +117,7 @@ def test_the_store_rejects_impossible_daily_metrics(
     db: Database, overrides: dict[str, Any], constraint: str
 ) -> None:
     run = sample_run(run_id="f" * 64)
-    with pytest.raises(pymssql.Error, match=f"{constraint}|CHECK constraint"):
+    with pytest.raises(DatabaseError, match=f"{constraint}|CHECK constraint"):
         persist_run(
             db,
             PersistencePayload(
@@ -128,7 +128,7 @@ def test_the_store_rejects_impossible_daily_metrics(
 
 def test_the_store_rejects_an_unassessed_identity_with_no_reason(db: Database) -> None:
     run = sample_run(run_id="1" * 64)
-    with pytest.raises(pymssql.Error, match="ck_alert_findings_unassessed|CHECK constraint"):
+    with pytest.raises(DatabaseError, match="ck_alert_findings_unassessed|CHECK constraint"):
         persist_run(
             db,
             PersistencePayload(
@@ -144,7 +144,7 @@ def test_the_store_rejects_an_unassessed_identity_with_no_reason(db: Database) -
 
 def test_the_store_rejects_an_invalid_assessment_principle_pairing(db: Database) -> None:
     run = sample_run(run_id="2" * 64)
-    with pytest.raises(pymssql.Error, match="ck_llm_verdicts_pairing|CHECK constraint"):
+    with pytest.raises(DatabaseError, match="ck_llm_verdicts_pairing|CHECK constraint"):
         # no_violation must carry principle NONE, never a catalogue id.
         persist_run(
             db,
@@ -187,7 +187,7 @@ def test_the_store_rejects_an_impossible_batch_attempt(
     db: Database, overrides: dict[str, Any], constraint: str
 ) -> None:
     run = sample_run(run_id="3" * 64)
-    with pytest.raises(pymssql.Error, match=f"{constraint}|CHECK constraint"):
+    with pytest.raises(DatabaseError, match=f"{constraint}|CHECK constraint"):
         persist_run(
             db,
             PersistencePayload(run=run, batch_attempts=[_attempt(run["run_id"], **overrides)]),
@@ -289,6 +289,45 @@ def test_get_latest_run_returns_the_most_recent_completed_run(db: Database) -> N
     latest = get_latest_run(db, "checkout-api")
     assert latest is not None
     assert latest["team_id"] == "checkout-api"
+
+
+def _at(text: str) -> datetime:
+    """SQL Server DATETIME2 columns take naive UTC values through this driver."""
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+
+
+def test_runs_tied_on_run_at_are_broken_by_when_they_actually_finished(db: Database) -> None:
+    """A team re-run over the same frozen clock produces distinct runs with equal run_at.
+
+    Ordering on run_at alone leaves them tied, and a tie resolves to whichever row the
+    engine happens to return - which made "latest" silently mean "oldest".
+    """
+    team = "tie-break-team"
+    for index, (suffix, finished) in enumerate(
+        [
+            ("a", "2026-08-30T08:00:00Z"),
+            ("b", "2026-08-30T13:00:00Z"),
+            ("c", "2026-08-30T11:00:00Z"),
+        ]
+    ):
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=f"{index}{suffix}" + "0" * 62,
+                    team_id=team,
+                    run_at=_at("2026-08-25T18:00:00Z"),
+                    completed_at=_at(finished),
+                ),
+                daily_metrics=[],
+                rule_counts=[],
+                findings=[],
+            ),
+        )
+
+    latest = get_latest_run(db, team)
+    assert latest is not None
+    assert latest["run_id"].startswith("1b"), "the run that finished last, not the first row"
 
 
 def test_reset_refuses_any_database_that_is_not_the_configured_test_one() -> None:

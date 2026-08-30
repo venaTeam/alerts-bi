@@ -36,7 +36,7 @@ Required toolchain:
 - Python 3.12 or later, defined by `pyproject.toml` with a **committed lockfile**.
 - An installable `alerts_bi` package; type hints throughout application code.
 - The official Elasticsearch Python client.
-- A real SQL Server driver. Never SQLite and never an in-memory persistence substitute.
+- SQLAlchemy Core over a real SQL Server driver (`mssql+pymssql`). Hand-written SQL executed as text; no ORM. Never SQLite and never an in-memory persistence substitute.
 - The regular OpenAI **Python** SDK.
 - `pytest` for tests, `ruff` for formatting and linting, `mypy` for strict static typing.
 
@@ -76,6 +76,7 @@ Keep these decisions intact unless the design is explicitly revised:
 - Treat R8-R10 as phase-readiness gaps. They never block LLM assessment and do not enter deterministic quality totals.
 - Derive the migration phase from identity presence and readiness; do not use self-reported phase or infer silent rule inventory.
 - Persist each run and render reports only from committed SQL Server data.
+- A local HTTP surface may start a run and return its scorecard (design section 7.8), built with FastAPI on uvicorn. It is a wrapper over the same `execute_run`/`persist_run` the CLI calls and adds no analysis: one team per run, `run_at` captured once, the same four files, reports rendered only from SQL, and runs serialized so two cannot race to write one deterministic `run_id`. It is not the deferred interactive frontend.
 - Produce one self-contained HTML scorecard and exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
 - Report a single week without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
 
@@ -154,6 +155,7 @@ The MVP must extend Compose with a pinned SQL Server 2022 service, a health chec
 - Inspect the repository and working-tree state before editing. Preserve unrelated and user-owned changes.
 - Use Python 3.12+ with type hints, and reuse the existing mock scripts and request patterns where practical.
 - Keep pipeline stages independently testable: registry, ES reader, normalization/metrics, deterministic rules, suppression, LLM, SQL persistence, and reporting.
+- Configuration lives in `alerts_bi.config`, split by what it configures; the HTTP surface lives in `alerts_bi.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
 - Establish shared contracts before parallel implementation.
 - Use one primary integrator. Delegate only bounded tasks with disjoint file ownership; avoid independent sessions implementing competing architectures or editing the same files.
 - Require each subagent to report assumptions, files changed, commands run, and test results. The primary agent reviews and integrates every contribution and runs the full suite.

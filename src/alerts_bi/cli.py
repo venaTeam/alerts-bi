@@ -82,6 +82,15 @@ def build_parser() -> argparse.ArgumentParser:
         "reset-test", help="drop and recreate ONLY the configured disposable test database"
     )
 
+    api = subparsers.add_parser("serve", help="serve the HTTP trigger surface")
+    api.add_argument(
+        "--host",
+        help="bind address; API_HOST, else loopback, because the surface has no authentication",
+    )
+    api.add_argument("--port", type=int, help="bind port; API_PORT, else 8000")
+    api.add_argument("--registry", help="registry path; default config/teams.json")
+    api.add_argument("--database", help="target database; default SQL_DATABASE")
+
     verify = subparsers.add_parser(
         "verify-acceptance", help="compare persisted rows and CSVs against the manifest"
     )
@@ -215,6 +224,32 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
     return 0
 
 
+def _command_serve(args: argparse.Namespace, config: AppConfig) -> int:
+    from alerts_bi.api import serve
+    from alerts_bi.config import load_api_settings
+
+    # Flags override the environment, which overrides the default - the same precedence the
+    # rest of the configuration uses.
+    settings = load_api_settings(
+        config,
+        host=args.host,
+        port=args.port,
+        registry_path=args.registry,
+        database=args.database,
+    )
+    if not settings.loopback_only:
+        sys.stderr.write(
+            f"warning: binding to {settings.host} exposes an unauthenticated endpoint that "
+            "triggers Elasticsearch reads and SQL writes to that network\n"
+        )
+    sys.stdout.write(
+        f"alerts-bi serving on http://{settings.host}:{settings.port}  (ctrl-c to stop)\n"
+        f"  interactive API docs: http://{settings.host}:{settings.port}/docs\n"
+    )
+    serve(settings)
+    return 0
+
+
 def _command_verify(args: argparse.Namespace, config: AppConfig) -> int:
     from alerts_bi.run.verify import verify_acceptance
 
@@ -250,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         return _command_report(args, config)
     if args.command == "db":
         return _command_db(args, config)
+    if args.command == "serve":
+        return _command_serve(args, config)
     if args.command == "verify-acceptance":
         return _command_verify(args, config)
 

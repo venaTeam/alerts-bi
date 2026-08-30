@@ -92,6 +92,7 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 | `alerts-bi db status` | Show which migrations are applied |
 | `alerts-bi db reset-test` | Drop and recreate **only** the configured disposable test database |
 | `alerts-bi verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
+| `alerts-bi serve` | Serve the HTTP trigger surface (see below) |
 
 ### `run` options
 
@@ -107,6 +108,64 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 
 `--fake-llm` stamps its own `model_version` onto the run record, so a mock run can never be
 mistaken for a live one.
+
+---
+
+## The HTTP trigger surface
+
+A convenience wrapper around the same pipeline the CLI drives, so a run can be started from
+a browser instead of a shell in the repository.
+
+```bash
+uv run alerts-bi serve
+```
+
+Then open <http://127.0.0.1:8000>, pick a team and press Run. The response **is** that run's
+scorecard.
+
+| Route | What it does |
+|---|---|
+| `GET /` | Team list and a run form |
+| `GET /healthz` | Liveness, with Elasticsearch and SQL Server reported separately |
+| `GET /teams` | The registry's teams as JSON |
+| `POST /runs` | Run one team; returns the scorecard HTML |
+| `GET /runs/<run_id>` | Re-render that run's scorecard from SQL |
+| `GET /runs/latest?team=<id>` | The team's most recent completed run |
+| `GET /runs/<run_id>/<file>.csv` | One of the three CSV exports |
+| `GET /docs`, `/redoc`, `/openapi.json` | Generated API documentation and schema |
+
+`POST /runs` takes a JSON body: `team` (required), `run_at` (optional ISO 8601) and `llm`
+(`live`, `fake` or `off`, mirroring the CLI's default, `--fake-llm` and `--no-llm`). Send
+`Accept: application/json` to get a summary with links instead of the scorecard HTML.
+
+```bash
+curl -X POST -H "Content-Type: application/json" -H "Accept: application/json" -d '{"team":"checkout-api","run_at":"2026-08-25T18:00:00Z","llm":"fake"}' http://127.0.0.1:8000/runs
+```
+
+```bash
+curl -o scorecard.html -X POST -H "Content-Type: application/json" -d '{"team":"checkout-api","llm":"fake"}' http://127.0.0.1:8000/runs
+```
+
+The request and response shapes are declared as Pydantic models, so the OpenAPI document is
+generated from the code rather than maintained beside it: interactive documentation at
+`/docs` and `/redoc`, the schema at `/openapi.json`.
+
+The surface adds no analysis. It loads the registry, calls the same `execute_run` and
+`persist_run` the CLI calls, writes the same four files under `out/`, and renders reports
+from committed SQL rows. A run still names one team and never defaults to all of them.
+
+Built with **FastAPI** on **uvicorn**. The run endpoint is a plain `def`, so FastAPI
+dispatches its minutes of blocking Elasticsearch and SQL work to the thread pool instead of
+stalling the event loop.
+
+Runs are **serialized**: a second request while one is running gets `409`, because two runs
+of the same team and clock derive one deterministic `run_id` and would race to replace each
+other's rows.
+
+**There is no authentication.** Every request triggers real Elasticsearch reads and real SQL
+writes, and a `live` run can call the on-prem model. The listener binds to `127.0.0.1` by
+default; `--host` widens it, and on a shared machine that exposes an unauthenticated write
+endpoint to the network.
 
 ---
 
@@ -156,13 +215,15 @@ never committed.
 |---|---|
 | `ES_URL`, `ES_USERNAME`, `ES_PASSWORD` | Elasticsearch endpoint and basic auth |
 | `ES_PAGE_SIZE` | Page size for point-in-time pagination |
-| `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` | SQL Server connection |
+| `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` | SQL Server connection, via SQLAlchemy over `mssql+pymssql` |
 | `SQL_DATABASE` | Persistent store, default `alerts_bi_dev` |
 | `SQL_TEST_DATABASE` | Disposable test database, default `alerts_bi_test` |
 | `LLM_ENABLED` | Must be true for a run to call the on-prem model |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | On-prem OpenAI-compatible endpoint |
 | `LLM_TIMEOUT_MS` | Per-attempt timeout; a timeout consumes one of the three attempts |
 | `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
+| `API_HOST`, `API_PORT` | Where `alerts-bi serve` listens; `--host` / `--port` override |
+| `API_REGISTRY_PATH`, `API_DATABASE`, `API_OUT_DIR` | Surface overrides for the registry, target database and report directory |
 
 For an on-prem cluster with a private CA, set `ES_CA_CERT` to the bundle path; the
 Elasticsearch Python client takes it directly.
@@ -290,7 +351,21 @@ be approximate.
 src/alerts_bi/
   cli.py                 command line; a run always names one team
   versions.py            frozen ruleset / prompt / parser versions
-  config.py              environment configuration
+  config/                environment configuration, split by what it configures
+    env.py                 reading the environment and .env
+    elasticsearch.py           sql.py                  } the three backing services
+    llm.py                 /
+    app.py                 the pipeline's configuration, composing those three
+    api.py                 the HTTP surface: where it listens, what it writes
+  api/                   HTTP trigger surface over the same pipeline
+    app.py                 application factory and exception handlers
+    routers/               the routes, grouped by what they are for
+    service.py             everything that touches the pipeline, plus the run gate
+    schemas.py             the wire contract; OpenAPI is generated from it
+    dependencies.py        typed access to per-application state
+    negotiation.py         the one rule for HTML versus JSON
+    ui/                    the two pages the surface renders itself
+    server.py              running it under uvicorn
   registry.py            ownership registry loading and validation
   es/                    Elasticsearch client and team-scoped reader
   domain/                run window, schema normalization, metric engine
