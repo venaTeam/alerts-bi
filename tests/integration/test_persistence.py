@@ -291,6 +291,45 @@ def test_get_latest_run_returns_the_most_recent_completed_run(db: Database) -> N
     assert latest["team_id"] == "checkout-api"
 
 
+def _at(text: str) -> datetime:
+    """SQL Server DATETIME2 columns take naive UTC values through this driver."""
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+
+
+def test_runs_tied_on_run_at_are_broken_by_when_they_actually_finished(db: Database) -> None:
+    """A team re-run over the same frozen clock produces distinct runs with equal run_at.
+
+    Ordering on run_at alone leaves them tied, and a tie resolves to whichever row the
+    engine happens to return - which made "latest" silently mean "oldest".
+    """
+    team = "tie-break-team"
+    for index, (suffix, finished) in enumerate(
+        [
+            ("a", "2026-08-30T08:00:00Z"),
+            ("b", "2026-08-30T13:00:00Z"),
+            ("c", "2026-08-30T11:00:00Z"),
+        ]
+    ):
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=f"{index}{suffix}" + "0" * 62,
+                    team_id=team,
+                    run_at=_at("2026-08-25T18:00:00Z"),
+                    completed_at=_at(finished),
+                ),
+                daily_metrics=[],
+                rule_counts=[],
+                findings=[],
+            ),
+        )
+
+    latest = get_latest_run(db, team)
+    assert latest is not None
+    assert latest["run_id"].startswith("1b"), "the run that finished last, not the first row"
+
+
 def test_reset_refuses_any_database_that_is_not_the_configured_test_one() -> None:
     for database in ("alerts_bi_dev", "master"):
         with pytest.raises(ValueError, match="only the configured test database"):

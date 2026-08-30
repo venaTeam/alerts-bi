@@ -364,10 +364,18 @@ def get_run(db: Database, run_id: str) -> dict[str, Any] | None:
 
 
 def get_latest_run(db: Database, team_id: str) -> dict[str, Any] | None:
-    """Most recent completed run for a team, used when re-rendering without a run id."""
+    """Most recent completed run for a team, used when re-rendering without a run id.
+
+    ``run_at`` alone does not order these. A team is routinely re-run over the same frozen
+    clock - after a registry edit, a ruleset bump or a code change - and each of those is a
+    distinct run with the same ``run_at``. Ordering by ``run_at`` alone leaves such runs
+    tied, and a tie in SQL Server resolves to whichever row the engine happens to return,
+    so "latest" could silently mean the oldest. ``completed_at`` breaks the tie by actual
+    execution, and ``run_id`` makes the result total rather than merely usually right.
+    """
     return db.query_one(
         "SELECT TOP 1 * FROM runs WHERE team_id = %(team_id)s AND status = 'completed' "
-        "ORDER BY run_at DESC",
+        "ORDER BY run_at DESC, completed_at DESC, run_id DESC",
         {"team_id": team_id},
     )
 

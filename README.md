@@ -92,6 +92,7 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 | `alerts-bi db status` | Show which migrations are applied |
 | `alerts-bi db reset-test` | Drop and recreate **only** the configured disposable test database |
 | `alerts-bi verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
+| `alerts-bi serve` | Serve the HTTP trigger surface (see below) |
 
 ### `run` options
 
@@ -107,6 +108,56 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 
 `--fake-llm` stamps its own `model_version` onto the run record, so a mock run can never be
 mistaken for a live one.
+
+---
+
+## The HTTP trigger surface
+
+A convenience wrapper around the same pipeline the CLI drives, so a run can be started from
+a browser instead of a shell in the repository.
+
+```bash
+uv run alerts-bi serve
+```
+
+Then open <http://127.0.0.1:8000>, pick a team and press Run. The response **is** that run's
+scorecard.
+
+| Route | What it does |
+|---|---|
+| `GET /` | Team list and a run form |
+| `GET /healthz` | Liveness, with Elasticsearch and SQL Server reported separately |
+| `GET /teams` | The registry's teams as JSON |
+| `POST /runs` | Run one team; returns the scorecard HTML |
+| `GET /runs/<run_id>` | Re-render that run's scorecard from SQL |
+| `GET /runs/latest?team=<id>` | The team's most recent completed run |
+| `GET /runs/<run_id>/<file>.csv` | One of the three CSV exports |
+
+`POST /runs` takes `team` (required), `run_at` (optional ISO 8601) and `llm`
+(`live`, `fake` or `off`, mirroring the CLI's default, `--fake-llm` and `--no-llm`).
+Parameters may arrive in the query string, as a form post, or as a JSON body. Send
+`Accept: application/json` to get a summary with links instead of HTML.
+
+```bash
+curl -X POST -H "Accept: application/json" "http://127.0.0.1:8000/runs?team=checkout-api&run_at=2026-08-25T18:00:00Z&llm=fake"
+```
+
+```bash
+curl -o scorecard.html -X POST "http://127.0.0.1:8000/runs?team=checkout-api&llm=fake"
+```
+
+The surface adds no analysis. It loads the registry, calls the same `execute_run` and
+`persist_run` the CLI calls, writes the same four files under `out/`, and renders reports
+from committed SQL rows. A run still names one team and never defaults to all of them.
+
+Runs are **serialized**: a second request while one is running gets `409`, because two runs
+of the same team and clock derive one deterministic `run_id` and would race to replace each
+other's rows.
+
+**There is no authentication.** Every request triggers real Elasticsearch reads and real SQL
+writes, and a `live` run can call the on-prem model. The listener binds to `127.0.0.1` by
+default; `--host` widens it, and on a shared machine that exposes an unauthenticated write
+endpoint to the network.
 
 ---
 
@@ -289,6 +340,7 @@ be approximate.
 ```
 src/alerts_bi/
   cli.py                 command line; a run always names one team
+  api.py                 HTTP trigger surface over the same pipeline
   versions.py            frozen ruleset / prompt / parser versions
   config.py              environment configuration
   registry.py            ownership registry loading and validation
