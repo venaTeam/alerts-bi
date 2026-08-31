@@ -348,13 +348,14 @@ be approximate.
 ## Architecture
 
 ```
-src/alerts_bi/
+src/                     the application package; the import name is `src`
   cli.py                 command line; a run always names one team
   versions.py            frozen ruleset / prompt / parser versions
   config/                environment configuration, split by what it configures
     env.py                 reading the environment and .env
-    elasticsearch.py           sql.py                  } the three backing services
-    llm.py                 /
+    elasticsearch.py       Elasticsearch settings
+    sql.py                 SQL Server settings
+    llm.py                 on-prem model settings, and the 200-alert ceiling
     app.py                 the pipeline's configuration, composing those three
     api.py                 the HTTP surface: where it listens, what it writes
   api/                   HTTP trigger surface over the same pipeline

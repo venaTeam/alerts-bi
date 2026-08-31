@@ -13,21 +13,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from alerts_bi.config import load_config
-from alerts_bi.db.connection import Database, connect
-from alerts_bi.db.migrate import reset_test_database
-from alerts_bi.db.repositories import (
+from src.config import load_config
+from src.db.connection import Database, connect
+from src.db.migrate import reset_test_database
+from src.db.repositories import (
     get_daily_metrics,
     get_findings,
     get_run,
     persist_run,
 )
-from alerts_bi.es.client import EsClient
-from alerts_bi.es.reader import V1_INDEX
-from alerts_bi.llm.fake import FakeLlmClient
-from alerts_bi.report.render import OUTPUT_FILES, render_run_report
-from alerts_bi.run.orchestrator import RunSummary, execute_run
+from src.es.client import EsClient
+from src.es.reader import V1_INDEX
+from src.llm.fake import FakeLlmClient
+from src.report.render import OUTPUT_FILES, render_run_report
+from src.run.orchestrator import RunSummary, execute_run
 
 pytestmark = pytest.mark.integration
 

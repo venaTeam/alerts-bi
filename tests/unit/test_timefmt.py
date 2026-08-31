@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-
-from alerts_bi.hashing import compact_json, sha256_of
-from alerts_bi.timefmt import iso_date, iso_instant
+from src.hashing import compact_json, sha256_of
+from src.timefmt import iso_date, iso_instant
 
 
 def test_milliseconds_are_always_written_even_at_a_whole_second() -> None:

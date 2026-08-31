@@ -31,9 +31,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from src.domain.severity import code_for_name
+
 from _jsrandom import Random
 from acceptance_teams import acceptance_teams
-from alerts_bi.domain.severity import code_for_name
 
 ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
 NOW = datetime(2026, 8, 25, 18, 0, 0, tzinfo=UTC)
@@ -58,7 +59,7 @@ V2_REPEAT = timedelta(hours=12)
 TWENTY_FOUR_HOURS = timedelta(hours=24)
 
 # The R2 and R3 catalogues are deliberately NOT duplicated here: the authoritative lists
-# live in src/alerts_bi/rules/catalogs.py, and fixture defs that need a catalogue value
+# live in src/rules/catalogs.py, and fixture defs that need a catalogue value
 # write the literal string.
 RULE1_GENERIC = [
     "Error Occurred",

@@ -11,10 +11,9 @@ from __future__ import annotations
 import re
 
 import pytest
-
-from alerts_bi.api.schemas import TeamOut
-from alerts_bi.api.ui import index_page
-from alerts_bi.api.ui.assets import PAGE_CSS, SUBMIT_SCRIPT
+from src.api.schemas import TeamOut
+from src.api.ui import index_page
+from src.api.ui.assets import PAGE_CSS, SUBMIT_SCRIPT
 
 TOKENS = ("--bg", "--fg", "--field-bg", "--line", "--muted", "--error")
 

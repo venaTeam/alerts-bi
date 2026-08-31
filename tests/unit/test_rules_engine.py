@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from alerts_bi.domain.normalize import identity_of
-from alerts_bi.domain.window import build_run_window
-from alerts_bi.rules.core import Finding
-from alerts_bi.rules.engine import (
+from src.domain.normalize import identity_of
+from src.domain.window import build_run_window
+from src.rules.core import Finding
+from src.rules.engine import (
     attach_row_findings,
     compare_rule_ids,
     compute_daily_flagged,
@@ -13,6 +13,7 @@ from alerts_bi.rules.engine import (
     count_phase2_gap_identities,
     evaluate_rows,
 )
+
 from tests.helpers.rows import v1_row, v2_row
 
 DATES = build_run_window(datetime.fromisoformat("2026-08-25T18:00:00+00:00")).snapshot_dates

@@ -52,7 +52,7 @@ The two implementations were compared row for row on the same fixture; the resul
 
 The MVP is implemented in Python and merged to `main`; the port from JavaScript is complete and the JavaScript implementation has been removed. `rewrite/python` and `feature/http-api` are the branches it arrived on and are now superseded — do not treat either as current.
 
-The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, fixture notes), the `alerts_bi` package under `src/` (including the `config` and `api` packages), SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts under `scripts/`, the hand-authored oracle at `test/fixtures/expected-results.json`, and unit, integration and acceptance suites under `tests/`. The repository root holds only what tooling requires. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
+The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, fixture notes), the application package, which **is** `src/` itself (the import name is `src`) (including the `config` and `api` packages), SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts under `scripts/`, the hand-authored oracle at `test/fixtures/expected-results.json`, and unit, integration and acceptance suites under `tests/`. The repository root holds only what tooling requires. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 
@@ -162,7 +162,7 @@ Compose already carries the pinned SQL Server 2022 service with its health check
 - Inspect the repository and working-tree state before editing. Preserve unrelated and user-owned changes.
 - Use Python 3.12+ with type hints, and reuse the existing mock scripts and request patterns where practical.
 - Keep pipeline stages independently testable: registry, ES reader, normalization/metrics, deterministic rules, suppression, LLM, SQL persistence, and reporting.
-- Configuration lives in `alerts_bi.config`, split by what it configures; the HTTP surface lives in `alerts_bi.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
+- Configuration lives in `src.config`, split by what it configures; the HTTP surface lives in `src.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
 - Establish shared contracts before parallel implementation.
 - Use one primary integrator. Delegate only bounded tasks with disjoint file ownership; avoid independent sessions implementing competing architectures or editing the same files.
 - Require each subagent to report assumptions, files changed, commands run, and test results. The primary agent reviews and integrates every contribution and runs the full suite.

@@ -9,14 +9,14 @@ schema wrong would quietly change what a team is told.
 from __future__ import annotations
 
 import pytest
-
-from alerts_bi.domain.severity import (
+from src.domain.severity import (
     SEVERITY_CODES,
     SEVERITY_NAMES,
     code_for_name,
     severity_label,
 )
-from alerts_bi.rules.readiness import evaluate_r9, is_completion_ready
+from src.rules.readiness import evaluate_r9, is_completion_ready
+
 from tests.helpers.rows import v1_row, v2_row
 
 # ------------------------------------------------------------------ the scale

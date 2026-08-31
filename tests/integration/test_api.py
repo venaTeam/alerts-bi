@@ -21,14 +21,13 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from alerts_bi.api import build_app
-from alerts_bi.api.service import RunGate
-from alerts_bi.config import ApiSettings, load_config
-from alerts_bi.db.migrate import reset_test_database
-from alerts_bi.es.client import EsClient
-from alerts_bi.es.reader import V1_INDEX
-from alerts_bi.report.render import OUTPUT_FILES
+from src.api import build_app
+from src.api.service import RunGate
+from src.config import ApiSettings, load_config
+from src.db.migrate import reset_test_database
+from src.es.client import EsClient
+from src.es.reader import V1_INDEX
+from src.report.render import OUTPUT_FILES
 
 pytestmark = pytest.mark.integration
 
