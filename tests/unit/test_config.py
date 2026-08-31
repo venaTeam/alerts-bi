@@ -4,9 +4,8 @@ import os
 from pathlib import Path
 
 import pytest
-
-from alerts_bi.config import MAX_BATCH_SIZE_CEILING, load_config, load_dotenv
-from alerts_bi.logging_setup import redact_error
+from src.config import MAX_BATCH_SIZE_CEILING, load_config, load_dotenv
+from src.logging_setup import redact_error
 
 ENV_NAMES = [
     "ES_URL",

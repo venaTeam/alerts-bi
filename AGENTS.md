@@ -1,6 +1,8 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-08-30 (MVP implemented in Python)
+**Last updated:** 2026-08-30 (MVP in Python, merged to `main`)
+
+This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
 
 ## Mandatory first action
 
@@ -37,6 +39,7 @@ Required toolchain:
 - An installable `alerts_bi` package; type hints throughout application code.
 - The official Elasticsearch Python client.
 - SQLAlchemy Core over a real SQL Server driver (`mssql+pymssql`). Hand-written SQL executed as text; no ORM. Never SQLite and never an in-memory persistence substitute.
+- Alembic for migration ordering, with the DDL in `.sql` files and the checksum ledger in `schema_migrations` (design section 7.8). Never edit an applied migration: add a new revision.
 - The regular OpenAI **Python** SDK.
 - `pytest` for tests, `ruff` for formatting and linting, `mypy` for strict static typing.
 
@@ -48,7 +51,9 @@ The two implementations were compared row for row on the same fixture; the resul
 
 ## Current repository state
 
-The MVP is implemented in Python on the `rewrite/python` branch; the port from JavaScript is complete and the JavaScript implementation has been removed. The repository contains the settled design, runtime flow, implementation blueprint, alerting guides, the `alerts_bi` package under `src/`, SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts, and unit, integration and acceptance suites. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
+The MVP is implemented in Python and merged to `main`; the port from JavaScript is complete and the JavaScript implementation has been removed. `rewrite/python` and `feature/http-api` are the branches it arrived on and are now superseded — do not treat either as current.
+
+The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, fixture notes), the application package, which **is** `src/` itself (the import name is `src`) (including the `config` and `api` packages), SQL Server migrations and repositories, the versioned registry at `config/teams.json`, the Elasticsearch/Kibana/SQL Server mock stack, the Python mock and probe scripts under `scripts/`, the hand-authored oracle at `test/fixtures/expected-results.json`, and unit, integration and acceptance suites under `tests/`. The repository root holds only what tooling requires. `README.md` carries the operating instructions. Verify the current tree before relying on this statement.
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 
@@ -76,7 +81,7 @@ Keep these decisions intact unless the design is explicitly revised:
 - Treat R8-R10 as phase-readiness gaps. They never block LLM assessment and do not enter deterministic quality totals.
 - Derive the migration phase from identity presence and readiness; do not use self-reported phase or infer silent rule inventory.
 - Persist each run and render reports only from committed SQL Server data.
-- A local HTTP surface may start a run and return its scorecard (design section 7.8), built with FastAPI on uvicorn. It is a wrapper over the same `execute_run`/`persist_run` the CLI calls and adds no analysis: one team per run, `run_at` captured once, the same four files, reports rendered only from SQL, and runs serialized so two cannot race to write one deterministic `run_id`. It is not the deferred interactive frontend.
+- A local HTTP surface may start a run and return its scorecard (design section 7.9), built with FastAPI on uvicorn. It is a wrapper over the same `execute_run`/`persist_run` the CLI calls and adds no analysis: one team per run, `run_at` captured once, the same four files, reports rendered only from SQL, and runs serialized so two cannot race to write one deterministic `run_id`. It is not the deferred interactive frontend.
 - Produce one self-contained HTML scorecard and exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
 - Report a single week without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
 
@@ -119,17 +124,18 @@ Keep these decisions intact unless the design is explicitly revised:
 
 Do not expand the MVP with deferred features. The approved next steps are:
 
-1. Design and build the interactive frontend over persisted runs and pipeline controls.
+1. Design and build the interactive frontend over persisted runs and pipeline controls. The HTTP trigger surface of design section 7.8 already exists and is the seam it grows from; it is deliberately not that frontend.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
 Plan the unattributed-alert audit, cross-team leaderboard, R6, scheduling/Kubernetes, and other deferred work separately afterward.
 
 ## Local mock environment
 
-The existing [`docker-compose.yml`](docker-compose.yml) currently provides:
+[`docker-compose.yml`](docker-compose.yml) provides:
 
 - Elasticsearch 8.15 at `http://localhost:9200`, container `alerts-bi-es`.
 - Kibana 8.15 at `http://localhost:5601`, container `alerts-bi-kibana`.
+- SQL Server 2022 at `localhost:1433`, container `alerts-bi-sqlserver`, pinned image with a health check.
 - Persistent Elasticsearch data in the `es-data` volume.
 
 Start the current services with:
@@ -146,16 +152,18 @@ Useful scripts:
 - `scripts/es_scale_probe.py` is read-only and reports the two approved diagnostics with their operands, scoped to one selected team.
 - `scripts/create_kibana_panels.py` creates the scale-probe dashboard and is rerunnable.
 
+The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the four hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
+
 Reset data only when the task requires a clean fixture load. Before deleting indices or recreating a database, verify that the endpoint is the explicit local mock and that the target database is the disposable `alerts_bi_test`. Never apply destructive fixture operations to production or an unknown endpoint.
 
-The MVP must extend Compose with a pinned SQL Server 2022 service, a health check, persistent `alerts_bi_dev`, disposable `alerts_bi_test`, migrations, `.env.example`, and uncommitted credentials. Do not substitute SQLite.
+Compose already carries the pinned SQL Server 2022 service with its health check, and the persistent `alerts_bi_dev` and disposable `alerts_bi_test` databases exist with migrations applied. Credentials come from `.env`, which is never committed; `.env.example` carries placeholders. Do not substitute SQLite.
 
 ## Implementation and collaboration practices
 
 - Inspect the repository and working-tree state before editing. Preserve unrelated and user-owned changes.
 - Use Python 3.12+ with type hints, and reuse the existing mock scripts and request patterns where practical.
 - Keep pipeline stages independently testable: registry, ES reader, normalization/metrics, deterministic rules, suppression, LLM, SQL persistence, and reporting.
-- Configuration lives in `alerts_bi.config`, split by what it configures; the HTTP surface lives in `alerts_bi.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
+- Configuration lives in `src.config`, split by what it configures; the HTTP surface lives in `src.api`, split by responsibility. Settings are configuration and belong in the former; runtime state belongs with the code that uses it.
 - Establish shared contracts before parallel implementation.
 - Use one primary integrator. Delegate only bounded tasks with disjoint file ownership; avoid independent sessions implementing competing architectures or editing the same files.
 - Require each subagent to report assumptions, files changed, commands run, and test results. The primary agent reviews and integrates every contribution and runs the full suite.
@@ -176,11 +184,14 @@ Implementation is not complete until the relevant unit, integration, and accepta
 - SQL Server migrations, constraints, transactions, restart/idempotency behavior, and SQL-only report rendering.
 - Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract.
 - Reconciliation against a hand-reviewed `test/fixtures/expected-results.json` that the production pipeline does not generate.
+- For the HTTP surface: that it refuses a run with no team, an unknown team, an unknown model mode and a second concurrent run; that only the four approved outputs are addressable; and that a scorecard it serves is byte-identical to the one the CLI writes for the same run.
 
 Run formatting, linting, type checks, unit tests, integration tests, migrations, and a clean mock acceptance run when those commands exist. Report commands and results accurately. Never claim live LLM, production Elasticsearch, or full acceptance validation unless it ran successfully.
 
-## Keep project instructions synchronized
+## One place for these instructions
 
-[`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) must remain behaviorally equivalent. When project-wide guidance changes, update both files in the same change.
+**This file is the only copy.** [`CLAUDE.md`](CLAUDE.md) is a short pointer that imports it, so there is nothing to keep in sync: project-wide guidance changes here and only here.
+
+Do not paste guidance back into `CLAUDE.md`. Two copies drifting apart is what this arrangement removes, and `tests/unit/test_instruction_files.py` fails if the pointer grows back into a duplicate.
 
 When a product or architecture decision is made, update `alerts_bi_design.md` in the same session, move resolved questions into the relevant section, and update its `Last updated` date. Update the flow, blueprint, fixture documentation, and expected-results manifest when the decision changes their behavior.

@@ -89,7 +89,7 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 | `alerts-bi report --run-id <id>` | Re-render a stored run without recomputing anything |
 | `alerts-bi report --team <id>` | Re-render that team's most recent completed run |
 | `alerts-bi db migrate` | Create the database if absent and apply pending migrations |
-| `alerts-bi db status` | Show which migrations are applied |
+| `alerts-bi db status` | Show the current revision and whether each migration still matches its checksum |
 | `alerts-bi db reset-test` | Drop and recreate **only** the configured disposable test database |
 | `alerts-bi verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
 | `alerts-bi serve` | Serve the HTTP trigger surface (see below) |
@@ -348,13 +348,14 @@ be approximate.
 ## Architecture
 
 ```
-src/alerts_bi/
+src/                     the application package; the import name is `src`
   cli.py                 command line; a run always names one team
   versions.py            frozen ruleset / prompt / parser versions
   config/                environment configuration, split by what it configures
     env.py                 reading the environment and .env
-    elasticsearch.py           sql.py                  } the three backing services
-    llm.py                 /
+    elasticsearch.py       Elasticsearch settings
+    sql.py                 SQL Server settings
+    llm.py                 on-prem model settings, and the 200-alert ceiling
     app.py                 the pipeline's configuration, composing those three
     api.py                 the HTTP surface: where it listens, what it writes
   api/                   HTTP trigger surface over the same pipeline
@@ -372,7 +373,9 @@ src/alerts_bi/
   rules/                 R1-R4 and R7 core, R8-R10 readiness, aggregation, phase
   suppression/           panel SQL lexer, parser, field table, safety guards
   llm/                   grouping, request factoring, response validation, retry
-  db/                    migrations, connection, repositories
+  db/                    connection, repositories, and migrations
+    migrations/            Alembic environment; the DDL stays in .sql beside it
+    ledger.py              the checksum ledger Alembic itself does not keep
   report/                HTML scorecard and the three CSV exports
   run/                   orchestrator, CLI command handlers, acceptance verification
 scripts/                 mock seeder, scale probe, Kibana setup

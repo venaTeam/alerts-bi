@@ -12,13 +12,12 @@ Python replaced the em dash in eight of these strings with a hyphen.
 from __future__ import annotations
 
 import pytest
-
-from alerts_bi.rules.catalogs import (
+from src.rules.catalogs import (
     CITABLE_IDS,
     PRINCIPLE_CATALOG,
     PRINCIPLE_IDS,
 )
-from alerts_bi.rules.phase import PHASE_LABELS
+from src.rules.phase import PHASE_LABELS
 
 EXPECTED_PRINCIPLES = {
     "P1": "Non-actionable — implies no investigation, fix, escalation or attention",

@@ -8,12 +8,11 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-
-from alerts_bi.config import load_config
-from alerts_bi.domain.window import build_run_window
-from alerts_bi.es.client import EsClient
-from alerts_bi.es.reader import V1_INDEX, build_query, read_schema, read_team_alerts
-from alerts_bi.registry import load_registry, select_team
+from src.config import load_config
+from src.domain.window import build_run_window
+from src.es.client import EsClient
+from src.es.reader import V1_INDEX, build_query, read_schema, read_team_alerts
+from src.registry import load_registry, select_team
 
 pytestmark = pytest.mark.integration
 

@@ -41,7 +41,7 @@ Over the last few months we have been running a company-wide alert standardizati
 | `application` | required | required |
 | `object` / `component` | `object`, required | renamed to `component`, required |
 | `message` | required | required |
-| `severity` | `error` / `major` / `warning` / `clear`, default `error` | `critical` / `high` / `warning`, default `warning` |
+| `severity` | **numeric** `5` / `4` / `3` / `1` = `error` / `major` / `warning` / `clear`, default `5` | **numeric** `5` / `4` / `3` / `1` = `critical` / `high` / `warning` / `clear`, default `3` |
 | `status` | — | `firing` / `resolved` / `suspended`, default `firing` |
 | `impact` | — | optional *(will become required)* |
 | `runbook_url` | — | optional *(will become required)* |
@@ -58,6 +58,19 @@ Notes that matter for measurement:
 
 * `clear` (v1) is replaced by `status: resolved` (v2) — they are the equivalent "this is over" signal.
 * `time_created` and `operator` moved from user-supplied to system-derived, which structurally eliminates two of the documented bad-alert characteristics (invalid timestamp, unrepresentative operator).
+* **`severity` is stored as a number, not as its name** (confirmed 2026-08-31). One scale serves both schemas, and each schema names its levels differently, so the number alone does not identify the level - the alert's schema does:
+
+  | code | v1 (Appchi) | v2 (Appchi V2) |
+  |---|---|---|
+  | 5 | `error` | `critical` |
+  | 4 | `major` | `high` |
+  | 3 | `warning` | `warning` |
+  | 1 | `clear` | `clear` |
+
+  Codes 2 and above 5 are undefined. An undefined code is **kept as its digits, never guessed at**: nulling it would discard a value a team actually sent, and mapping it to a neighbouring level would assert a seriousness nobody chose. The conversion lives in `alerts_bi.domain.severity` and happens once, during normalization, so every rule, export and report downstream still reads a name.
+
+  This is why the collapse of `critical` and `error` onto 5 costs nothing where it matters: R8-R10 are v2-only (section 4), so a 5 reaching the readiness rules is always `critical`.
+
 * `severity` does **not** map 1:1. `warning` maps to `warning` cleanly; `error` and `major` must be re-decided per alert against the Wake-Up Test. There is deliberately **no published mapping** — each team decides per alert using the guide.
 * `impact` and `runbook_url` are optional today and will be made required later. The standard is therefore **not enforced at ingest**, which is precisely why a BI layer is needed.
 * **The v2 `key_field` hash is built from every field *except* `status`, `message`, and the time fields** (confirmed 2026-08-27). Two consequences: the key is stable across 12-hour re-fires and across `firing` -> `resolved`, so `distinct_alerts` is meaningful; but the key *does* change when `severity`, `impact`, or `runbook_url` change — which is exactly what phase 1 and phase 2 ask teams to do. See section 3.7.
@@ -301,7 +314,7 @@ Rule 5 is the one to put in front of teams first: it is their own filter quoted 
 
 **Rule 8 treats an absent or unusable V2 impact as a readiness gap** (decided 2026-08-29). R8 matches when `impact` is missing, `null`, not a string, empty or whitespace-only, or equals `unknown`, `test`, `default`, or `n/a` after trim/lowercase/whitespace normalization. A present but poor impact such as `high cpu` is not R8; it is handled by R10 or the LLM. R8 remains outside `flagged_by_rule` and does not block LLM assessment.
 
-**Rule 9 evaluates runbook presence and URL shape on every V2 alert** (decided 2026-08-29). R9 matches when `runbook_url` is missing, `null`, not a string, empty or whitespace-only, equals `unknown`, `test`, `default`, or `n/a` after normalization, or is not a valid absolute `http://` or `https://` URL. It is reported as a readiness gap for every severity. For `critical`, a match is a mandatory phase-2 completion failure; for `high` and `warning`, it remains visible but does not by itself prevent completion under the current 100%-on-critical criterion. R9 stays outside `flagged_by_rule` and never blocks the LLM.
+**Rule 9 evaluates runbook presence and URL shape on every V2 alert** (decided 2026-08-29). R9 matches when `runbook_url` is missing, `null`, not a string, empty or whitespace-only, equals `unknown`, `test`, `default`, or `n/a` after normalization, or is not a valid absolute `http://` or `https://` URL. It is reported as a readiness gap for every severity. For `critical` (stored as severity 5 on a v2 alert), a match is a mandatory phase-2 completion failure; for `high` and `warning`, it remains visible but does not by itself prevent completion under the current 100%-on-critical criterion. R9 stays outside `flagged_by_rule` and never blocks the LLM.
 
 **Rule 10 is a deliberately narrow deterministic proxy; semantic cause-versus-impact judgment remains with LLM principle P9** (decided 2026-08-29). Normalize `impact` by trimming, converting to lowercase, collapsing repeated whitespace, and removing surrounding punctuation. R10 matches only when the complete normalized value equals `high cpu`, `high cpu usage`, `cpu usage is high`, or `cpu is high`. It does not use substring or token-similarity matching: `high cpu causes checkout latency` continues to the LLM. R10 remains a V2 readiness gap, stays outside `flagged_by_rule`, and never blocks the LLM. Catalogue additions require a `ruleset_version` change.
 
@@ -620,7 +633,7 @@ Recorded here so they read as choices rather than oversights.
 * **`query` template variables inside suppression predicates** (section 5.2) — counted as unmeasured rather than resolved by executing a team's SQL.
 * **Panel discovery or live variable retrieval via the Grafana API** (section 5.2) — panels and frozen variable definitions are collected by the standardization team instead.
 * **Cross-team leaderboard** (sections 2, 6) — deferred; the MVP produces one independently timed team scorecard per run.
-* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29). The MVP remains a generated self-contained HTML scorecard plus the three approved CSV exports; detailed frontend scope is designed after the MVP. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.8, which records what it deliberately does not do.
+* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29). The MVP remains a generated self-contained HTML scorecard plus the three approved CSV exports; detailed frontend scope is designed after the MVP. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.9, which records what it deliberately does not do.
 * **Company-wide attribution audit and `Unattributed` work list** (sections 3.1, 6) — deferred because it requires enumerating operators across all alerts, which conflicts with the MVP's team-filtered queries. The future audit enumerates every operator/application value, subtracts all registered operators and reports the remainder with volumes; application may suggest an owner but never assigns one automatically.
 * **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch.
 * **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards.
@@ -674,7 +687,19 @@ Two behaviours are now pinned by tests precisely because the port could have cha
 
 **Acceptance-data contract** (decided 2026-08-29): give the existing seeded generator a fixed default clock for acceptance runs and require a clean index reload. Reconcile its R1-R10 cases with the exact rules above; add dense rule-URL groups, missing-URL application groups, groups larger than 200, suppression safety cases, and retry cases. Check in a hand-reviewed `test/fixtures/expected-results.json` containing each mock team's daily raw/distinct counts, hourly rates, diagnostic operands and ratios, per-rule row/distinct counts, LLM batch membership, quality states, suppression results, readiness, and phase. The pipeline under test must not generate its own oracle. A verification command compares persisted SQL rows and CSV exports to this manifest; HTML acceptance tests check required structure and content rather than incidental formatting.
 
-### 7.8 HTTP trigger surface
+### 7.8 Migrations run on Alembic
+
+**Schema migrations are ordered by Alembic** (decided 2026-08-31).
+
+The previous runner ordered migrations by filename sort. Two migrations added concurrently - `002_add_index.sql` and `002_add_column.sql` - would both apply, in alphabetical order, with nothing objecting, leaving the two databases that ran them subtly different. Alembic's revision graph turns that into "multiple heads", an error someone has to resolve deliberately. That is the whole reason for the change; autogenerate is unusable here because the SQL is hand-written and there are no ORM models to diff against.
+
+Alembic does not verify content. `alembic_version` holds a single row naming the current head, so editing an already-applied revision is invisible to it. The checksum ledger the previous runner introduced is therefore **kept** as `schema_migrations`, verified before every upgrade and appended to after each revision. The two tables divide the work: Alembic owns ordering, the ledger owns content.
+
+The DDL stays in `.sql` files rather than moving inside the revision modules, because the checksum has to cover the text that actually ran. A revision is a few lines naming its file.
+
+Databases migrated before the change were stamped rather than re-migrated: their schema and their ledger were already correct and only `alembic_version` was missing. A database built from nothing through Alembic was compared against one migrated by the old runner - 126 columns and 40 constraints, identical - so the change is ordering only.
+
+### 7.9 HTTP trigger surface
 
 **A local HTTP surface may start a run and return its scorecard** (decided 2026-08-30, at the product owner's direction).
 

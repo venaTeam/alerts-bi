@@ -36,6 +36,14 @@ RESET=1 uv run python scripts/generate_mock_alerts.py
 uv run alerts-bi run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
 ```
 
+## Severity in the fixture
+
+Alerts store severity as a number: `5` / `4` / `3` / `1`, read as `error` / `major` /
+`warning` / `clear` in v1 and `critical` / `high` / `warning` / `clear` in v2. The team
+definitions below still name the level they want; the generator converts it, and refuses a
+name the standard does not define. Every count in this file is unaffected - the encoding
+changed, not the data.
+
 ## How to read this
 
 `alerts` is the raw row count. `distinct` is the sum of daily distinct

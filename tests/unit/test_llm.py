@@ -5,11 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-
-from alerts_bi.db.repositories import verdict_key
-from alerts_bi.llm.assess import MAX_ATTEMPTS, assess_alerts, mark_all_unassessed
-from alerts_bi.llm.fake import FakeLlmClient, ScriptedResult, scripted_verdicts
-from alerts_bi.llm.grouping import (
+from src.db.repositories import verdict_key
+from src.llm.assess import MAX_ATTEMPTS, assess_alerts, mark_all_unassessed
+from src.llm.fake import FakeLlmClient, ScriptedResult, scripted_verdicts
+from src.llm.grouping import (
     MAX_BATCH_SIZE,
     alert_transport_id,
     balanced_partition_sizes,
@@ -17,20 +16,22 @@ from alerts_bi.llm.grouping import (
     build_batches,
     group_alerts,
 )
-from alerts_bi.llm.prompt import build_prompt
-from alerts_bi.llm.request import (
+from src.llm.prompt import build_prompt
+from src.llm.request import (
     assert_lossless,
     build_request,
     reconstruct_document,
     serialize_request,
     shared_field_names,
 )
-from alerts_bi.llm.response import (
+from src.llm.response import (
     LlmResponseError,
     response_json_schema,
     state_for_verdict,
     validate_response,
 )
+from src.versions import PROMPT_VERSION as CURRENT_PROMPT_VERSION
+
 from tests.helpers.rows import v1_row, v2_row
 
 RUN_ID = "run-1"
@@ -577,8 +578,23 @@ def test_the_prompt_carries_both_guides_verbatim_and_the_full_catalogue() -> Non
     assert "that's a log" in built.system_prompt.lower()
     for identifier in ("P1", "P7", "P11", "R1", "R10"):
         assert identifier in built.system_prompt
-    assert built.prompt_version == "1.0.0"
+    assert built.prompt_version == CURRENT_PROMPT_VERSION
     assert len(built.system_prompt_hash) == 64
+
+
+def test_the_prompt_states_the_numeric_severity_scale() -> None:
+    """Severity reaches the model as a number, so the scale has to be in the prompt.
+
+    Without it the guides' severity reasoning - principle P8 above all - has nothing to
+    work with, because a bare 5 names no level.
+    """
+    prompt = build_prompt().system_prompt
+    assert "SEVERITY SCALE" in prompt
+    assert "`severity` is a NUMBER, not a word" in prompt
+    for level in ("error", "critical", "major", "high", "warning", "clear"):
+        assert level in prompt
+    # The number alone is ambiguous, so the model is told to read it against the schema.
+    assert "schema" in prompt[prompt.index("SEVERITY SCALE") :]
 
 
 def test_the_prompt_instructs_independent_per_alert_assessment() -> None:

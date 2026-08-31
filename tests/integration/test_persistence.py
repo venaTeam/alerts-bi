@@ -8,11 +8,10 @@ from typing import Any
 
 import pytest
 from sqlalchemy.exc import DatabaseError
-
-from alerts_bi.config import load_config
-from alerts_bi.db.connection import Database, connect, quote_identifier
-from alerts_bi.db.migrate import reset_test_database
-from alerts_bi.db.repositories import (
+from src.config import load_config
+from src.db.connection import Database, connect, quote_identifier
+from src.db.migrate import reset_test_database
+from src.db.repositories import (
     PersistencePayload,
     find_panel_parse,
     find_verdicts,
@@ -25,6 +24,7 @@ from alerts_bi.db.repositories import (
     persist_run,
     verdict_key,
 )
+
 from tests.helpers.sql import (
     sample_daily,
     sample_finding,
