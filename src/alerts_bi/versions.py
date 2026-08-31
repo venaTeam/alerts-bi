@@ -19,7 +19,9 @@ counts as a bad alert had changed.
 """
 
 RULESET_VERSION = "1.0.0"
-PROMPT_VERSION = "1.0.0"
+# 1.1.0 (2026-08-31): the prompt states the numeric severity scale, because alerts carry
+# severity as a number and the guides reason about it by name.
+PROMPT_VERSION = "1.1.0"
 PARSER_VERSION = "1.0.0"
 
 APP_VERSION = "0.1.0"

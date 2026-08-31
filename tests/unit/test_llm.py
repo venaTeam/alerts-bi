@@ -31,6 +31,7 @@ from alerts_bi.llm.response import (
     state_for_verdict,
     validate_response,
 )
+from alerts_bi.versions import PROMPT_VERSION as CURRENT_PROMPT_VERSION
 from tests.helpers.rows import v1_row, v2_row
 
 RUN_ID = "run-1"
@@ -577,8 +578,23 @@ def test_the_prompt_carries_both_guides_verbatim_and_the_full_catalogue() -> Non
     assert "that's a log" in built.system_prompt.lower()
     for identifier in ("P1", "P7", "P11", "R1", "R10"):
         assert identifier in built.system_prompt
-    assert built.prompt_version == "1.0.0"
+    assert built.prompt_version == CURRENT_PROMPT_VERSION
     assert len(built.system_prompt_hash) == 64
+
+
+def test_the_prompt_states_the_numeric_severity_scale() -> None:
+    """Severity reaches the model as a number, so the scale has to be in the prompt.
+
+    Without it the guides' severity reasoning - principle P8 above all - has nothing to
+    work with, because a bare 5 names no level.
+    """
+    prompt = build_prompt().system_prompt
+    assert "SEVERITY SCALE" in prompt
+    assert "`severity` is a NUMBER, not a word" in prompt
+    for level in ("error", "critical", "major", "high", "warning", "clear"):
+        assert level in prompt
+    # The number alone is ambiguous, so the model is told to read it against the schema.
+    assert "schema" in prompt[prompt.index("SEVERITY SCALE") :]
 
 
 def test_the_prompt_instructs_independent_per_alert_assessment() -> None:

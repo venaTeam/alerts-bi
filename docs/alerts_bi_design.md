@@ -41,7 +41,7 @@ Over the last few months we have been running a company-wide alert standardizati
 | `application` | required | required |
 | `object` / `component` | `object`, required | renamed to `component`, required |
 | `message` | required | required |
-| `severity` | `error` / `major` / `warning` / `clear`, default `error` | `critical` / `high` / `warning`, default `warning` |
+| `severity` | **numeric** `5` / `4` / `3` / `1` = `error` / `major` / `warning` / `clear`, default `5` | **numeric** `5` / `4` / `3` / `1` = `critical` / `high` / `warning` / `clear`, default `3` |
 | `status` | — | `firing` / `resolved` / `suspended`, default `firing` |
 | `impact` | — | optional *(will become required)* |
 | `runbook_url` | — | optional *(will become required)* |
@@ -58,6 +58,19 @@ Notes that matter for measurement:
 
 * `clear` (v1) is replaced by `status: resolved` (v2) — they are the equivalent "this is over" signal.
 * `time_created` and `operator` moved from user-supplied to system-derived, which structurally eliminates two of the documented bad-alert characteristics (invalid timestamp, unrepresentative operator).
+* **`severity` is stored as a number, not as its name** (confirmed 2026-08-31). One scale serves both schemas, and each schema names its levels differently, so the number alone does not identify the level - the alert's schema does:
+
+  | code | v1 (Appchi) | v2 (Appchi V2) |
+  |---|---|---|
+  | 5 | `error` | `critical` |
+  | 4 | `major` | `high` |
+  | 3 | `warning` | `warning` |
+  | 1 | `clear` | `clear` |
+
+  Codes 2 and above 5 are undefined. An undefined code is **kept as its digits, never guessed at**: nulling it would discard a value a team actually sent, and mapping it to a neighbouring level would assert a seriousness nobody chose. The conversion lives in `alerts_bi.domain.severity` and happens once, during normalization, so every rule, export and report downstream still reads a name.
+
+  This is why the collapse of `critical` and `error` onto 5 costs nothing where it matters: R8-R10 are v2-only (section 4), so a 5 reaching the readiness rules is always `critical`.
+
 * `severity` does **not** map 1:1. `warning` maps to `warning` cleanly; `error` and `major` must be re-decided per alert against the Wake-Up Test. There is deliberately **no published mapping** — each team decides per alert using the guide.
 * `impact` and `runbook_url` are optional today and will be made required later. The standard is therefore **not enforced at ingest**, which is precisely why a BI layer is needed.
 * **The v2 `key_field` hash is built from every field *except* `status`, `message`, and the time fields** (confirmed 2026-08-27). Two consequences: the key is stable across 12-hour re-fires and across `firing` -> `resolved`, so `distinct_alerts` is meaningful; but the key *does* change when `severity`, `impact`, or `runbook_url` change — which is exactly what phase 1 and phase 2 ask teams to do. See section 3.7.
@@ -301,7 +314,7 @@ Rule 5 is the one to put in front of teams first: it is their own filter quoted 
 
 **Rule 8 treats an absent or unusable V2 impact as a readiness gap** (decided 2026-08-29). R8 matches when `impact` is missing, `null`, not a string, empty or whitespace-only, or equals `unknown`, `test`, `default`, or `n/a` after trim/lowercase/whitespace normalization. A present but poor impact such as `high cpu` is not R8; it is handled by R10 or the LLM. R8 remains outside `flagged_by_rule` and does not block LLM assessment.
 
-**Rule 9 evaluates runbook presence and URL shape on every V2 alert** (decided 2026-08-29). R9 matches when `runbook_url` is missing, `null`, not a string, empty or whitespace-only, equals `unknown`, `test`, `default`, or `n/a` after normalization, or is not a valid absolute `http://` or `https://` URL. It is reported as a readiness gap for every severity. For `critical`, a match is a mandatory phase-2 completion failure; for `high` and `warning`, it remains visible but does not by itself prevent completion under the current 100%-on-critical criterion. R9 stays outside `flagged_by_rule` and never blocks the LLM.
+**Rule 9 evaluates runbook presence and URL shape on every V2 alert** (decided 2026-08-29). R9 matches when `runbook_url` is missing, `null`, not a string, empty or whitespace-only, equals `unknown`, `test`, `default`, or `n/a` after normalization, or is not a valid absolute `http://` or `https://` URL. It is reported as a readiness gap for every severity. For `critical` (stored as severity 5 on a v2 alert), a match is a mandatory phase-2 completion failure; for `high` and `warning`, it remains visible but does not by itself prevent completion under the current 100%-on-critical criterion. R9 stays outside `flagged_by_rule` and never blocks the LLM.
 
 **Rule 10 is a deliberately narrow deterministic proxy; semantic cause-versus-impact judgment remains with LLM principle P9** (decided 2026-08-29). Normalize `impact` by trimming, converting to lowercase, collapsing repeated whitespace, and removing surrounding punctuation. R10 matches only when the complete normalized value equals `high cpu`, `high cpu usage`, `cpu usage is high`, or `cpu is high`. It does not use substring or token-similarity matching: `high cpu causes checkout latency` continues to the LLM. R10 remains a V2 readiness gap, stays outside `flagged_by_rule`, and never blocks the LLM. Catalogue additions require a `ruleset_version` change.
 

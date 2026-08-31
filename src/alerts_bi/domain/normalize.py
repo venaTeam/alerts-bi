@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from alerts_bi.domain.severity import severity_label
 from alerts_bi.domain.window import utc_date_key
 from alerts_bi.hashing import sha256_of
 
@@ -157,7 +158,8 @@ def normalize_row(schema: str, source: dict[str, Any]) -> AlertRecord:
         identity=identity_of(application, key_field),
         component=_str_or_none(source.get("component" if is_v2 else "object")),
         message=_str_or_none(source.get("message")),
-        severity=_str_or_none(source.get("severity")),
+        # Stored as a number; the schema decides which name that number carries.
+        severity=severity_label(schema, source.get("severity")),
         operator=_str_or_none(source.get("operator")),
         node_name=_str_or_none(source.get("node_name")),
         network=_str_or_none(source.get("network")),

@@ -28,6 +28,24 @@ __all__ = ["BuiltPrompt", "build_prompt", "build_system_prompt"]
 GUIDE_DIR = "docs"
 GUIDE_FILES = ("Alerting_Guide_Appchi_EN.md", "what_is_an_incorrect_alert_EN.md")
 
+#: Severity reaches the model as the number the alert stores, so the scale has to be stated
+#: or the model cannot apply the guides' severity reasoning - principle P8 in particular.
+#: The alert's own ``schema`` field says which column applies.
+SEVERITY_SCALE = """===== SEVERITY SCALE =====
+`severity` is a NUMBER, not a word. Both schemas share the scale and name its levels
+differently, so read the number against the alert's own `schema`:
+
+  severity   v1 (Appchi)   v2 (Appchi V2)
+  --------   -----------   --------------
+  5          error         critical
+  4          major         high
+  3          warning       warning
+  1          clear         clear
+
+Any other number is a level the standard does not define: report what you see and do not
+treat it as more or less serious than a defined level."""
+
+
 #: The fixed per-alert decision procedure.
 #:
 #: Two instructions here exist specifically to counter batching's known failure mode: the
@@ -125,6 +143,8 @@ def build_system_prompt(repo_root: Path | str = ".") -> str:
     return "\n".join(
         [
             _read_guides(Path(repo_root)),
+            "",
+            SEVERITY_SCALE,
             "",
             "===== CITATION CATALOGUE =====",
             f"ruleset_version: {RULESET_VERSION}",

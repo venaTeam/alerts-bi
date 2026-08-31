@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _jsrandom import Random
 from acceptance_teams import acceptance_teams
+from alerts_bi.domain.severity import code_for_name
 
 ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
 NOW = datetime(2026, 8, 25, 18, 0, 0, tzinfo=UTC)
@@ -172,7 +173,9 @@ def expand_v1(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
                     "application": definition["application"],
                     "object": definition["obj"],
                     "message": definition["message"],
-                    "severity": definition.get("severity") or "error",
+                    # Stored as a number. code_for_name raises on a name outside
+                    # the standard, so a typo in a fixture fails the build.
+                    "severity": code_for_name(definition.get("severity") or "error"),
                     "operator": operator,
                     "key_field": definition.get("key_field")
                     or v1_key_field(
@@ -196,7 +199,7 @@ def expand_v2(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
         "application": definition["application"],
         "component": definition["obj"],
         "message": definition["message"],
-        "severity": definition.get("severity") or "warning",
+        "severity": code_for_name(definition.get("severity") or "warning"),
         "impact": definition.get("impact"),
         "runbook_url": definition.get("runbook_url"),
         "environment": definition.get("environment") or "production",
@@ -242,7 +245,7 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
         "application": {"type": "keyword"},
         "object": {"type": "keyword"},
         "message": _TEXT_WITH_RAW,
-        "severity": {"type": "keyword"},
+        "severity": {"type": "integer"},
         "operator": {"type": "keyword"},
         "key_field": {"type": "keyword"},
         "time_created": {"type": "date"},
@@ -257,7 +260,7 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
         "application": {"type": "keyword"},
         "component": {"type": "keyword"},
         "message": _TEXT_WITH_RAW,
-        "severity": {"type": "keyword"},
+        "severity": {"type": "integer"},
         "status": {"type": "keyword"},
         "impact": _TEXT_WITH_RAW,
         "runbook_url": {"type": "keyword"},
@@ -390,7 +393,7 @@ def main() -> None:
                         "application": definition["application"],
                         "object": definition["obj"],
                         "message": definition["message"],
-                        "severity": definition["severity"],
+                        "severity": code_for_name(definition["severity"]),
                         "operator": definition["operator"],
                         "key_field": v1_key_field(
                             definition["application"],
@@ -419,7 +422,7 @@ def main() -> None:
                 "application": definition["application"],
                 "component": definition["obj"],
                 "message": definition["message"],
-                "severity": definition["severity"],
+                "severity": code_for_name(definition["severity"]),
                 "status": status,
                 "impact": definition.get("impact"),
                 "runbook_url": definition.get("runbook_url"),
