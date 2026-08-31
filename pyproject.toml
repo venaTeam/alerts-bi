@@ -16,6 +16,9 @@ dependencies = [
     # Database access. SQLAlchemy Core only - hand-written SQL executed as text, no ORM:
     # the pipeline persists rows it has already computed and reads them back to render.
     "sqlalchemy>=2.0,<3",
+    # Migration ordering: a revision graph, so two migrations added concurrently collide
+    # as multiple heads instead of both applying in filename order.
+    "alembic>=1.14,<2",
     # The DBAPI under SQLAlchemy's mssql+pymssql dialect. Chosen over pyodbc because it
     # ships wheels and needs no separately installed ODBC driver, which keeps `uv sync`
     # sufficient to run the integration tests.

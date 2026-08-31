@@ -22,6 +22,8 @@ from src.config import AppConfig, load_config
 from src.db.connection import connect
 from src.db.migrate import (
     applied_migrations,
+    current_revision,
+    heads,
     load_migrations,
     migrate_database,
     reset_test_database,
@@ -207,7 +209,9 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
         database = _target_database(args, config)
         with connect(config.sql, database) as db:
             applied_map = applied_migrations(db)
+            revision = current_revision(db)
             sys.stdout.write(f"database: {database}\n")
+            sys.stdout.write(f"revision: {revision or '(none - never migrated)'}\n")
             for migration in load_migrations():
                 if migration.version not in applied_map:
                     state = "pending"
@@ -216,6 +220,14 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
                 else:
                     state = "APPLIED BUT FILE CHANGED"
                 sys.stdout.write(f"  {migration.version:<32} {state}\n")
+
+        # More than one head means two migrations were added without agreeing on an order.
+        graph_heads = heads()
+        if len(graph_heads) > 1:
+            sys.stderr.write(
+                f"warning: {len(graph_heads)} revision heads ({', '.join(graph_heads)}); "
+                "merge them before migrating\n"
+            )
         return 0
 
     # reset-test: only ever the configured disposable test database.
