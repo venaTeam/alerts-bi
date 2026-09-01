@@ -27,7 +27,7 @@ The approved toolchain is:
 | Packaging and dependencies | `pyproject.toml` plus a committed lockfile |
 | Elasticsearch access | the official `elasticsearch` Python client |
 | SQL Server access | SQLAlchemy Core over a real SQL Server driver (`mssql+pymssql`); hand-written SQL, no ORM; never SQLite or an in-memory substitute |
-| HTTP trigger surface | FastAPI on uvicorn (design section 7.8) |
+| HTTP trigger surface | FastAPI on uvicorn (design section 7.9) |
 | LLM transport | the regular OpenAI **Python** SDK |
 | Registry schema validation | a JSON Schema validator against the checked-in schema |
 | Tests | `pytest` |

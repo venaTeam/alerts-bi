@@ -124,7 +124,7 @@ Keep these decisions intact unless the design is explicitly revised:
 
 Do not expand the MVP with deferred features. The approved next steps are:
 
-1. Design and build the interactive frontend over persisted runs and pipeline controls. The HTTP trigger surface of design section 7.8 already exists and is the seam it grows from; it is deliberately not that frontend.
+1. Design and build the interactive frontend over persisted runs and pipeline controls. The HTTP trigger surface of design section 7.9 already exists and is the seam it grows from; it is deliberately not that frontend.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
 Plan the unattributed-alert audit, cross-team leaderboard, R6, scheduling/Kubernetes, and other deferred work separately afterward.
