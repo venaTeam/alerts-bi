@@ -20,7 +20,8 @@ After reading the design, use these documents according to the task:
 2. [`alerts_bi_implementation_plan.md`](docs/alerts_bi_implementation_plan.md) — implementation components, milestones, tests, and definition of done.
 3. [`Alerting_Guide_Appchi_EN.md`](docs/Alerting_Guide_Appchi_EN.md) and [`what_is_an_incorrect_alert_EN.md`](docs/what_is_an_incorrect_alert_EN.md) — the company standard. Read both completely for rule-engine, LLM-prompt, scoring, or alert-quality work.
 4. [`outputs.md`](docs/outputs.md) — what a run emits: the scorecard section by section, every CSV column, the API shapes, and the invariants a reader gets wrong. Read it before changing the renderer, the exports or the API contract, and before answering a question about what a number means.
-5. [`team_alert_status.md`](docs/team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
+5. [`openshift-deployment.md`](docs/openshift-deployment.md) — what to configure to run this on a cluster, and the gaps to close first. Proposed, not proven: nothing in it has run on a cluster, and Kubernetes remains deferred work.
+6. [`team_alert_status.md`](docs/team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
 
 For any MVP implementation, architecture, integration, or acceptance task, read the runtime flow and implementation blueprint **in full** before changing code. For rule-engine, LLM-prompt, scoring, or alert-quality work, also read both alerting guides **in full**.
 
