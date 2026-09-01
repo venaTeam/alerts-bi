@@ -13,6 +13,7 @@ single week. There is no comparison against a previous run, no trend, no baselin
 cross-team leaderboard — by design.
 
 [`docs/alerts_bi_design.md`](docs/alerts_bi_design.md) is the canonical specification.
+[`docs/outputs.md`](docs/outputs.md) explains what a run emits.
 [`docs/alerts_bi_flow.md`](docs/alerts_bi_flow.md) describes one run end to end, and
 [`docs/alerts_bi_implementation_plan.md`](docs/alerts_bi_implementation_plan.md) describes
 what to build. Where this README and the design differ, the design wins.
@@ -185,6 +186,10 @@ separate, retryable step, so a display failure after a successful run loses noth
 ```bash
 uv run alerts-bi report --run-id <run id>
 ```
+
+[`docs/outputs.md`](docs/outputs.md) documents all four: the scorecard section by section,
+every column of every CSV, the API's JSON shapes, and what the outputs deliberately do not
+say. The essentials are below.
 
 ### Reading the numbers
 
