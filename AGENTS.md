@@ -19,7 +19,8 @@ After reading the design, use these documents according to the task:
 1. [`alerts_bi_flow.md`](docs/alerts_bi_flow.md) — concise runtime sequence for one MVP run.
 2. [`alerts_bi_implementation_plan.md`](docs/alerts_bi_implementation_plan.md) — implementation components, milestones, tests, and definition of done.
 3. [`Alerting_Guide_Appchi_EN.md`](docs/Alerting_Guide_Appchi_EN.md) and [`what_is_an_incorrect_alert_EN.md`](docs/what_is_an_incorrect_alert_EN.md) — the company standard. Read both completely for rule-engine, LLM-prompt, scoring, or alert-quality work.
-4. [`team_alert_status.md`](docs/team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
+4. [`outputs.md`](docs/outputs.md) — what a run emits: the scorecard section by section, every CSV column, the API shapes, and the invariants a reader gets wrong. Read it before changing the renderer, the exports or the API contract, and before answering a question about what a number means.
+5. [`team_alert_status.md`](docs/team_alert_status.md) — a description of the current synthetic fixture only. It predates the settled design and is **not** an acceptance oracle.
 
 For any MVP implementation, architecture, integration, or acceptance task, read the runtime flow and implementation blueprint **in full** before changing code. For rule-engine, LLM-prompt, scoring, or alert-quality work, also read both alerting guides **in full**.
 
@@ -182,7 +183,7 @@ Implementation is not complete until the relevant unit, integration, and accepta
 - Suppression AST safety, variable behavior, unanimity, and blast-radius handling.
 - Stable LLM grouping, balanced partitions, lossless factoring, exact response-ID validation, byte-identical three-attempt retries, batch-wide failure, and durable verdict reuse.
 - SQL Server migrations, constraints, transactions, restart/idempotency behavior, and SQL-only report rendering.
-- Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract.
+- Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract. A new export column or scorecard section must be documented in `docs/outputs.md`; `tests/unit/test_outputs_doc.py` fails until it is.
 - Reconciliation against a hand-reviewed `test/fixtures/expected-results.json` that the production pipeline does not generate.
 - For the HTTP surface: that it refuses a run with no team, an unknown team, an unknown model mode and a second concurrent run; that only the four approved outputs are addressable; and that a scorecard it serves is byte-identical to the one the CLI writes for the same run.
 
