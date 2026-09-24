@@ -203,11 +203,19 @@ def test_the_checked_in_registry_loads_and_its_hash_covers_the_complete_file() -
     assert len(loaded.file_sha256) == 64
 
 
+#: The registry file exactly as the javascript-mvp build read it. The live config/teams.json
+#: moves on (teams are enrolled, operators change); this copy stays, so the hashing itself
+#: is still pinned to what the JavaScript implementation computed.
+PARITY_REGISTRY = (
+    DEFAULT_REGISTRY_PATH.parents[1] / "test" / "fixtures" / "registry-javascript-mvp.json"
+)
+
+
 def test_the_registry_hash_matches_the_javascript_implementation() -> None:
     # Recorded from the javascript-mvp build against the same registry file. If this
     # fails, the two implementations would stamp different run records for one input.
     assert (
-        load_registry().file_sha256
+        load_registry(PARITY_REGISTRY).file_sha256
         == "ad7472d8c8e744a91eb9826956482899d70d1cf979bf5a4844fa076f018e87bc"
     )
 

@@ -1,9 +1,10 @@
 # Deploying Alerts BI to OpenShift
 
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-24
 
 **Status: proposed, not proven.** Nothing here has been exercised on a cluster. Kubernetes
-and scheduling are deferred post-MVP work (design section 7.4), so the repository carries no
+deployment is deferred post-MVP work (design section 7.4); the weekly schedule of design
+section 7.11 is built but its CronJob below is untested. The repository carries no
 Dockerfile, no manifest and no CI, and everything below is new.
 
 Read it in two halves. The **configuration reference** is grounded in the code: every
@@ -399,6 +400,19 @@ Options, roughly in order of preference:
 
 Do not put an unauthenticated Route on a shared cluster.
 
+### The review portal and admin app
+
+See [Running it without touching a pod](#running-it-without-touching-a-pod) for their manifests.
+
+The read-only review portal (`alerts-bi portal`, design section 7.10) is a second process
+and should be a second Deployment. It is meant to be reachable from the company network,
+unlike the trigger surface. It needs its own Secret carrying `PORTAL_SQL_USER` and
+`PORTAL_SQL_PASSWORD` for a login created with `alerts-bi db grant-reader`. It refuses to
+start with a login that can write. Its client-network allowlist (`PORTAL_ALLOWED_NETWORKS`)
+sees the router's address rather than the reader's, so on a cluster restrict it at the Route
+or with a NetworkPolicy instead. Never expose the trigger surface through the portal's
+Route. None of this has run on a cluster.
+
 ### `SQL_ENCRYPT` and `SQL_TRUST_SERVER_CERTIFICATE` do nothing
 
 Both are read into configuration and never passed to the driver. Setting them will not
@@ -427,10 +441,245 @@ Route and client timeouts above your slowest expected run, or the caller will se
 timeout while the run completes and persists correctly anyway — the result is still
 retrievable at `GET /runs/<run_id>`.
 
-### Nothing schedules runs
+### Running it without touching a pod
 
-The MVP runs manually for one selected team. If you want them weekly, a `CronJob` per team
-is the smallest thing that works:
+Everything routine runs by itself (design section 7.12). Apply these once; after that, the
+only thing anyone edits is the registry ConfigMap, and the only screen anyone uses is the
+admin app.
+
+**Schema and the portal login on every rollout** - add an init container to the app
+Deployment. It needs the portal password, so give it the portal Secret as well:
+
+```yaml
+      initContainers:
+        - name: db-setup
+          image: image-registry.openshift-image-registry.svc:5000/alerts-bi/alerts-bi:latest
+          command: ["alerts-bi", "db", "setup"]
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
+            - secretRef: {name: alerts-bi-portal-secrets}
+```
+
+**The reader portal** - its own Deployment, Service and Route, with only the reader Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: alerts-bi-portal-secrets}
+stringData:
+  PORTAL_SQL_USER: "alerts_bi_portal"
+  PORTAL_SQL_PASSWORD: "..."            # the init container creates the login with this
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: alerts-bi-portal}
+spec:
+  replicas: 2                           # read-only and stateless; more than one is fine
+  selector: {matchLabels: {app: alerts-bi-portal}}
+  template:
+    metadata: {labels: {app: alerts-bi-portal}}
+    spec:
+      containers:
+        - name: portal
+          image: image-registry.openshift-image-registry.svc:5000/alerts-bi/alerts-bi:latest
+          command: ["alerts-bi", "portal"]
+          env:
+            - {name: PORTAL_HOST, value: "0.0.0.0"}
+            - {name: PORTAL_PORT, value: "8100"}
+            # The router is the client the allowlist sees; restrict readers at the Route.
+            - {name: PORTAL_ALLOWED_NETWORKS, value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}
+            - {name: SQL_HOST, valueFrom: {configMapKeyRef: {name: alerts-bi-config, key: SQL_HOST}}}
+            - {name: SQL_DATABASE, valueFrom: {configMapKeyRef: {name: alerts-bi-config, key: SQL_DATABASE}}}
+          envFrom:
+            - secretRef: {name: alerts-bi-portal-secrets}   # never alerts-bi-secrets
+          ports: [{containerPort: 8100}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8100}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: alerts-bi-portal}
+spec:
+  selector: {app: alerts-bi-portal}
+  ports: [{port: 8100, targetPort: 8100}]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: alerts-bi-portal
+  annotations:
+    haproxy.router.openshift.io/ip_allowlist: "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+spec:
+  to: {kind: Service, name: alerts-bi-portal}
+  tls: {termination: edge}
+```
+
+The portal refuses to start if its login can write, so a wrong Secret shows up as a pod that
+never becomes ready rather than as an exposed writer.
+
+**The operator admin app** - a Deployment with OpenShift's `oauth-proxy` as a sidecar. The
+proxy signs people in and admits only those allowed to `get` the Service below; the app binds
+to the pod's loopback and trusts the proxy's `X-Forwarded-User`.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alerts-bi-admin
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.admin: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"alerts-bi-admin"}}'
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: alerts-bi-admin-secrets}
+stringData:
+  ADMIN_SECRET: "..."          # 32+ random characters; signs the admin forms
+  COOKIE_SECRET: "..."         # 32 random bytes, base64; the proxy's session cookie
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: alerts-bi-admin}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: alerts-bi-admin}}
+  template:
+    metadata: {labels: {app: alerts-bi-admin}}
+    spec:
+      serviceAccountName: alerts-bi-admin
+      containers:
+        - name: admin
+          image: image-registry.openshift-image-registry.svc:5000/alerts-bi/alerts-bi:latest
+          command: ["alerts-bi", "admin", "--registry", "/etc/alerts-bi/teams.json"]
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
+            - secretRef: {name: alerts-bi-admin-secrets}
+          volumeMounts: [{name: registry, mountPath: /etc/alerts-bi}]
+        - name: oauth-proxy
+          image: registry.redhat.io/openshift4/ose-oauth-proxy:latest
+          args:
+            - --provider=openshift
+            - --https-address=:8443
+            - --http-address=
+            - --upstream=http://127.0.0.1:8200
+            - --openshift-service-account=alerts-bi-admin
+            - --tls-cert=/etc/tls/private/tls.crt
+            - --tls-key=/etc/tls/private/tls.key
+            - --cookie-secret-file=/etc/proxy/secrets/COOKIE_SECRET
+            - '--openshift-sar={"namespace":"alerts-bi","resource":"services","resourceName":"alerts-bi-admin","verb":"get"}'
+          ports: [{containerPort: 8443, name: https}]
+          volumeMounts:
+            - {name: proxy-tls, mountPath: /etc/tls/private}
+            - {name: proxy-secrets, mountPath: /etc/proxy/secrets}
+      volumes:
+        - {name: registry, configMap: {name: alerts-bi-registry}}
+        - {name: proxy-tls, secret: {secretName: alerts-bi-admin-tls}}
+        - {name: proxy-secrets, secret: {secretName: alerts-bi-admin-secrets}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alerts-bi-admin
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: alerts-bi-admin-tls
+spec:
+  selector: {app: alerts-bi-admin}
+  ports: [{name: https, port: 443, targetPort: 8443}]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: alerts-bi-admin
+  annotations:
+    haproxy.router.openshift.io/ip_allowlist: "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+spec:
+  to: {kind: Service, name: alerts-bi-admin}
+  tls: {termination: reencrypt}
+---
+# Only the standardization team passes the proxy's access check.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: alerts-bi-admin-access}
+rules:
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [alerts-bi-admin]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: alerts-bi-admin-access}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: alerts-bi-admin-access}
+subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: standardization-team}
+```
+
+Replace `standardization-team` with your OpenShift group and `alerts-bi` with your
+namespace. The proxy passes the signed-in user's name as `X-Forwarded-User`, and every
+publication, withdrawal and decision is recorded under it. The admin container listens only
+on `127.0.0.1:8200`; there is deliberately no Service port for it.
+
+After this, day to day:
+
+| You want to | Do |
+|---|---|
+| Add a team | Add it to `config/teams.json` with `weekly_review.enabled`, run `alerts-bi registry check` locally, update the `alerts-bi-registry` ConfigMap. The next daily run starts it |
+| See how the schedule is doing | The admin app's team list; failed `alerts-bi-weekly` Jobs in the console |
+| Publish, withdraw, decide | The admin app |
+| Upgrade | Push the image and roll out; the init container migrates first |
+
+Nothing here has run on a cluster.
+
+### Weekly reviews run from one CronJob
+
+`alerts-bi weekly` is the whole schedule (design section 7.11). One CronJob covers every team
+enrolled in the registry; adding a team never needs a new CronJob. Run it daily - it only
+does what is due, so a missed day heals itself the next:
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: alerts-bi-weekly
+spec:
+  schedule: "30 2 * * *"          # daily, 02:30 UTC; weeks end Monday 00:00 UTC
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 0              # the next day's run is the retry
+      activeDeadlineSeconds: 43200 # every team is assessed by the model; allow for it
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: weekly
+              image: image-registry.openshift-image-registry.svc:5000/alerts-bi/alerts-bi:latest
+              command: ["alerts-bi", "weekly", "--registry", "/etc/alerts-bi/teams.json"]
+              envFrom:
+                - configMapRef: {name: alerts-bi-config}
+                - secretRef: {name: alerts-bi-secrets}
+              volumeMounts:
+                - {name: registry, mountPath: /etc/alerts-bi}
+          volumes:
+            - name: registry
+              configMap: {name: alerts-bi-registry}
+```
+
+`concurrencyPolicy: Forbid` stops Kubernetes starting a second Job, and the command also
+holds a SQL Server application lock, so a manual `alerts-bi weekly` cannot overlap it either.
+The Job **fails** whenever a week was held, failed or blocked; alert on failed Jobs, then run
+`alerts-bi weekly-status` to see why. Scorecard files written under `out/weekly` are lost with
+the pod; they can be re-rendered from SQL at any time with `alerts-bi report --run-id`.
+
+Nothing here has run on a cluster.
+
+### Superseded: one CronJob per team
+
+Before the weekly schedule existed, a `CronJob` per team was the stopgap:
 
 ```yaml
 apiVersion: batch/v1
@@ -454,9 +703,8 @@ spec:
                 - secretRef: {name: alerts-bi-secrets}
 ```
 
-Note this bypasses the surface's run gate entirely, so keep `concurrencyPolicy: Forbid` and
-do not schedule a team's CronJob to overlap a manual run. Scheduling is deferred design work
-(section 7.4) — this is a stopgap, not an approved design.
+Do not use it: it runs at "now" rather than on the Monday boundary, never publishes, and
+bypasses the schedule's lock. It is kept only so an existing deployment can be recognised.
 
 ---
 

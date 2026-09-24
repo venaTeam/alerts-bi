@@ -20,6 +20,7 @@ from src.db.connection import Database
 
 __all__ = [
     "PersistencePayload",
+    "RunIsPublished",
     "find_panel_parse",
     "find_verdicts",
     "get_batch_attempts",
@@ -32,6 +33,10 @@ __all__ = [
     "persist_run",
     "verdict_key",
 ]
+
+
+class RunIsPublished(ValueError):
+    """A run readers can currently see may not be re-persisted underneath them."""
 
 
 def verdict_key(application: str, key_field: str) -> str:
@@ -224,6 +229,18 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
     run_id = payload.run["run_id"]
 
     with db.transaction():
+        # A published week is what readers are looking at; replacing its rows underneath
+        # them would change a review nobody re-published (design section 7.10).
+        if db.query_one(
+            "SELECT 1 AS published FROM review_publications "
+            "WHERE run_id = :run_id AND withdrawn_at IS NULL",
+            {"run_id": run_id},
+        ):
+            raise RunIsPublished(
+                f"run {run_id[:16]} is published as a weekly review; withdraw it with "
+                "`alerts-bi unpublish` before re-persisting it"
+            )
+
         # Replace this run's own rows. ON DELETE CASCADE covers the children, but they are
         # deleted explicitly so the intent survives a future schema change.
         for table in (
@@ -234,12 +251,17 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
             "run_panels",
         ):
             db.execute(f"DELETE FROM {table} WHERE run_id = :run_id", {"run_id": run_id})
-        db.execute("DELETE FROM runs WHERE run_id = :run_id", {"run_id": run_id})
 
-        db.execute(
-            _insert_statement("runs", _RUN_COLUMNS),
-            {name: payload.run.get(name) for name in _RUN_COLUMNS},
-        )
+        # The run row itself is updated in place rather than deleted: a withdrawn
+        # publication still references it, and that audit row must survive a rerun.
+        run_values = {name: payload.run.get(name) for name in _RUN_COLUMNS}
+        if db.query_one("SELECT 1 AS present FROM runs WHERE run_id = :run_id", {"run_id": run_id}):
+            assignments = ", ".join(
+                f"{name} = :{name}" for name in _RUN_COLUMNS if name != "run_id"
+            )
+            db.execute(f"UPDATE runs SET {assignments} WHERE run_id = :run_id", run_values)
+        else:
+            db.execute(_insert_statement("runs", _RUN_COLUMNS), run_values)
 
         db.execute_many(
             _insert_statement("daily_metrics", _DAILY_METRIC_COLUMNS),

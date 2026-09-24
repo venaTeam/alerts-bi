@@ -1,10 +1,9 @@
 {
-  "registry_version": "2026-09-24.1",
-  "effective_date": "2026-09-24",
+  "registry_version": "2026-08-30.1",
+  "effective_date": "2026-08-30",
   "teams": [
     {
       "team_id": "payments-core",
-      "weekly_review": { "enabled": true },
       "display_name": "Payments Core",
       "v1_operators": [],
       "v2_operator": "payments-core",
@@ -18,7 +17,6 @@
     },
     {
       "team_id": "legacy-batch-jobs",
-      "weekly_review": { "enabled": true },
       "display_name": "Legacy Batch Jobs",
       "v1_operators": ["batch-team", "BATCH_JOBS", "batch_svc"],
       "v2_operator": null,
@@ -32,7 +30,6 @@
     },
     {
       "team_id": "fraud-detection",
-      "weekly_review": { "enabled": true },
       "display_name": "Fraud Detection",
       "v1_operators": ["fraud-detection"],
       "v2_operator": null,
@@ -46,7 +43,6 @@
     },
     {
       "team_id": "checkout-api",
-      "weekly_review": { "enabled": true },
       "display_name": "Checkout API",
       "v1_operators": ["checkout", "Checkout-API"],
       "v2_operator": "checkout-api",
@@ -65,7 +61,6 @@
     },
     {
       "team_id": "notifications-svc",
-      "weekly_review": { "enabled": true },
       "display_name": "Notifications Service",
       "v1_operators": ["notifications", "notif-svc", "NOTIF_TEAM"],
       "v2_operator": "notifications-svc",
@@ -84,7 +79,6 @@
     },
     {
       "team_id": "search-platform",
-      "weekly_review": { "enabled": true },
       "display_name": "Search Platform",
       "v1_operators": ["search-platform"],
       "v2_operator": "search-platform",
@@ -103,7 +97,6 @@
     },
     {
       "team_id": "data-pipeline-etl",
-      "weekly_review": { "enabled": true },
       "display_name": "Data Pipeline / ETL",
       "v1_operators": ["data-pipeline", "dp-team", "ETL_TEAM", "pipeline"],
       "v2_operator": "data-pipeline-etl",

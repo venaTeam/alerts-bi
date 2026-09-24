@@ -89,6 +89,8 @@ class TeamEntry:
     v1_operators: tuple[str, ...]
     v2_operator: str | None
     panels: tuple[Panel, ...] = ()
+    #: Enrolled in the automatic weekly review (design section 7.11).
+    weekly_review: bool = False
     #: The entry exactly as it appeared in the registry document, preserved so the stored
     #: snapshot is the supplied text rather than a re-serialization of our own model.
     raw: dict[str, Any] | None = None
@@ -101,6 +103,7 @@ class TeamEntry:
             v1_operators=tuple(raw["v1_operators"]),
             v2_operator=raw["v2_operator"],
             panels=tuple(Panel.from_dict(p) for p in raw.get("panels", [])),
+            weekly_review=bool((raw.get("weekly_review") or {}).get("enabled", False)),
             raw=raw,
         )
 
