@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-08-30 (MVP in Python, merged to `main`)
+**Last updated:** 2026-09-24 (read-only review portal, design section 7.10)
 
 This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
 
@@ -71,7 +71,7 @@ Boundaries settled during implementation are recorded in design section 7.6. Rea
 
 Keep these decisions intact unless the design is explicitly revised:
 
-- Run manually for **one selected team**. Never default to all teams.
+- Every run is for **one selected team**. Never default to all teams. Teams enrolled with `weekly_review.enabled` in the registry are also run automatically by `alerts-bi weekly` (design section 7.11): one ordinary single-team run per team and Monday-to-Monday UTC week, oldest due week first, auto-published when healthy, and after three days held even when not, with a reader note. Nothing routine needs a pod command (design section 7.12): an init container runs `alerts-bi db setup`, and publishing, withdrawing and decisions are also available in the operator admin app (`alerts-bi admin`) - loopback-only behind OpenShift oauth-proxy, POST forms with an HMAC token, every action under the signed-in person's identity.
 - Capture `run_at` once and query the exact UTC half-open window `[run_at - 168h, run_at)`.
 - Validate the versioned team registry before querying. Require at least one source operator, enforce exact case-sensitive operator uniqueness across teams, and store the registry version, complete-file SHA-256, and selected-entry snapshot with the run.
 - Query `appchi-v1` only by the selected team's configured v1 operators and `appchi-v2` only by its configured v2 operator. Elasticsearch is the sole alert source.
@@ -85,7 +85,8 @@ Keep these decisions intact unless the design is explicitly revised:
 - Persist each run and render reports only from committed SQL Server data.
 - A local HTTP surface may start a run and return its scorecard (design section 7.9), built with FastAPI on uvicorn. It is a wrapper over the same `execute_run`/`persist_run` the CLI calls and adds no analysis: one team per run, `run_at` captured once, the same four files, reports rendered only from SQL, and runs serialized so two cannot race to write one deterministic `run_id`. It is not the deferred interactive frontend.
 - Produce one self-contained HTML scorecard and exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
-- Report a single week without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
+- Report a single week in the scorecard and exports without cross-run trends, deltas, baselines, leaderboards, or combined v1/v2 volume conclusions.
+- The read-only review portal (design section 7.10) is the one place that shows history: published weeks only, back to back, plotted without deltas or conclusions, with weekly **total** distinct alerts per schema. It is a separate GET-only FastAPI app over the `portal_*` views and its own `alerts_bi_reader` login; it never imports the pipeline, the run endpoint, Elasticsearch or the model. Publication and human decisions are operator CLI commands only, decisions are append-only and never change `quality_state` or a verdict, and a published run cannot be re-persisted.
 
 ### Rule boundaries that commonly drift
 
@@ -126,10 +127,10 @@ Keep these decisions intact unless the design is explicitly revised:
 
 Do not expand the MVP with deferred features. The approved next steps are:
 
-1. Design and build the interactive frontend over persisted runs and pipeline controls. The HTTP trigger surface of design section 7.9 already exists and is the seam it grows from; it is deliberately not that frontend.
+1. ~~Design and build the interactive frontend over persisted runs.~~ Delivered as the read-only review portal (design section 7.10). The HTTP trigger surface of section 7.9 stays separate and is never mounted on the portal.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
-Plan the unattributed-alert audit, cross-team leaderboard, R6, scheduling/Kubernetes, and other deferred work separately afterward.
+Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. Plan the unattributed-alert audit, cross-team leaderboard, R6, the rest of the Kubernetes work, and other deferred work separately afterward.
 
 ## Local mock environment
 
@@ -187,6 +188,9 @@ Implementation is not complete until the relevant unit, integration, and accepta
 - Deterministic CSV ordering, formula-injection protection, HTML escaping, and the exact output file contract. A new export column or scorecard section must be documented in `docs/outputs.md`; `tests/unit/test_outputs_doc.py` fails until it is.
 - Reconciliation against a hand-reviewed `test/fixtures/expected-results.json` that the production pipeline does not generate.
 - For the HTTP surface: that it refuses a run with no team, an unknown team, an unknown model mode and a second concurrent run; that only the four approved outputs are addressable; and that a scorecard it serves is byte-identical to the one the CLI writes for the same run.
+- For the admin app: no access without the proxy identity, refused forged or cross-site writes, other operators' tokens rejected, and every publish, withdrawal and decision recorded under the signed-in operator.
+- For the weekly schedule: the three-day forced publication with its reader note; Monday-boundary planning, latest-week-only onboarding, catch-up of missed weeks, the health gate (held, then stored behind it), expired weeks published across a gap, the lock, and that only enrolled teams run.
+- For the review portal: publication isolation (only published weeks are visible, overlaps refused), GET-only access and the network allowlist, the reader login's inability to write or read base tables, SQL-only rendering, pagination, alert-detail accuracy, earlier-row evidence versus the latest firing, advisory and readiness labels, append-only decision history that never carries to a new key, and totals that match the stored metrics with v1 and v2 kept apart.
 
 Run formatting, linting, type checks, unit tests, integration tests, migrations, and a clean mock acceptance run when those commands exist. Report commands and results accurately. Never claim live LLM, production Elasticsearch, or full acceptance validation unless it ran successfully.
 

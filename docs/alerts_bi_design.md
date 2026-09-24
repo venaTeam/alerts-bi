@@ -1,7 +1,7 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7)
-**Last updated:** 2026-08-30
+**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12)
+**Last updated:** 2026-09-24
 
 ---
 
@@ -100,6 +100,8 @@ Report the state of one selected team's alerting for the week being measured:
 
 This is a deliberate narrowing of an earlier goal ("comparison against the past, so improvement over time is visible per team"), which is withdrawn. Every number the BI publishes is now a statement about a single week.
 
+**Amended 2026-09-24 for the review portal only (section 7.10).** The scorecard and CSV exports are unchanged and still compare nothing. The read-only review portal shows each team's numbers over time across its **published** weeks, which the standardization team publishes back to back so that no two overlap. It plots the numbers and draws no conclusion from them: no improvement percentage, no "fixed" label on an alert that stopped firing, and no combined v1 + v2 figure.
+
 **Snapshots are still persisted, and that is not a contradiction.** Not comparing is a decision about the *report*; not storing would be a decision about the *data*, and section 3.5 explains why that one is irreversible. Each run appends the selected team's week to a store that outlives the 3-month retention, so any comparison anybody wants later is available to them.
 
 **Volume is an absolute KPI, not a relative one.** A team firing 100 alerts an hour did not have 100 problems in that hour, and that is a volume problem whatever schema they are on. `alerts` against `distinct_alerts` is what separates the two failure modes — 100 rows/hour over 3 distinct keys is one thing stuck, 100 rows/hour over 100 distinct keys is a team genuinely flooding the pipeline.
@@ -194,6 +196,8 @@ Those two numbers together are the clearest statement of the problem this projec
 **Keys do not recur across days** (2026-08-27). Company-wide, the distinct count scales linearly with the window — roughly **210,000 across all teams for 7 days** and 2,700,000 across the full 3-month retention. A single-team run processes only that team's share. Two consequences:
 
 * **`distinct_alerts` is reported as a daily rate, never as a window total.** A 7-day total is 7x a 1-day total for arithmetic reasons alone, so it is not comparable between teams measured over different spans. Every published distinct figure carries its window.
+
+  **Portal exception, decided 2026-09-24 (section 7.10).** The review portal shows the **total distinct alerts in the week** - distinct (`application`, `key_field`) identities in the whole 168-hour window, which is the number of work-list rows. The reason for the daily rate does not apply there: every published review covers exactly 168 hours, so totals are comparable week to week. The scorecard and `daily_metrics.csv` keep the daily rate.
 * **A run classifies every key belonging to the selected team in its window that it has not seen before.** Storing verdicts on `application` + `key_field` assumed a key seen today would be seen again tomorrow; it will not. So within a window the store's job is collapsing that team's rows onto keys. Across runs it does something else useful: because runs are ad hoc and may overlap (section 6), a re-run for a team over days already covered costs almost nothing. See section 5.1.
 
 Worth noting the linkage: message templating was dropped from section 5.1 precisely because key-level dedup looked sufficient. Non-recurring keys are exactly the condition under which a coarser, node-independent cache key would have earned its cost back. That is not reopened here, but it is where to look first if per-alert classification cost ever needs to come down.
@@ -522,7 +526,7 @@ The **delta check** — running the count with and without the suppression predi
 
 ## 6. MVP scope
 
-* **Manual, on-demand, single-team run, performed by our team** (decided 2026-08-27). The operator selects one team for each run. There is no schedule. The run reports that team's **last 7 days**, and that is the only window it ever reports. The window is an exact rolling 168 hours in UTC (decided 2026-08-29): capture `run_at` once, set `window_end = run_at` and `window_start = run_at - 168 hours`, and query the half-open range `@timestamp >= window_start AND @timestamp < window_end`. Gaps between runs and overlaps with a previous run are both acceptable and neither needs handling: nothing is compared across runs (section 2), so an alert appearing in two runs' output is not double counting anything, and a day nobody ran over is simply a day nobody asked about.
+* **Manual, on-demand, single-team run, performed by our team** (decided 2026-08-27). The operator selects one team for each run. There is no schedule. **Amended 2026-09-24 (section 7.11):** teams enrolled in the registry are also run automatically every week, each as its own single-team run over the Monday-to-Monday UTC week; a manual run is unchanged. The run reports that team's **last 7 days**, and that is the only window it ever reports. The window is an exact rolling 168 hours in UTC (decided 2026-08-29): capture `run_at` once, set `window_end = run_at` and `window_start = run_at - 168 hours`, and query the half-open range `@timestamp >= window_start AND @timestamp < window_end`. Gaps between runs and overlaps with a previous run are both acceptable and neither needs handling: nothing is compared across runs (section 2), so an alert appearing in two runs' output is not double counting anything, and a day nobody ran over is simply a day nobody asked about.
 * **Input for a run:** one selected registry entry containing the team's list of v1 `operator` values and its v2 `operator`. The team's panel queries are separate, optional inputs used only to detect which owned alerts the team deliberately filters out of its dashboards (rule 5).
 * **Mock environment first** — built from real examples. Production is on-prem, so the mock is where the pipeline is developed and tested before it is pointed at the real cluster.
 * **Environment and store** (decided 2026-08-27). The tool **can reach ECK directly**, so runs query Elasticsearch live — no export step. Snapshots are appended to a **SQL Server database of our own**: small relational aggregates, the versioned registry joins cleanly, and Grafana already queries SQL Server if panels are ever wanted on top of it.
@@ -601,7 +605,7 @@ The version fields on the run record exist so that a movement in a team's number
 
 ## 7. Open questions
 
-The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, the post-MVP frontend and history backfill, the rule-6 deferrals, a record of what was deliberately left out, the boundaries settled during implementation, and the implementation language.
+The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, history backfill, the rule-6 deferrals, a record of what was deliberately left out, the boundaries settled during implementation, the implementation language, the read-only review portal (section 7.10), and automatic weekly reviews (section 7.11).
 
 ### 7.1 Rule-grouped batching validation (5.1)
 
@@ -633,11 +637,11 @@ Recorded here so they read as choices rather than oversights.
 * **`query` template variables inside suppression predicates** (section 5.2) — counted as unmeasured rather than resolved by executing a team's SQL.
 * **Panel discovery or live variable retrieval via the Grafana API** (section 5.2) — panels and frozen variable definitions are collected by the standardization team instead.
 * **Cross-team leaderboard** (sections 2, 6) — deferred; the MVP produces one independently timed team scorecard per run.
-* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29). The MVP remains a generated self-contained HTML scorecard plus the three approved CSV exports; detailed frontend scope is designed after the MVP. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.9, which records what it deliberately does not do.
+* **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29), **delivered 2026-09-24 as the read-only review portal** (section 7.10). The self-contained HTML scorecard and the three approved CSV exports are unchanged. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.9, which records what it deliberately does not do.
 * **Company-wide attribution audit and `Unattributed` work list** (sections 3.1, 6) — deferred because it requires enumerating operators across all alerts, which conflicts with the MVP's team-filtered queries. The future audit enumerates every operator/application value, subtracts all registered operators and reports the remainder with volumes; application may suggest an owner but never assigns one automatically.
 * **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch.
 * **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards.
-* **Any comparison between runs** (section 2) — no trends, deltas, baselines or improvement percentages. The tool reports one week; people compare.
+* **Any comparison between runs** (section 2) — no trends, deltas, baselines or improvement percentages in the scorecard or the exports. The tool reports one week; people compare. **Amended 2026-09-24:** the review portal plots each team's published weeks over time (section 7.10), still with no delta, percentage or conclusion.
 * **Sampling and error bars on `unassessed`** (section 5.1) — withdrawn with the classification budget. Under exhaustive coverage `unassessed` is enumerable, so there is nothing left to estimate.
 * **One verdict per alert rule** (section 5.1) — grouping is an input-side optimisation only. Collapsing a rule to a single classification was considered and rejected: alerts under one rule can differ in `message`, `node_name` or `environment` in ways that matter, and the work list is built from alerts.
 
@@ -715,3 +719,80 @@ It is built on FastAPI over uvicorn (2026-08-30), as the `alerts_bi.api` package
 **There is no authentication**, and every request triggers real Elasticsearch reads and real SQL writes. The listener therefore binds to loopback by default. Widening it with `--host` exposes an unauthenticated write endpoint to that network, and the command line says so when asked to.
 
 `GET /runs/latest?team=` is one such caller. Building the surface surfaced one pre-existing defect, in how "the team's most recent run" was ordered. It is not a property of this surface — `alerts-bi report --team` was equally affected — so it is recorded with the other settled boundaries in section 7.6.
+
+### 7.10 Read-only review portal
+
+**The first post-MVP step is a read-only review portal** (decided 2026-09-24, at the product owner's direction). The standardization team runs the analysis one team at a time, as before, and decides when a completed run becomes a published weekly review. Any internal company user can then open the portal, with no login, to see every team's published reviews, follow them over time, and inspect individual alerts. Readers cannot start runs, publish reviews, record decisions or change data.
+
+Four states are kept distinct and never inferred from one another:
+
+* **Run completed** - the pipeline finished and its rows are committed. Operator-facing only; the portal never shows runs.
+* **Review published** - an operator explicitly chose to show that run's week to readers. Only published weeks, and the review note written at publication, appear in the portal.
+* **Machine finding** - a deterministic rule match, a v2 readiness gap, or an advisory model verdict, exactly as the run stored it.
+* **Human decision** - an operator's `pending`, `confirmed` or `dismissed` call on one finding, with a note and a timestamp.
+
+**Publication is back to back.** Runs are managed so that published weeks never overlap. Publishing refuses a run whose 168-hour window overlaps any current publication of the same team. It also refuses one that leaves a gap after that team's latest published week, unless the operator passes `--allow-gap` explicitly. Republishing the same week with a different run needs `--replace`, which withdraws the earlier publication rather than deleting it. A publication can be withdrawn with a reason. Withdrawn rows are kept for audit and never shown. A run that is currently published cannot be re-persisted underneath its readers: the pipeline refuses, and the run has to be withdrawn first.
+
+**What a reader sees is alert data, not service internals.** The portal shows the week covered, when it was published, the review note, the alert fields, the findings with their evidence, and the decisions. It shows no run id, registry, ruleset, prompt or model version, run timing or document hash. Those stay in the scorecard and the operator CLI, where the standardization team needs them.
+
+**Volume in the portal is a weekly total.** For each schema separately it shows **alert events in the week** (every firing, repeats included, `sum(daily_metrics.alerts)`) and **distinct alerts in the week** (distinct `application` + `key_field` identities in the 168-hour window, which equals the number of work-list rows for that schema). This amends section 3.3 for the portal only; the scorecard and the CSV exports keep the per-day distinct rate. v1 and v2 are never added together and no cross-schema or migration percentage is shown.
+
+**History is plotted, not interpreted.** Each schema has its own chart of distinct alerts and of events, one point per published week, dated by the week's end. A gap in publication breaks the line instead of joining across it. The portal states no delta, improvement percentage or "fixed" status. An alert that stops appearing may have been deleted, silenced or moved to v2, and this tool cannot tell whether monitoring coverage was kept (section 3.4).
+
+**Alert detail comes only from stored rows.** The work list is one row per identity, ordered: rule findings, then advisory model findings, then alerts needing a decision, then readiness-only gaps, and within each group by event count. It leads with the alert's latest message and source, followed by a plain-language reason, and is paginated in SQL. The detail page shows the latest representative event's message, application, component, schema, severity, environment, provider, impact and runbook where the schema has them, and first and last seen times and event count. It also shows every finding:
+
+* A **rule finding** shows why the rule matched, the matched-row count, and the stored sample. The sample comes from one matching event and may be older than the latest event, so the two are labelled separately.
+* An **advisory model finding** shows the cited principle, the confidence and the model's original justification.
+* A **`needs_review`** finding states the specific decision a person has to make.
+* **v2 readiness gaps** are shown in their own section, apart from quality.
+
+`key_field` and rule ids sit in a collapsed technical area. The portal never queries Elasticsearch. It reads the stored representative document through database views that extract only the fields above. All alert text is HTML-escaped, and a link is rendered only for an absolute `http(s)` URL.
+
+**Human decisions are a separate, append-only record.** A decision attaches to one finding on one exact identity (`alert_schema`, `application`, `key_field`, finding id), is made against a published week, and is never updated or deleted: a later decision is a new row, and readers see the whole history. It never alters `quality_state` or the stored model verdict. Because it is keyed on the exact identity, it does not carry over to the new v2 key minted when a team enriches an alert (section 3.7).
+
+**Access is split by surface and by credential.**
+
+* **The reader surface** (`alerts-bi portal`) is a separate FastAPI application with GET routes only. Any other method is refused, and it contains no route and no import path that reaches the run pipeline, the run endpoint of section 7.9, Elasticsearch or the model. It connects with its own SQL login, a member of the `alerts_bi_reader` database role, which may `SELECT` only from the `portal_*` views. Those views expose published weeks only and omit complete source documents, model request payloads and batch audit rows. The portal refuses to start if its login can write, or can read the base tables. It binds to loopback by default and admits only client addresses on a configured allowlist, private address ranges by default, so that it is reachable from the company network and not beyond it. There are no viewer logins.
+* **The operator surface** is the admin web app of section 7.12, and the command line with the same owning credential: `publish`, `unpublish`, `publications`, `decide`, `decisions` and `db grant-reader`. The unauthenticated run endpoint of section 7.9 stays on its own loopback listener and is never mounted on the portal.
+
+Scope is otherwise unchanged. A run still names one team, `run_at` is still captured once, and the scorecard and the three CSV exports are unchanged. Nothing here ranks teams against each other: the directory lists teams alphabetically.
+
+### 7.11 Automatic weekly reviews
+
+**Reviews run and publish themselves every week** (decided 2026-09-24, at the product owner's direction), and adding a team to the registry is all it takes to start them.
+
+**Every week is Monday 00:00 UTC to the next Monday 00:00 UTC, for every team.** `run_at` is always that Monday boundary, never the moment a scheduler started, so a run that starts late still covers exactly the right week and every team's weeks line up. Each week is still an ordinary single-team run (section 6): the scheduler is a loop over enrolled teams, one at a time, and never an all-teams run.
+
+**Enrolment is one registry field.** A team entry carries `"weekly_review": {"enabled": true}`; absent means not enrolled. Adding a team is: add its entry with its operators (and panels, if any) and the flag, bump `registry_version`, validate with `alerts-bi registry check`, deploy the file. The next scheduled invocation reviews the team's **most recent completed week only**; there is no backfill of earlier weeks.
+
+**`alerts-bi weekly` is the whole schedule.** It is idempotent and meant to be invoked daily - on OpenShift by a `CronJob` - so a missed invocation heals itself. For each enrolled team it works out the due weeks: every completed Monday week after the team's latest published one, oldest first. It runs and persists each, and publishes each automatically **only when healthy** (the run completed and the model assessed every alert it was asked about) and only while every earlier due week was published.
+
+* An unhealthy week is **held** and retried on every invocation. Every due week after it is still run and **stored**, so no data is lost to retention, but it is not published until the held week is resolved - by a healthy retry, by an operator, or automatically: **a week still unhealthy three days after it was first held is published anyway** (decided 2026-09-24), with a review note telling readers how many alerts the automated review could not assess. The portal already shows those alerts as "Not reviewed", and rule findings are complete, so nothing is passed off as examined. The three days are measured on the schedule's own clock from the first time it held that week.
+* A week whose start is more than 84 days old is **expired**: its data is at or past Elasticsearch's three-month retention, so it is not run, and the next week is published across the gap. The portal's chart shows the gap rather than an invented quiet week.
+* A team whose latest published week does not end on a Monday boundary (published by hand before the schedule existed) is **blocked** until an operator aligns it.
+* A failure for one team never stops the others. Every outcome - published, held, stored, failed, blocked, expired - is appended to `weekly_review_log`, which only the operator CLI reads (`alerts-bi weekly-status`). The command exits non-zero when any week needs a person, so the CronJob shows as failed.
+* Two invocations never overlap: the whole run holds a SQL Server application lock, and a second one is refused.
+
+Scheduled publications are recorded as published by `weekly-schedule`. Manual `run` and `publish` still work and follow the section 7.10 rules; a manual week that is not on the Monday boundary will block the schedule for that team, which is why the schedule reports it rather than guessing.
+
+**What this costs.** Every enrolled team is assessed by the model every week, which is the company-wide load section 5.1 estimates and section 7.2 has not yet measured. Runs are sequential, so a large fleet can take hours; the CronJob's `activeDeadlineSeconds` has to allow for it. Publishing without a person removes a human check before readers see a week; the health gate and `unpublish` are what stand in for it.
+
+Scheduling is otherwise unchanged from the design: the CronJob is the only trigger, nothing is scheduled on a developer machine, and none of it has run on a cluster yet.
+
+### 7.12 Operating without pod commands
+
+**Nothing routine needs a person to run a command** (decided 2026-09-24, at the product owner's direction). The deployment is applied by hand today and no pipeline is assumed, so the automation lives in the pods themselves:
+
+* **Schema and the portal login** - the application Deployment has an init container running `alerts-bi db setup` on every rollout: migrate, then create or update the portal's read-only login from its Secret. It is idempotent, so a rollout with nothing to change does nothing.
+* **Weekly reviews** - the CronJob of section 7.11. A week the model cannot assess is retried daily and published automatically after three days.
+* **Adding a team** - an edit to the registry ConfigMap; the next daily run picks it up.
+
+**What still needs judgment gets a web screen instead of a pod shell: the operator admin app** (`alerts-bi admin`). It is a third application, beside the reader portal and the trigger surface, for the standardization team only:
+
+* It shows every registered team, whether it is on the schedule, its latest published week and the schedule's last outcome; every run of a team with its publication state; each run's full scorecard, rendered from SQL; and a published week's findings with their decision history.
+* It lets an operator publish a run (with a note, `replace` or `allow gap`), withdraw a published week with a reason, and record a decision on a finding. Each action calls the same `src.review` functions as the command line and follows the section 7.10 rules exactly.
+* **Every action is recorded under the signed-in person's identity**, from the login proxy.
+
+**Access.** The app has no login of its own. It sits behind OpenShift's `oauth-proxy`, which signs the person in and admits only the standardization team (a SubjectAccessReview that only that group's role satisfies), and passes their name in `X-Forwarded-User`. The app trusts that header, which is safe only because nothing else can reach the app: it binds to loopback and refuses any other address, and the proxy is a sidecar sharing the pod's loopback. Every write is a POST carrying an HMAC token of the user and date under `ADMIN_SECRET`, and a browser-declared cross-site request is refused, so a page elsewhere on the network cannot act through a signed-in operator's browser. It runs with the owning SQL credential, has its own internal-only Route, and is never mounted on the portal or the trigger surface.
+
+No alerting was added: problems surface as failed CronJob runs and on the admin app's team list.

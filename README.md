@@ -8,9 +8,11 @@ deterministic rule set, measures how much of its own inventory the team hides fr
 dashboards, asks an on-prem model about everything the rules could not decide, persists the
 result to SQL Server, and renders a scorecard from the stored rows.
 
-**The tool reports numbers; people draw conclusions.** Every figure is a statement about a
-single week. There is no comparison against a previous run, no trend, no baseline and no
-cross-team leaderboard — by design.
+**The tool reports numbers; people draw conclusions.** Every figure in the scorecard is a
+statement about a single week. There is no comparison against a previous run, no trend, no
+baseline and no cross-team leaderboard — by design. The read-only
+[review portal](#the-review-portal) shows each team's published weeks over time, still
+without deltas or conclusions.
 
 [`docs/alerts_bi_design.md`](docs/alerts_bi_design.md) is the canonical specification.
 [`docs/outputs.md`](docs/outputs.md) explains what a run emits, and
@@ -95,6 +97,15 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 | `alerts-bi db reset-test` | Drop and recreate **only** the configured disposable test database |
 | `alerts-bi verify-acceptance` | Compare persisted rows and CSVs against the hand-reviewed manifest |
 | `alerts-bi serve` | Serve the HTTP trigger surface (see below) |
+| `alerts-bi portal` | Serve the read-only review portal (see below) |
+| `alerts-bi publish`, `unpublish`, `publications` | Publish a completed run as a team's weekly review, withdraw one, list them |
+| `alerts-bi decide`, `decisions` | Record and list human decisions on findings |
+| `alerts-bi db grant-reader` | Create or update the portal's read-only SQL login |
+| `alerts-bi weekly` | Run and publish every due Monday week of every enrolled team |
+| `alerts-bi weekly-status` | Each enrolled team's latest published week and last schedule outcome |
+| `alerts-bi registry check` | Validate the team registry before deploying an edit |
+| `alerts-bi db setup` | Migrate, then create or update the portal login; idempotent, for an init container |
+| `alerts-bi admin` | Serve the operator admin app on loopback, behind a login proxy |
 
 ### `run` options
 
@@ -171,6 +182,192 @@ endpoint to the network.
 
 ---
 
+## Automatic weekly reviews
+
+Enrolled teams are reviewed and published every week without anyone running them (design
+section 7.11). Every team's week is **Monday 00:00 UTC to Monday 00:00 UTC**.
+
+### Adding a team
+
+1. Add its entry to `config/teams.json` - operators, optional panels - with
+   `"weekly_review": { "enabled": true }`, and bump `registry_version`.
+2. Validate the file:
+
+```bash
+uv run alerts-bi registry check
+```
+
+3. Deploy it. The next scheduled run reviews the team's most recent completed week and
+   publishes it; from then on every week follows. Earlier weeks are not backfilled.
+
+### What runs
+
+```bash
+uv run alerts-bi weekly
+```
+
+Run it as often as you like - on OpenShift a CronJob runs it daily. It only does what is due:
+
+- each enrolled team's completed Monday weeks since its latest published one, oldest first;
+- a week is **published** automatically when it is healthy (the model assessed every alert);
+- an unhealthy week is **held** and retried every day; the healthy weeks after it are run and
+  **stored**. If it is still unhealthy three days after it was first held, it is **published
+  anyway** with a note to readers saying how many alerts the automated review could not assess;
+- a week older than 84 days is **expired** - its data is past retention - and the next week is
+  published across the gap;
+- a team whose published history is not on the Monday boundary is **blocked** until you align
+  it.
+
+It exits non-zero whenever something needs a person. See where every team stands:
+
+```bash
+uv run alerts-bi weekly-status
+```
+
+Resolve a held week by publishing its run yourself after checking it, or skip it by
+publishing the next week with `--allow-gap`. `--dry-run` shows what is due without running
+anything, `--team` narrows to enrolled teams, and `--as-of` fixes "now" for the mock:
+
+```bash
+uv run alerts-bi weekly --as-of 2026-08-25T18:00:00Z --fake-llm
+```
+
+---
+
+## The operator admin app
+
+A web screen for the standardization team, so nothing needs a command on a pod (design
+section 7.12). It lists every team with its schedule status, every run with its publication
+state and full scorecard, and a published week's findings. It can publish a run, withdraw a
+week, and record decisions - each recorded under the signed-in person's name.
+
+It has no login of its own: in OpenShift it sits behind the `oauth-proxy` sidecar, which signs
+people in, admits only the standardization team, and passes their name in
+`X-Forwarded-User`. It binds to loopback only, so the proxy is the only way in. It needs
+`ADMIN_SECRET` (32+ characters), which signs its forms.
+
+Locally, without a proxy:
+
+```bash
+ADMIN_SECRET=local-development-secret-0123456789 uv run alerts-bi admin --dev-user yourname
+```
+
+Then open `http://127.0.0.1:8200`. `--dev-user` acts as that name for every request; never
+use it anywhere shared.
+
+---
+
+## The review portal
+
+A separate, **read-only** web surface where anyone on the company network can see every
+team's published weekly reviews, follow them over time, and open individual alerts
+(design section 7.10). It has no login, and it cannot start runs, publish, record decisions
+or change anything.
+
+Four things are kept apart:
+
+| | Who | Visible in the portal |
+|---|---|---|
+| **Run completed** | the pipeline | never - runs are operator-facing |
+| **Review published** | an operator, `alerts-bi publish` | yes; only published weeks exist there |
+| **Machine finding** | the rules and the advisory model | yes, with its stored evidence |
+| **Human decision** | an operator, `alerts-bi decide` | yes, as a history beside the finding |
+
+### Setting it up locally
+
+The portal reads through its own SQL login, which can `SELECT` from four `portal_*` views
+and nothing else. Put a reader password in `.env`, with the same complexity rules as the SA
+password:
+
+```
+PORTAL_SQL_USER=alerts_bi_portal
+PORTAL_SQL_PASSWORD=Change_me_reader_1
+```
+
+Apply migration 002 and create the login:
+
+```bash
+uv run alerts-bi db migrate
+```
+
+```bash
+uv run alerts-bi db grant-reader
+```
+
+Run a team, then publish that run as its weekly review:
+
+```bash
+uv run alerts-bi run --team notifications-svc --run-at 2026-08-25T18:00:00Z --fake-llm
+```
+
+```bash
+uv run alerts-bi publish --run-id <run id printed above> --note "First review"
+```
+
+Start the portal and open `http://127.0.0.1:8100`:
+
+```bash
+uv run alerts-bi portal
+```
+
+It refuses to start if its login can write, read a base table, or is missing the views.
+
+### Operator commands
+
+These run with the owning credential (`SQL_USER`) and are the only way to publish or decide.
+
+| Command | What it does |
+|---|---|
+| `alerts-bi publish --run-id <id> [--note ...]` | Publish a completed run as its team's weekly review |
+| `alerts-bi publish ... --replace` | Publish in place of the run already published for exactly that week; the earlier publication is withdrawn, not deleted |
+| `alerts-bi publish ... --allow-gap` | Publish a week that is not adjacent to the team's published weeks |
+| `alerts-bi unpublish --run-id <id> --reason ...` | Withdraw a published week; readers stop seeing it |
+| `alerts-bi publications --team <id>` | List a team's publications, current and withdrawn |
+| `alerts-bi decide --team <id> --week YYYY-MM-DD --schema v1 --application <a> --key-field <k> --finding R1 --state confirmed --note ...` | Append a human decision on one finding |
+| `alerts-bi decisions --team <id>` | List a team's decision history |
+| `alerts-bi db grant-reader` | Create or update the portal's read-only login (`PORTAL_SQL_PASSWORD`) |
+
+Publishing refuses a week that overlaps a published one, always. Weeks are meant to be back
+to back: run each team with `--run-at` set to the end of its previous published week. A
+decision is recorded against a published week and keyed on the exact alert identity, so it
+never carries over to the new v2 key a team mints by enriching an alert. Decisions are
+append-only; a changed mind is a new decision.
+
+A run that is currently published cannot be re-persisted underneath its readers: `run`
+refuses, and the week has to be withdrawn first.
+
+### What readers see
+
+- A **team directory** with each team's latest published week, listed alphabetically.
+- For each team, a **week picker**, the week's migration phase and readiness, and for v1 and
+  v2 separately the **distinct alerts in the week** and the **alert events in the week**.
+  These are weekly totals, not the scorecard's per-day rate, and v1 and v2 are never added
+  together.
+- **History charts**: one point per published week, one chart per schema and measure. No
+  deltas, percentages or "fixed" labels.
+- A **work list**, paginated, leading with each alert's latest message and a plain-language
+  reason. Opening an alert shows its latest firing, every finding with its stored
+  evidence (an older matching firing is labelled apart from the latest one), advisory model
+  findings with their original reasoning, the decision a person has to make for an
+  uncertain one, v2 readiness gaps in their own section, and the decision history.
+
+It never shows a run id, registry, ruleset, prompt or model version. The scorecard keeps
+those.
+
+### Network exposure
+
+The portal binds to `127.0.0.1:8100` by default (`PORTAL_HOST`, `PORTAL_PORT`). It admits
+only clients on `PORTAL_ALLOWED_NETWORKS` - loopback and the private address ranges by
+default - and answers anyone else with `403`. Behind a reverse proxy the client address is
+the proxy's, so narrow the allowlist to the proxy there. Every page carries a
+Content-Security-Policy that forbids script, framing and inline styles; the pages contain no
+script at all.
+
+Never mount the trigger surface of `alerts-bi serve` on the portal's listener: it is a
+separate application with an unauthenticated write endpoint.
+
+---
+
 ## What a run produces
 
 Exactly four files, and no others:
@@ -230,6 +427,10 @@ never committed.
 | `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
 | `API_HOST`, `API_PORT` | Where `alerts-bi serve` listens; `--host` / `--port` override |
 | `API_REGISTRY_PATH`, `API_DATABASE`, `API_OUT_DIR` | Surface overrides for the registry, target database and report directory |
+| `PORTAL_SQL_USER`, `PORTAL_SQL_PASSWORD` | The portal's own read-only login; never the owning credential |
+| `PORTAL_HOST`, `PORTAL_PORT` | Where `alerts-bi portal` listens; default `127.0.0.1:8100` |
+| `PORTAL_ALLOWED_NETWORKS` | Comma-separated client networks the portal admits; default loopback and private ranges |
+| `PORTAL_DATABASE`, `PORTAL_PAGE_SIZE` | Database the portal reads (default `SQL_DATABASE`) and work-list page size |
 
 For an on-prem cluster with a private CA, set `ES_CA_CERT` to the bundle path; the
 Elasticsearch Python client takes it directly.
@@ -420,10 +621,10 @@ flow document fixes.
 
 ## Not in the MVP
 
-Deliberately, and recorded in design section 7.4: any comparison between runs, a cross-team
-leaderboard, R6 spam detection, historical backfill, the interactive frontend, the
+Deliberately, and recorded in design section 7.4: any comparison between runs in the
+scorecard or exports, a cross-team leaderboard, R6 spam detection, historical backfill, the
 company-wide unattributed-alert audit, panel discovery or live Grafana variable retrieval,
 and a BI-side migration-invariant alert identity.
 
-The approved next steps, in order: the interactive frontend over persisted runs, then
-deterministic historical backfill oldest-first with no LLM calls.
+The first post-MVP step, the frontend, is delivered as the read-only review portal (design
+section 7.10). The next is deterministic historical backfill oldest-first with no LLM calls.

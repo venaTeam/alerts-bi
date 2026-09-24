@@ -25,6 +25,7 @@ from src.config.app import AppConfig, load_config
 from src.config.elasticsearch import EsConfig, load_es_config
 from src.config.env import load_dotenv, read_bool, read_int, read_str
 from src.config.llm import MAX_BATCH_SIZE_CEILING, LlmConfig, load_llm_config
+from src.config.portal import PortalSettings, load_portal_settings
 from src.config.sql import SqlConfig, load_sql_config
 
 __all__ = [
@@ -35,12 +36,14 @@ __all__ = [
     "AppConfig",
     "EsConfig",
     "LlmConfig",
+    "PortalSettings",
     "SqlConfig",
     "load_api_settings",
     "load_config",
     "load_dotenv",
     "load_es_config",
     "load_llm_config",
+    "load_portal_settings",
     "load_sql_config",
     "read_bool",
     "read_int",

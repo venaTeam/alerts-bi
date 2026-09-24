@@ -1,6 +1,6 @@
 # What a run produces
 
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-24
 
 A run writes exactly four files and no others: `scorecard.html`, `daily_metrics.csv`,
 `rule_counts.csv`, `alert_worklist.csv`. This document says what is in each of them, column
@@ -271,13 +271,49 @@ SQL and nowhere else.
 
 ---
 
-## 10. What these outputs deliberately do not say
+## 10. The review portal
+
+The read-only portal (design section 7.10) is not a run output: it renders **published**
+weeks from the store, through four views its own SQL login can read. It is described here
+because its numbers are the ones most easily misread against the scorecard's.
+
+| View | One row per | Holds |
+|---|---|---|
+| `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness |
+| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention |
+| `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, and `attention_rank` |
+| `portal_decisions` | human decision made on a published week | finding id, `pending` / `confirmed` / `dismissed`, note, time, operator |
+
+**The portal's distinct count is a weekly total, and the scorecard's is a daily rate.**
+Portal: distinct `application + key_field` identities in the whole 168-hour window, which is
+the number of work-list rows for that schema. Scorecard and `daily_metrics.csv`:
+`sum(daily distinct) / 7`. Both are correct; they answer different questions. The total is
+comparable week to week only because every published week is exactly 168 hours.
+
+**Events** in the portal are `sum(daily_metrics.alerts)` for the schema, the same number as
+the scorecard's volume row. v1 and v2 are never added together.
+
+**Work-list order** (`attention_rank`): `0` rule finding, `1` advisory model finding, `2`
+needs a decision, `3` readiness gap only, `4` nothing to do. Within a rank, by event count.
+
+**A human decision never changes a machine finding.** `quality_state` and the model's
+verdict stay exactly as the run stored them; the decision is a separate, append-only row
+keyed on the exact identity and finding id.
+
+What the views never expose: the complete source document (`representative_doc`), model
+request payloads, batch audit rows, the registry snapshot, or any week that is not
+currently published.
+
+---
+
+## 11. What these outputs deliberately do not say
 
 Recorded so they read as choices, not omissions. The full list with reasoning is design
 section 7.4.
 
-* **No comparison between runs** — no trends, deltas, baselines or improvement percentages.
-  The tool reports one week; people compare.
+* **No comparison between runs** in the scorecard or the exports — no trends, deltas,
+  baselines or improvement percentages. The tool reports one week; people compare. The
+  review portal plots published weeks over time (section 10), still with no deltas.
 * **No cross-team leaderboard.** Runs are independently timed, so their windows are not the
   same week.
 * **No combined v1 + v2 volume conclusion.** The two schemas' row counts are not

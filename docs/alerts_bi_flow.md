@@ -185,6 +185,14 @@ The HTML scorecard and CSV exports are generated from SQL Server, not recomputed
 
 The self-contained HTML also shows run/version metadata, supplied panel IDs, rule/principle breakdown, and the limitations of the single-week snapshot. It contains no cross-run comparison, leaderboard, or combined v1/v2 volume conclusion. The three exports are exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`. Their ordering is deterministic; CSV retains full values and neutralizes spreadsheet-formula prefixes, while the HTML escapes all alert content. An interactive frontend is post-MVP.
 
+## 10. Publish and read (design section 7.10)
+
+A completed run is not yet visible to anyone outside the standardization team. An operator publishes it as the team's weekly review with `alerts-bi publish`, which refuses a week that overlaps a published one and, unless told otherwise, one that leaves a gap. The read-only review portal then shows it to internal readers from the `portal_*` views, over its own read-only SQL login: weekly totals per schema, history across published weeks, the work list and each alert's stored evidence. Operators record human decisions on findings with `alerts-bi decide`; they sit beside the machine findings and never change them.
+
+## 11. The weekly schedule (design section 7.11)
+
+`alerts-bi weekly`, invoked daily, runs steps 1-9 for every team enrolled in the registry, once per completed Monday-to-Monday UTC week that has not been published yet, oldest first, with `run_at` set to the Monday boundary. It then performs step 10's publication itself when the run is healthy. An unhealthy week is held for an operator and the weeks after it are stored but not published; a newly enrolled team starts at its most recent completed week.
+
 ## After the MVP
 
-The first next step is an interactive frontend over the persisted runs and pipeline controls. The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, a cross-team leaderboard, and the spam/noise rule R6.
+The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, a cross-team leaderboard, and the spam/noise rule R6.

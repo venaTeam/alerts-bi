@@ -50,6 +50,17 @@
           "type": "array",
           "items": { "$ref": "#/$defs/panel" },
           "description": "Optional supplied Grafana panel queries, used only for suppression detection (design section 5.2). Never for ownership."
+        },
+        "weekly_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true, `alerts-bi weekly` runs and publishes this team's review for every Monday-to-Monday UTC week (design section 7.11). Absent means false."
+            }
+          }
         }
       }
     },

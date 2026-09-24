@@ -286,6 +286,16 @@ The MVP is complete when:
 
 Build the interactive frontend first, using the persisted run data and pipeline controls; define its detailed product scope after the MVP rather than expanding the current build.
 
+**Delivered 2026-09-24 as the read-only review portal** (design section 7.10):
+
+- Migration `002_review_portal`: `review_publications`, the append-only `finding_decisions`, the four `portal_*` views and the `alerts_bi_reader` role.
+- `src.review`: publication rules (no overlap; a gap needs `--allow-gap`; `--replace` withdraws rather than deletes) and the decision record. Operator CLI only.
+- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, a script-free Content-Security-Policy, and its own read-only SQL login that it verifies at startup.
+- `persist_run` refuses to replace a run that is currently published.
+- Tests: publication rules, the reader credential's limits, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
+
 Implement deterministic historical backfill second. Process the oldest period first, reuse the same registry/ruleset versioning and persistence grain, and make no LLM calls. Track completion so ranges can be resumed safely.
 
-After backfill, separately plan the company-wide unattributed-alert audit, cross-team leaderboard, R6 spam analysis, and any scheduled or Kubernetes deployment work.
+**Automatic weekly reviews delivered 2026-09-24** (design section 7.11): a `weekly_review.enabled` registry flag, `src.weekly` (pure week planning plus a locked, idempotent runner with a health gate), migration `003_weekly_schedule` for the outcome log, and `alerts-bi weekly`, `weekly-status` and `registry check`. The OpenShift CronJob is documented, not proven.
+
+After backfill, separately plan the company-wide unattributed-alert audit, cross-team leaderboard, R6 spam analysis, and the remaining Kubernetes deployment work.
