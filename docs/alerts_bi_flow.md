@@ -202,7 +202,7 @@ The self-contained HTML also shows run/version metadata, supplied panel IDs, rul
 
 ## 10. Publish and read (design section 7.10)
 
-A completed run is not yet visible to anyone outside the standardization team. An operator publishes it as the team's weekly review with `alerts-bi publish`, which refuses a week that overlaps a published one and, unless told otherwise, one that leaves a gap. The read-only review portal then shows it to internal readers from the `portal_*` views, over its own read-only SQL login: weekly totals per schema, history across published weeks, the work list and each alert's stored evidence. Operators record human decisions on findings with `alerts-bi decide`; they sit beside the machine findings and never change them.
+A completed run is not yet visible to anyone outside the standardization team. An operator publishes it as the team's weekly review with `alerts-bi publish`, which refuses a week that overlaps a published one and, unless told otherwise, one that leaves a gap. The GET-only review portal then shows it to internal readers from the `portal_*` views using the same SQL database and login as the pipeline: weekly totals per schema, history across published weeks, the work list and each alert's stored evidence. Operators record human decisions on findings with `alerts-bi decide`; they sit beside the machine findings and never change them.
 
 ## 11. The weekly schedule (design section 7.11)
 

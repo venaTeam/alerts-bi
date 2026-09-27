@@ -87,16 +87,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup = db_subparsers.add_parser(
         "setup",
-        help="migrate, then create or update the portal login if PORTAL_SQL_PASSWORD is set; "
-        "idempotent, for an init container",
+        help="apply pending migrations; idempotent, for an init container",
     )
     setup.add_argument("--database", help="target database; default SQL_DATABASE")
     grant = db_subparsers.add_parser(
         "grant-reader",
-        help="create or update the portal's read-only SQL login (password: PORTAL_SQL_PASSWORD)",
+        help="optional legacy utility: create a restricted portal-view login",
     )
     grant.add_argument("--database", help="target database; default SQL_DATABASE")
-    grant.add_argument("--login", help="reader login; default PORTAL_SQL_USER or alerts_bi_portal")
+    grant.add_argument("--login", help="login; default PORTAL_SQL_USER or alerts_bi_portal")
 
     # ------------------------------------------------ operator: publication and review
     publish = subparsers.add_parser(
@@ -202,7 +201,6 @@ def build_parser() -> argparse.ArgumentParser:
     portal = subparsers.add_parser("portal", help="serve the read-only review portal")
     portal.add_argument("--host", help="bind address; PORTAL_HOST, else loopback")
     portal.add_argument("--port", type=int, help="bind port; PORTAL_PORT, else 8100")
-    portal.add_argument("--database", help="database to read; PORTAL_DATABASE, else SQL_DATABASE")
 
     api = subparsers.add_parser("serve", help="serve the HTTP trigger surface")
     api.add_argument(
@@ -351,32 +349,20 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
         return 0
 
     if args.db_command == "setup":
-        from src.config.env import read_str
-        from src.config.portal import DEFAULT_READER_LOGIN
-        from src.db.reader import grant_reader
-
         database = _target_database(args, config)
         applied, _ = migrate_database(config.sql, database)
         for version in applied:
             sys.stdout.write(f"applied {version}\n")
         if not applied:
             sys.stdout.write("database is up to date\n")
-        password = read_str("PORTAL_SQL_PASSWORD")
-        if password:
-            login = read_str("PORTAL_SQL_USER", DEFAULT_READER_LOGIN)
-            grant_reader(config.sql, database, login, password)
-            sys.stdout.write(f"{login} can read the portal views of {database}, and nothing else\n")
-        else:
-            sys.stdout.write("PORTAL_SQL_PASSWORD is not set; the portal login was left as it is\n")
         return 0
 
     if args.db_command == "grant-reader":
         from src.config.env import read_str
-        from src.config.portal import DEFAULT_READER_LOGIN
         from src.db.reader import grant_reader
 
         database = _target_database(args, config)
-        login = args.login or read_str("PORTAL_SQL_USER", DEFAULT_READER_LOGIN)
+        login = args.login or read_str("PORTAL_SQL_USER", "alerts_bi_portal")
         # The password comes from the environment only, never a flag, so it stays out of
         # shell history and process listings.
         grant_reader(config.sql, database, login, read_str("PORTAL_SQL_PASSWORD"))
@@ -644,19 +630,15 @@ def _command_admin(args: argparse.Namespace, config: AppConfig) -> int:
 
 def _command_portal(args: argparse.Namespace, config: AppConfig) -> int:
     from src.config import load_portal_settings
-    from src.portal.server import PortalRefused, serve
+    from src.portal.server import serve
 
-    settings = load_portal_settings(config, host=args.host, port=args.port, database=args.database)
+    settings = load_portal_settings(config, host=args.host, port=args.port)
     sys.stdout.write(
         f"alerts-bi portal on http://{settings.host}:{settings.port}  (ctrl-c to stop)\n"
         f"  reading {settings.database} as {settings.sql.user}; admitting "
         f"{', '.join(settings.allowed_networks)}\n"
     )
-    try:
-        serve(settings)
-    except PortalRefused as exc:
-        sys.stderr.write(f"portal not started: {exc}\n")
-        return 1
+    serve(settings)
     return 0
 
 

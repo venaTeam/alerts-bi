@@ -1,7 +1,7 @@
 # Alerts BI — Design Document
 
 **Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13)
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-27
 
 ---
 
@@ -750,10 +750,11 @@ Four states are kept distinct and never inferred from one another:
 
 **Human decisions are a separate, append-only record.** A decision attaches to one finding on one exact identity (`alert_schema`, `application`, `key_field`, finding id), is made against a published week, and is never updated or deleted: a later decision is a new row, and readers see the whole history. It never alters `quality_state` or the stored model verdict. Because it is keyed on the exact identity, it does not carry over to the new v2 key minted when a team enriches an alert (section 3.7).
 
-**Access is split by surface and by credential.**
+**Access is split by surface.**
 
-* **The reader surface** (`alerts-bi portal`) is a separate FastAPI application with GET routes only. Any other method is refused, and it contains no route and no import path that reaches the run pipeline, the run endpoint of section 7.9, Elasticsearch or the model. It connects with its own SQL login, a member of the `alerts_bi_reader` database role, which may `SELECT` only from the `portal_*` views. Those views expose published weeks only and omit complete source documents, model request payloads and batch audit rows. The portal refuses to start if its login can write, or can read the base tables. It binds to loopback by default and admits only client addresses on a configured allowlist, private address ranges by default, so that it is reachable from the company network and not beyond it. There are no viewer logins.
-* **The operator surface** is the admin web app of section 7.12, and the command line with the same owning credential: `publish`, `unpublish`, `publications`, `decide`, `decisions` and `db grant-reader`. The unauthenticated run endpoint of section 7.9 stays on its own loopback listener and is never mounted on the portal.
+* **The reader surface** (`alerts-bi portal`) is a separate FastAPI application with GET routes only. Any other method is refused, and it contains no route and no import path that reaches the run pipeline, the run endpoint of section 7.9, Elasticsearch or the model. It reads through the `portal_*` views, which expose published weeks only and omit complete source documents, model request payloads and batch audit rows. It binds to loopback by default and admits only client addresses on a configured allowlist, private address ranges by default, so that it is reachable from the company network and not beyond it. There are no viewer logins.
+* **SQL access revised 2026-09-27.** The portal uses the exact `SQL_*` connection and database used by the pipeline. The separate `PORTAL_SQL_USER`, `PORTAL_SQL_PASSWORD`, `PORTAL_DATABASE` and portal `--database` settings, and the startup audit of the login's effective permissions, are removed. The database is owned by another company team and the available application users cannot create the special portal login. The portal still issues only the approved view queries, but a shared SQL login may be able to read base tables or write through other clients; database permissions no longer enforce the portal's isolation. The `alerts_bi_reader` role and explicit `db grant-reader` utility remain for existing installations, but are not used by portal startup or `db setup`.
+* **The operator surface** is the admin web app of section 7.12, and the command line with the same SQL credential: `publish`, `unpublish`, `publications`, `decide` and `decisions`. The unauthenticated run endpoint of section 7.9 stays on its own loopback listener and is never mounted on the portal.
 
 Scope is otherwise unchanged. A run still names one team, `run_at` is still captured once, and the scorecard and the three CSV exports are unchanged. Nothing here ranks teams against each other: the directory lists teams alphabetically.
 
@@ -783,7 +784,7 @@ Scheduling is otherwise unchanged from the design: the CronJob is the only trigg
 
 **Nothing routine needs a person to run a command** (decided 2026-09-24, at the product owner's direction). The deployment is applied by hand today and no pipeline is assumed, so the automation lives in the pods themselves:
 
-* **Schema and the portal login** - the application Deployment has an init container running `alerts-bi db setup` on every rollout: migrate, then create or update the portal's read-only login from its Secret. It is idempotent, so a rollout with nothing to change does nothing.
+* **Schema** - the application Deployment has an init container running `alerts-bi db setup` on every rollout to apply pending migrations. It no longer creates a portal login. A deployment whose SQL credential cannot apply migrations must have the database-owning team apply them first and omit that init container.
 * **Weekly reviews** - the CronJob of section 7.11. A week the model cannot assess is retried daily and published automatically after three days.
 * **Adding a team** - an edit to the registry ConfigMap; the next daily run picks it up.
 
@@ -844,8 +845,9 @@ still commit together in `persist_run`. Journal-only records never appear in the
 Successful responses survive failure before that final transaction; cache identity remains
 `(application, key_field, prompt_version, model_version)`. `classified_at` is the actual
 assessment event, preserved on replay, rather than the reporting window's captured `run_at`.
-Published runs refuse further assessment and replacement. Reader credentials are denied all
-four audit tables; no audit routes are added to the portal.
+Published runs refuse further assessment and replacement. The optional `alerts_bi_reader`
+role is denied all four audit tables; the portal's shared SQL credential may have broader
+rights, though the portal has no audit routes and queries only the `portal_*` views.
 
 **Endpoint provenance and capacity.** `LLM_MODEL_REVISION`, when supplied, is the immutable
 cache/model version; `LLM_MODEL` remains the deployment sent to the endpoint. Without a

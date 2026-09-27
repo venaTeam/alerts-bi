@@ -1,7 +1,7 @@
 """The reader portal's application factory (design section 7.10).
 
-A separate FastAPI application from the trigger surface of section 7.9, sharing no router,
-no listener and no credential with it. Three guarantees are enforced here rather than hoped
+A separate FastAPI application from the trigger surface of section 7.9, sharing no router
+or listener with it. Three guarantees are enforced here rather than hoped
 for:
 
 * **GET only.** Every route is a GET, and a middleware answers any other method with 405
@@ -11,7 +11,7 @@ for:
 * **Nothing executes in the browser.** The pages carry no script, and the
   Content-Security-Policy forbids script, framing, plugins and inline styles.
 
-Every page is rendered from the ``portal_*`` views over the portal's own read-only SQL
+Every page is rendered from the ``portal_*`` views over the application's SQL
 login; nothing here reaches Elasticsearch, the model, or the run pipeline.
 """
 

@@ -1,6 +1,6 @@
 # What a run produces
 
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-27
 
 A run writes exactly four files and no others: `scorecard.html`, `daily_metrics.csv`,
 `rule_counts.csv`, `alert_worklist.csv`. This document says what is in each of them, column
@@ -277,9 +277,9 @@ SQL and nowhere else.
 
 ## 10. The review portal
 
-The read-only portal (design section 7.10) is not a run output: it renders **published**
-weeks from the store, through four views its own SQL login can read. It is described here
-because its numbers are the ones most easily misread against the scorecard's.
+The GET-only portal (design section 7.10) is not a run output: it renders **published**
+weeks from the store through four views using the application's `SQL_*` login. It is
+described here because its numbers are the ones most easily misread against the scorecard's.
 
 | View | One row per | Holds |
 |---|---|---|

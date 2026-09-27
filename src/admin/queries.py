@@ -1,7 +1,7 @@
 """What the admin app reads.
 
-Unlike the portal, the admin app runs with the owning credential and sees every run, not
-only published weeks: deciding what to publish is its job.
+The admin app sees every run, while the portal queries only published weeks through its
+views. Both use the application's SQL credential.
 """
 
 from __future__ import annotations

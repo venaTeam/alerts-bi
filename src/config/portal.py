@@ -1,17 +1,11 @@
-"""Configuration for the read-only review portal (design section 7.10).
+"""Configuration for the review portal (design section 7.10).
 
-Separate from :mod:`src.config.api` because the two surfaces must never share a listener or
-a credential. The trigger surface of section 7.9 writes and binds to loopback; the portal
-only reads, is meant to be reachable from the company network, and connects as its own SQL
-login - a member of the ``alerts_bi_reader`` role and nothing else.
-
-The portal shares the SQL host, port and TLS settings with the pipeline, and replaces the
-user and password with ``PORTAL_SQL_USER`` and ``PORTAL_SQL_PASSWORD``.
+The portal has its own listener and client allowlist, but uses the pipeline's exact SQL
+connection settings, including its database and login.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import ipaddress
 from dataclasses import dataclass
 
@@ -23,7 +17,6 @@ __all__ = [
     "DEFAULT_ALLOWED_NETWORKS",
     "DEFAULT_PORTAL_HOST",
     "DEFAULT_PORTAL_PORT",
-    "DEFAULT_READER_LOGIN",
     "IpNetwork",
     "PortalSettings",
     "load_portal_settings",
@@ -34,7 +27,6 @@ IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 DEFAULT_PORTAL_HOST = "127.0.0.1"
 DEFAULT_PORTAL_PORT = 8100
-DEFAULT_READER_LOGIN = "alerts_bi_portal"
 
 #: Loopback plus the private address ranges: reachable from a company network, refused from
 #: anywhere else. Behind a reverse proxy the client address is the proxy's, so narrow this to
@@ -64,9 +56,8 @@ def parse_networks(values: tuple[str, ...]) -> tuple[IpNetwork, ...]:
 
 @dataclass(frozen=True, slots=True)
 class PortalSettings:
-    """Where the portal listens, whom it admits, and the read-only credential it uses."""
+    """Where the portal listens, whom it admits, and its SQL connection."""
 
-    #: The reader credential. Never the owning one: the portal refuses to start if it can write.
     sql: SqlConfig
     database: str
     host: str = DEFAULT_PORTAL_HOST
@@ -82,15 +73,9 @@ def load_portal_settings(
     config: AppConfig | None = None,
     host: str | None = None,
     port: int | None = None,
-    database: str | None = None,
 ) -> PortalSettings:
-    """Read the portal's settings from the environment, with explicit overrides winning."""
+    """Read portal settings while reusing the application's SQL connection exactly."""
     resolved = config or load_config()
-    reader = dataclasses.replace(
-        resolved.sql,
-        user=read_str("PORTAL_SQL_USER", DEFAULT_READER_LOGIN),
-        password=read_str("PORTAL_SQL_PASSWORD"),
-    )
     networks = tuple(
         part.strip()
         for part in read_str("PORTAL_ALLOWED_NETWORKS", ",".join(DEFAULT_ALLOWED_NETWORKS)).split(
@@ -103,8 +88,8 @@ def load_portal_settings(
     if not 1 <= page_size <= 200:
         raise ValueError(f"PORTAL_PAGE_SIZE must be between 1 and 200, got {page_size}")
     return PortalSettings(
-        sql=reader,
-        database=database or read_str("PORTAL_DATABASE") or resolved.sql.database,
+        sql=resolved.sql,
+        database=resolved.sql.database,
         host=host or read_str("PORTAL_HOST", DEFAULT_PORTAL_HOST),
         port=port or read_int("PORTAL_PORT", DEFAULT_PORTAL_PORT),
         allowed_networks=networks,

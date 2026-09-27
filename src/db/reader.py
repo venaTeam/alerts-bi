@@ -1,16 +1,13 @@
-"""The reader portal's database credential (design section 7.10).
+"""Optional restricted login utilities retained for existing installations.
 
-The portal connects with its own login, a member of the ``alerts_bi_reader`` role created by
-migration 002. That role may ``SELECT`` from the four ``portal_*`` views and nothing else:
-it cannot write, and it cannot read a base table, so a complete source document, a model
-request payload or an unpublished week is out of its reach even if the portal code had a bug.
+Migration 002 created ``alerts_bi_reader`` for a separate portal login. The portal now uses
+the application's SQL connection directly. The role and explicit grant command remain for
+installations that already use them or need a restricted login for another view consumer.
 
 Two operations live here:
 
-* :func:`grant_reader` - run by an operator with the owning credential, to create or update
-  the login and put it in the role.
-* :func:`read_only_problems` - run by the portal at startup with its own credential; any
-  problem it reports stops the portal from serving.
+* :func:`grant_reader` creates or updates that optional login and puts it in the role.
+* :func:`read_only_problems` diagnoses whether such a login is restricted to the views.
 """
 
 from __future__ import annotations
@@ -95,12 +92,7 @@ def grant_reader(admin: SqlConfig, database: str, login: str, password: str) -> 
 
 
 def read_only_problems(db: Database) -> list[str]:
-    """Everything that makes this connection more than a reader of the portal views.
-
-    An empty list means the credential is fit for the portal. Checked with the connection's
-    own effective permissions, so a login that became a member of a writer role later is
-    caught at the next start.
-    """
+    """Report permissions beyond reading the portal views for an optional login."""
     problems: list[str] = []
 
     row = db.query_one(
@@ -146,8 +138,8 @@ def read_only_problems(db: Database) -> list[str]:
         )
         if allowed is None or allowed["can_select"] != 1:
             problems.append(
-                f"cannot read the view {view}; run `alerts-bi db grant-reader` and check that "
-                "migrations are applied"
+                f"cannot read the view {view}; check that migrations and the optional "
+                "reader grant are applied"
             )
 
     database_writes = db.query_one(

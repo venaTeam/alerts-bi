@@ -1,8 +1,8 @@
 """The review portal, against a real disposable SQL Server database (design section 7.10).
 
 Synthetic runs are persisted through the same ``persist_run`` the pipeline uses, published
-through the operator functions, and read back by the portal over its own read-only login -
-never the owning credential. One test drives the real pipeline over the mock Elasticsearch
+through the operator functions, and read back by the portal using the application's SQL
+credential. One test drives the real pipeline over the mock Elasticsearch
 data, so the portal's totals are checked against numbers the pipeline itself stored.
 """
 
@@ -256,7 +256,7 @@ def _store(name: str, team: str, end: datetime, *, rich: bool = False) -> None:
 
 @pytest.fixture(scope="module")
 def reader() -> SqlConfig:
-    """A fresh database with three published weeks, and the portal's own read-only login."""
+    """A fresh database with three published weeks and an optional view-only login."""
     try:
         reset_test_database(CONFIG.sql, DB)
     except Exception as exc:  # pragma: no cover - environment dependent
@@ -314,7 +314,7 @@ def reader() -> SqlConfig:
 
 @pytest.fixture(scope="module")
 def portal(reader: SqlConfig) -> Iterator[TestClient]:
-    settings = PortalSettings(sql=reader, database=DB, page_size=3)
+    settings = PortalSettings(sql=CONFIG.sql, database=DB, page_size=3)
     with TestClient(build_portal(settings), client=LOCAL) as client:
         yield client
 
@@ -322,14 +322,9 @@ def portal(reader: SqlConfig) -> Iterator[TestClient]:
 # ------------------------------------------------------------------ the credential
 
 
-def test_the_reader_login_is_fit_for_the_portal(reader: SqlConfig) -> None:
+def test_the_optional_reader_login_is_limited_to_views(reader: SqlConfig) -> None:
     with connect(reader, DB) as db:
         assert read_only_problems(db) == []
-
-
-def test_the_owning_credential_is_refused_as_a_portal_login(reader: SqlConfig) -> None:
-    with connect(CONFIG.sql, DB) as db:
-        assert read_only_problems(db), "sa can write; the portal must refuse it"
 
 
 @pytest.mark.parametrize(
