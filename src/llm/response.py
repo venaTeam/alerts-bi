@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from src.domain.normalize import AlertRecord
 from src.rules.catalogs import CITABLE_IDS
 
 __all__ = [
@@ -93,7 +94,13 @@ def _validate_verdict(raw: Any) -> Verdict:
     return Verdict(alert_id, assessment, principle_id, confidence, justification)
 
 
-def validate_response(parsed: Any, batch_id: str, alert_ids: Sequence[str]) -> list[Verdict]:
+def validate_response(
+    parsed: Any,
+    batch_id: str,
+    alert_ids: Sequence[str],
+    *,
+    alerts: Sequence[AlertRecord] | None = None,
+) -> list[Verdict]:
     """Validate a parsed response against the request it answers.
 
     Returns verdicts in REQUEST order, so callers never depend on response ordering:
@@ -131,7 +138,28 @@ def validate_response(parsed: Any, batch_id: str, alert_ids: Sequence[str]) -> l
         if alert_id not in by_alert_id:
             raise LlmResponseError(f"response is missing a verdict for alert {alert_id}")
 
-    return [by_alert_id[alert_id] for alert_id in alert_ids]
+    ordered = [by_alert_id[alert_id] for alert_id in alert_ids]
+    if alerts is not None:
+        if len(alerts) != len(alert_ids):
+            raise ValueError("applicability context must match request membership")
+        for verdict, alert in zip(ordered, alerts, strict=True):
+            validate_applicability(verdict, alert)
+    return ordered
+
+
+def validate_applicability(verdict: Verdict, alert: AlertRecord) -> None:
+    """Reject objective scope errors, without attempting to grade semantic evidence."""
+    principle = verdict.principle_id
+    invalid = (
+        (principle in {"P7", "P8", "P9", "R8", "R9", "R10"} and alert.schema != "v2")
+        or (principle == "P7" and alert.severity != "critical")
+        or (principle == "R7" and alert.schema != "v1")
+        or (principle == "R4" and (alert.provider or "").strip().lower() != "grafana")
+    )
+    if invalid:
+        raise LlmResponseError(
+            f"principle {principle} is not applicable to alert {verdict.alert_id}"
+        )
 
 
 def state_for_verdict(verdict: Verdict | Mapping[str, Any]) -> str:

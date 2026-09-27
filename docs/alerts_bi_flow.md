@@ -124,11 +124,23 @@ The request carries the group identity, ruleset and prompt versions, shared fiel
 
 ### 6.3 Send and validate
 
+Before calling, the shared assessment path holds a SQL application lock for its scope and
+commits the exact prompt/schema provenance, immutable settings, serialized request and attempt
+start to the independent LLM audit journal (design 7.13). Live assessment without this journal
+is refused. Successful committed responses replay after interruption; a started attempt
+without a committed result is recorded as interrupted and consumes its slot. A subsequent
+explicit run after three failures opens a new numbered cycle, preserving earlier attempts.
+
 The tool calls the on-prem OpenAI-compatible endpoint through the regular OpenAI Python SDK. It uses Chat Completions with strict JSON-schema output, temperature zero, a configurable timeout, and SDK automatic retries disabled. Each timeout, transport failure, invalid response, or other failed call consumes one of the pipeline's recorded attempts.
 
 The cached prompt prefix contains the approved alerting guides, the R/P catalogue, and the fixed classification procedure. The model reconstructs and judges every alert independently, uses batch neighbours only as context, cites one most-actionable principle with a deterministic tie-break, uses `other` only for clear uncatalogued violations, and defaults to `no_violation` when evidence is ambiguous. The request body contains the losslessly factored representative documents and stable per-alert IDs.
 
 The response is a closed object carrying the echoed batch ID and one verdict per alert ID. Each verdict contains an assessment, one primary principle, a confidence enum, and a required justification of at most 1,000 characters. The batch ID and alert-ID set must exactly match the request; duplicate IDs, invalid enum combinations, empty justifications, and additional fields reject the entire batch. Verdict order does not matter because IDs provide the binding.
+
+Prompt 1.2.0 adds evidence and applicability guidance without changing the guides, catalogue
+wording or verdict fields. Validation also rejects v2-only citations on v1, P7 outside v2
+critical, R7 on v2 and R4 outside Grafana. Refusal, incomplete and empty SDK responses are
+recorded failures; available model/token metadata is retained, with missing usage unknown.
 
 The tool makes at most three attempts in total: the initial request plus two retries. Each retry sends the identical batch as a group. Alerts are never retried individually. If the third attempt fails, the whole batch becomes `unassessed`.
 
@@ -157,6 +169,9 @@ The tool derives the selected team's phase from the alerts found in this run:
 The derived phase and v2 readiness percentage are saved with the run. They describe only alerts that fired inside this run's window; the tool cannot infer silent rule inventory.
 
 ## 8. Persist the result
+
+This final transaction commits the complete report state atomically. The pre-call journal
+already exists independently and survives a failed final transaction; it is not reader-visible.
 
 The tool writes the run to SQL Server as:
 

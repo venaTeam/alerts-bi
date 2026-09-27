@@ -13,7 +13,7 @@ which is why grouping is isolated here and testable on its own.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from src.domain.normalize import AlertRecord
@@ -177,3 +177,24 @@ def build_batches(
             )
 
     return batches
+
+
+def reverse_for_evaluation(
+    batch: Batch, run_id: str, prompt_version: str, model_version: str
+) -> Batch:
+    """Reverse a fixed partition only for a recorded evaluation trial."""
+    ids = tuple(reversed(batch.alert_ids))
+    return replace(
+        batch,
+        alerts=tuple(reversed(batch.alerts)),
+        alert_ids=ids,
+        batch_id=batch_id_of(
+            run_id,
+            batch.group_type,
+            batch.group_value,
+            batch.partition_index,
+            ids,
+            prompt_version,
+            model_version,
+        ),
+    )

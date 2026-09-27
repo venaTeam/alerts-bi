@@ -15,6 +15,7 @@ from typing import Any
 
 from src.config import AppConfig
 from src.db.connection import Database
+from src.db.llm_audit import SqlLlmJournal
 from src.db.repositories import PersistencePayload, find_verdicts
 from src.domain.metrics import compute_daily_volume
 from src.domain.normalize import AlertRecord
@@ -124,8 +125,8 @@ def execute_run(
 ) -> tuple[PersistencePayload, RunSummary]:
     """Execute one run and return the payload to persist.
 
-    Nothing is written here: persistence is the caller's step, so a run can be computed and
-    inspected without touching the store.
+    Model requests/results are journaled before final persistence. Completed report rows
+    remain the caller's atomic step; the journal never exposes partial runs to readers.
     """
     started_at = datetime.now(UTC)
 
@@ -206,6 +207,12 @@ def execute_run(
             now=started_at,
             max_batch_size=config.llm.max_batch_size,
             existing_verdicts=existing,
+            journal=SqlLlmJournal(db, run_id) if db is not None else None,
+            clock=lambda: datetime.now(UTC),
+            audit_settings={
+                "model_deployment": config.llm.model,
+                "max_completion_tokens": config.llm.max_completion_tokens,
+            },
         )
         outcomes = assessment.outcomes
         batch_attempts = assessment.batch_attempts

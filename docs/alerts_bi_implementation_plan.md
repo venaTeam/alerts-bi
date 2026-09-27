@@ -123,6 +123,22 @@ Cache the result by SQL-text hash and parser version. A parse or safety failure 
 
 ### 2.7 LLM assessment module
 
+Implemented upgrade (2026-09-24; design 7.13): prompt 1.2.0 adds evidence and applicability
+guidance, while context-aware response validation rejects inapplicable citations batch-wide.
+The existing SDK adapter captures model/usage/finish metadata with no hidden retries.
+`src.db.llm_audit.SqlLlmJournal` persists requests and attempt starts before calls, replays
+committed successes, counts uncertain interrupted calls against the current three-attempt
+cycle, and keeps later explicit retry cycles separate. Final run persistence stays atomic.
+The new audit tables are denied to the reader and independent of replaceable run rows.
+
+`scripts/evaluate_llm.py` supplies isolated, opt-in live evaluation and fake protocol checks,
+using the existing generator with separate draft semantic annotations. Test source/version
+integrity, applicability, actual SDK failure behavior, real-SQL pre-call visibility and crash
+recovery. Semantic release gates still require representative human-reviewed labels and live
+endpoint trials; fake runs cannot demonstrate improved accuracy. See the upgrade plan and
+README for operator commands and the distinctions between implemented tooling and measured
+quality, capacity or rollout decisions.
+
 Split this module into five testable parts:
 
 1. **Verdict lookup:** read by application, key, prompt version, and model version.

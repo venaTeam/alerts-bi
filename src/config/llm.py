@@ -26,6 +26,8 @@ class LlmConfig:
     timeout_ms: int
     max_batch_size: int
     live_test: bool
+    model_revision: str = ""
+    max_completion_tokens: int | None = None
 
 
 def load_llm_config() -> LlmConfig:
@@ -40,6 +42,12 @@ def load_llm_config() -> LlmConfig:
             f"of {MAX_BATCH_SIZE_CEILING}"
         )
 
+    token_limit = read_int("LLM_MAX_COMPLETION_TOKENS", 0)
+    if token_limit < 0:
+        raise ValueError("LLM_MAX_COMPLETION_TOKENS must be nonnegative")
+    revision = read_str("LLM_MODEL_REVISION")
+    if len(revision) > 128:
+        raise ValueError("LLM_MODEL_REVISION exceeds 128 characters")
     return LlmConfig(
         enabled=read_bool("LLM_ENABLED", False),
         base_url=read_str("LLM_BASE_URL"),
@@ -48,4 +56,6 @@ def load_llm_config() -> LlmConfig:
         timeout_ms=read_int("LLM_TIMEOUT_MS", 120000),
         max_batch_size=max_batch_size,
         live_test=read_bool("LLM_LIVE_TEST", False),
+        model_revision=revision,
+        max_completion_tokens=token_limit or None,
     )

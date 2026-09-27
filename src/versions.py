@@ -13,15 +13,13 @@ deliberately and never edited in place:
 ``model_version`` is not here: it is supplied by configuration (the exact on-prem
 deployment identifier) and recorded per run.
 
-These values are carried over unchanged from the superseded JavaScript implementation. The
-port changed the language, not the ruleset, so bumping them would falsely signal that what
-counts as a bad alert had changed.
+The language port preserved these versions. Later prompt improvements receive their own
+version; the rule and principle catalogues remain unchanged.
 """
 
 RULESET_VERSION = "1.0.0"
-# 1.1.0 (2026-08-31): the prompt states the numeric severity scale, because alerts carry
-# severity as a number and the guides reason about it by name.
-PROMPT_VERSION = "1.1.0"
+# 1.2.0 (2026-09-24): evidence guidance, explicit applicability and untrusted alert text.
+PROMPT_VERSION = "1.2.0"
 PARSER_VERSION = "1.0.0"
 
 APP_VERSION = "0.1.0"

@@ -520,6 +520,71 @@ means here.
 
 ## The mock environment
 
+### Evaluating the LLM review upgrade
+
+Prompt `1.2.0` adds scope-aware evidence guidance and checks for inapplicable citations. It is
+a candidate for live quality evaluation; passing protocol tests does not establish better
+judgment. The [upgrade plan](docs/llm_review_upgrade_plan.md) records release gates and
+[design section 7.13](docs/alerts_bi_design.md#713-llm-review-quality-evaluation-and-durable-audit)
+specifies audit/recovery behavior.
+
+Apply migration `004_llm_review_audit` through the normal `alerts-bi db migrate` command
+before running the upgraded live pipeline (the deployment init container runs setup).
+It stores requests before calls, preserves successful responses across interrupted runs,
+and records uncertain interrupted attempts against the three-attempt budget. A later explicit
+retry after exhaustion gets a new recorded cycle. The four report files and portal API stay
+unchanged. Audit tables are operator-only and retain full documents; use existing SQL access
+and backup controls, not ordinary logs, for review evidence.
+
+Run the isolated benchmark without calling any model:
+
+```powershell
+uv run python scripts/evaluate_llm.py --mode fake --caps 1 10 --repeats 2 --out out/evaluations/smoke.json
+```
+
+It defaults to development cases, both full and factored documents, and normal/reversed
+within-partition ordering. Supported caps are 1 through 200; default trials use
+1/10/25/50/100/200. The checked-in 14-case corpus is draft, synthetic and small. A reported
+`max_actual_batch=2` does not validate capacity at 200. The default all-good fake exercises
+the harness and deliberately misses labelled violations; its precision is undefined.
+Inspect per-group uncertainty and subgroup counts, not just an overall score. Explanations
+still need blinded human review; summaries do not grade the truth of free text.
+
+For an exploratory on-prem trial, configure the existing endpoint credentials, a stable
+`LLM_MODEL_REVISION` when `LLM_MODEL` is a mutable alias, and an already migrated audit database:
+
+```powershell
+$env:LLM_LIVE_TEST = 'true'
+uv run python scripts/evaluate_llm.py --mode live --database alerts_bi_dev --caps 1 --allow-draft
+```
+
+The explicit `--allow-draft` is needed until independent reviewers adjudicate the labels.
+Evaluation scopes never read or write the production verdict cache or publish a run.
+The command stops the matrix after a failed attempt unless `--continue-after-failure` is
+explicitly supplied. Each completed trial saves a summary; raw requests/responses stay in
+the SQL audit. No result automatically enables a model or satisfies release gates.
+
+Use `--cases` for a separately reviewed manifest, keep families and actual groups within one
+split, freeze development decisions, then use `--split holdout`. Each case supplies either a
+synthetic `definition` (see the checked-in manifest) or a complete frozen `source` representative,
+which is preserved exactly. Keep private case manifests outside Git. Annotations carry accepted
+`principles`, `confidences`, `evidence_fields` and a `rationale`; `review_state=reviewed` requires
+named `reviewers`. Include independently sampled `no_violation` cases to detect misses; confirm/
+dismiss clicks alone cover only findings and are not automatically gold labels.
+To compare a saved baseline
+prompt, pass its UTF-8 file with `--system-prompt` and its distinct `--prompt-version`; compare
+summary files with `--compare`. This keeps the current strict validator, so this comparison
+isolates prompt/model changes rather than reproducing the old implementation's weaker
+validator. Reproducing that old pipeline requires its matching source revision.
+
+`LLM_MAX_COMPLETION_TOKENS=0` preserves omission of that SDK parameter. Only set a positive
+value after testing support and capacity on the endpoint. Usage/cached-token fields stay null
+when unavailable. Review baseline/candidate explanations and large/long representative groups
+before selecting a production cap or deployment; keep the prior release/model available for
+rollback of future runs. Published reviews and historical verdicts are never rewritten.
+
+### Seeding the normal acceptance fixture
+
 `scripts/generate_mock_alerts.py` seeds `appchi-v1` and `appchi-v2` from a seeded RNG on a
 fixed clock, so the dataset is reproducible.
 
