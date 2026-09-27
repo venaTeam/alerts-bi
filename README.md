@@ -100,11 +100,11 @@ The scorecard and the three CSV exports are written under `out/<run id prefix>/`
 | `alerts-bi portal` | Serve the read-only review portal (see below) |
 | `alerts-bi publish`, `unpublish`, `publications` | Publish a completed run as a team's weekly review, withdraw one, list them |
 | `alerts-bi decide`, `decisions` | Record and list human decisions on findings |
-| `alerts-bi db grant-reader` | Create or update the portal's read-only SQL login |
+| `alerts-bi db grant-reader` | Optional legacy utility to create a restricted login for direct access to portal views |
 | `alerts-bi weekly` | Run and publish every due Monday week of every enrolled team |
 | `alerts-bi weekly-status` | Each enrolled team's latest published week and last schedule outcome |
 | `alerts-bi registry check` | Validate the team registry before deploying an edit |
-| `alerts-bi db setup` | Migrate, then create or update the portal login; idempotent, for an init container |
+| `alerts-bi db setup` | Apply pending migrations; idempotent, for an init container |
 | `alerts-bi admin` | Serve the operator admin app on loopback, behind a login proxy |
 
 ### `run` options
@@ -275,23 +275,12 @@ Four things are kept apart:
 
 ### Setting it up locally
 
-The portal reads through its own SQL login, which can `SELECT` from four `portal_*` views
-and nothing else. Put a reader password in `.env`, with the same complexity rules as the SA
-password:
-
-```
-PORTAL_SQL_USER=alerts_bi_portal
-PORTAL_SQL_PASSWORD=Change_me_reader_1
-```
-
-Apply migration 002 and create the login:
+The portal uses the same `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` and
+`SQL_DATABASE` as the pipeline. It queries the four `portal_*` views. Apply the migrations
+if the database-owning team has not already done so:
 
 ```bash
 uv run alerts-bi db migrate
-```
-
-```bash
-uv run alerts-bi db grant-reader
 ```
 
 Run a team, then publish that run as its weekly review:
@@ -310,7 +299,8 @@ Start the portal and open `http://127.0.0.1:8100`:
 uv run alerts-bi portal
 ```
 
-It refuses to start if its login can write, read a base table, or is missing the views.
+The portal does not inspect the SQL login's permissions at startup. The configured login
+must be able to read the `portal_*` views for pages to load.
 
 ### Operator commands
 
@@ -325,7 +315,7 @@ These run with the owning credential (`SQL_USER`) and are the only way to publis
 | `alerts-bi publications --team <id>` | List a team's publications, current and withdrawn |
 | `alerts-bi decide --team <id> --week YYYY-MM-DD --schema v1 --application <a> --key-field <k> --finding R1 --state confirmed --note ...` | Append a human decision on one finding |
 | `alerts-bi decisions --team <id>` | List a team's decision history |
-| `alerts-bi db grant-reader` | Create or update the portal's read-only login (`PORTAL_SQL_PASSWORD`) |
+| `alerts-bi db grant-reader` | Optional legacy utility to create a restricted view login; the portal does not use it |
 
 Publishing refuses a week that overlaps a published one, always. Weeks are meant to be back
 to back: run each team with `--run-at` set to the end of its previous published week. A
@@ -427,10 +417,9 @@ never committed.
 | `LLM_MAX_BATCH_SIZE` | May lower the 200-alert ceiling, never raise it |
 | `API_HOST`, `API_PORT` | Where `alerts-bi serve` listens; `--host` / `--port` override |
 | `API_REGISTRY_PATH`, `API_DATABASE`, `API_OUT_DIR` | Surface overrides for the registry, target database and report directory |
-| `PORTAL_SQL_USER`, `PORTAL_SQL_PASSWORD` | The portal's own read-only login; never the owning credential |
 | `PORTAL_HOST`, `PORTAL_PORT` | Where `alerts-bi portal` listens; default `127.0.0.1:8100` |
 | `PORTAL_ALLOWED_NETWORKS` | Comma-separated client networks the portal admits; default loopback and private ranges |
-| `PORTAL_DATABASE`, `PORTAL_PAGE_SIZE` | Database the portal reads (default `SQL_DATABASE`) and work-list page size |
+| `PORTAL_PAGE_SIZE` | Work-list page size; the portal reads `SQL_DATABASE` as `SQL_USER` |
 
 For an on-prem cluster with a private CA, set `ES_CA_CERT` to the bundle path; the
 Elasticsearch Python client takes it directly.

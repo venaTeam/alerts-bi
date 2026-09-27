@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
-from src.config import MAX_BATCH_SIZE_CEILING, load_config, load_dotenv
+from src.config import MAX_BATCH_SIZE_CEILING, load_config, load_dotenv, load_portal_settings
 from src.logging_setup import redact_error
 
 ENV_NAMES = [
@@ -75,6 +75,23 @@ def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None
     assert config.es.url == "https://eck.internal:9200", "a trailing slash is stripped"
     assert config.es.page_size == 250
     assert config.sql.port == 1444
+
+
+def test_portal_uses_the_exact_application_sql_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SQL_USER", "shared-login")
+    monkeypatch.setenv("SQL_PASSWORD", "shared-password")
+    monkeypatch.setenv("SQL_DATABASE", "shared-database")
+    monkeypatch.setenv("PORTAL_SQL_USER", "obsolete-login")
+    monkeypatch.setenv("PORTAL_SQL_PASSWORD", "obsolete-password")
+    monkeypatch.setenv("PORTAL_DATABASE", "obsolete-database")
+    config = load_config()
+
+    portal = load_portal_settings(config)
+
+    assert portal.sql is config.sql
+    assert portal.database == config.sql.database
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])

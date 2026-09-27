@@ -129,7 +129,8 @@ The existing SDK adapter captures model/usage/finish metadata with no hidden ret
 `src.db.llm_audit.SqlLlmJournal` persists requests and attempt starts before calls, replays
 committed successes, counts uncertain interrupted calls against the current three-attempt
 cycle, and keeps later explicit retry cycles separate. Final run persistence stays atomic.
-The new audit tables are denied to the reader and independent of replaceable run rows.
+The new audit tables are denied to the optional `alerts_bi_reader` role and independent of
+replaceable run rows. The portal now uses the application's `SQL_*` credential.
 
 `scripts/evaluate_llm.py` supplies isolated, opt-in live evaluation and fake protocol checks,
 using the existing generator with separate draft semantic annotations. Test source/version
@@ -306,9 +307,9 @@ Build the interactive frontend first, using the persisted run data and pipeline 
 
 - Migration `002_review_portal`: `review_publications`, the append-only `finding_decisions`, the four `portal_*` views and the `alerts_bi_reader` role.
 - `src.review`: publication rules (no overlap; a gap needs `--allow-gap`; `--replace` withdraws rather than deletes) and the decision record. Operator CLI only.
-- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, a script-free Content-Security-Policy, and its own read-only SQL login that it verifies at startup.
+- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, a script-free Content-Security-Policy, and the same `SQL_*` connection and database as the pipeline. It queries only the `portal_*` views and does not audit the login's permissions at startup.
 - `persist_run` refuses to replace a run that is currently published.
-- Tests: publication rules, the reader credential's limits, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
+- Tests: publication rules, shared SQL configuration, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
 
 Implement deterministic historical backfill second. Process the oldest period first, reuse the same registry/ruleset versioning and persistence grain, and make no LLM calls. Track completion so ranges can be resumed safely.
 

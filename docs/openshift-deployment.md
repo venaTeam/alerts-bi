@@ -406,9 +406,9 @@ See [Running it without touching a pod](#running-it-without-touching-a-pod) for 
 
 The read-only review portal (`alerts-bi portal`, design section 7.10) is a second process
 and should be a second Deployment. It is meant to be reachable from the company network,
-unlike the trigger surface. It needs its own Secret carrying `PORTAL_SQL_USER` and
-`PORTAL_SQL_PASSWORD` for a login created with `alerts-bi db grant-reader`. It refuses to
-start with a login that can write. Its client-network allowlist (`PORTAL_ALLOWED_NETWORKS`)
+unlike the trigger surface. It uses the same `SQL_*` database and credential as the pipeline;
+no portal-specific SQL login or startup permission audit is required. Its client-network
+allowlist (`PORTAL_ALLOWED_NETWORKS`)
 sees the router's address rather than the reader's, so on a cluster restrict it at the Route
 or with a NetworkPolicy instead. Never expose the trigger surface through the portal's
 Route. None of this has run on a cluster.
@@ -447,8 +447,8 @@ Everything routine runs by itself (design section 7.12). Apply these once; after
 only thing anyone edits is the registry ConfigMap, and the only screen anyone uses is the
 admin app.
 
-**Schema and the portal login on every rollout** - add an init container to the app
-Deployment. It needs the portal password, so give it the portal Secret as well:
+**Schema on every rollout** - add an init container to the app Deployment if its SQL login
+can apply migrations. Otherwise, the database-owning team must apply them before rollout:
 
 ```yaml
       initContainers:
@@ -458,19 +458,12 @@ Deployment. It needs the portal password, so give it the portal Secret as well:
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
-            - secretRef: {name: alerts-bi-portal-secrets}
 ```
 
-**The reader portal** - its own Deployment, Service and Route, with only the reader Secret:
+**The reader portal** - its own Deployment, Service and Route, using the same SQL
+configuration and Secret as the pipeline:
 
 ```yaml
-apiVersion: v1
-kind: Secret
-metadata: {name: alerts-bi-portal-secrets}
-stringData:
-  PORTAL_SQL_USER: "alerts_bi_portal"
-  PORTAL_SQL_PASSWORD: "..."            # the init container creates the login with this
----
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: alerts-bi-portal}
@@ -489,10 +482,9 @@ spec:
             - {name: PORTAL_PORT, value: "8100"}
             # The router is the client the allowlist sees; restrict readers at the Route.
             - {name: PORTAL_ALLOWED_NETWORKS, value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}
-            - {name: SQL_HOST, valueFrom: {configMapKeyRef: {name: alerts-bi-config, key: SQL_HOST}}}
-            - {name: SQL_DATABASE, valueFrom: {configMapKeyRef: {name: alerts-bi-config, key: SQL_DATABASE}}}
           envFrom:
-            - secretRef: {name: alerts-bi-portal-secrets}   # never alerts-bi-secrets
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
           ports: [{containerPort: 8100}]
           readinessProbe: {httpGet: {path: /healthz, port: 8100}}
 ---
@@ -514,8 +506,8 @@ spec:
   tls: {termination: edge}
 ```
 
-The portal refuses to start if its login can write, so a wrong Secret shows up as a pod that
-never becomes ready rather than as an exposed writer.
+The portal queries only the `portal_*` views, but the shared SQL credential may have broader
+rights. Keep the portal Route and client allowlist limited to the intended company network.
 
 **The operator admin app** - a Deployment with OpenShift's `oauth-proxy` as a sidecar. The
 proxy signs people in and admits only those allowed to `get` the Service below; the app binds

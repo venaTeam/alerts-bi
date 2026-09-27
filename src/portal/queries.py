@@ -1,8 +1,8 @@
 """Everything the portal reads, and only through the ``portal_*`` views.
 
-The views are the portal's whole world: its SQL login can read nothing else (design section
-7.10). They contain published weeks only, so no query here needs to remember to filter out an
-unpublished run - and a query that forgot could not see one anyway.
+The portal code queries only these views (design section 7.10). They contain published weeks
+only, so no query here needs to remember to filter out an unpublished run. The shared SQL
+login may have broader permissions, but no portal query uses them.
 
 Nothing here writes, and nothing reaches Elasticsearch or the model.
 """
