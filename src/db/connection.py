@@ -138,6 +138,9 @@ def connect(
     engine = create_engine(
         engine_url(config, database),
         poolclass=NullPool,
+        # Audit parameters contain full alerts and model responses; never print them
+        # through a SQLAlchemy exception when a database write fails.
+        hide_parameters=True,
         connect_args={"timeout": timeout_seconds, "login_timeout": timeout_seconds},
     )
     connection = engine.connect()

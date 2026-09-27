@@ -26,6 +26,8 @@ ENV_NAMES = [
     "LLM_BASE_URL",
     "LLM_API_KEY",
     "LLM_MODEL",
+    "LLM_MODEL_REVISION",
+    "LLM_MAX_COMPLETION_TOKENS",
     "LLM_TIMEOUT_MS",
     "LLM_MAX_BATCH_SIZE",
     "LLM_LIVE_TEST",
@@ -42,6 +44,17 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
+
+
+def test_optional_model_revision_and_completion_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert load_config().llm.max_completion_tokens is None
+    monkeypatch.setenv("LLM_MODEL_REVISION", "weights-2026-09-24")
+    monkeypatch.setenv("LLM_MAX_COMPLETION_TOKENS", "4096")
+    assert load_config().llm.model_revision == "weights-2026-09-24"
+    assert load_config().llm.max_completion_tokens == 4096
+    monkeypatch.setenv("LLM_MAX_COMPLETION_TOKENS", "-1")
+    with pytest.raises(ValueError, match="nonnegative"):
+        load_config()
 
 
 def test_defaults_are_sane_without_any_environment() -> None:

@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
 
+from src.db.llm_audit import SqlLlmJournal
 from src.db.repositories import verdict_key
 from src.domain.normalize import AlertRecord
 from src.hashing import compact_json
-from src.llm.client import LlmClient, LlmTransportError
-from src.llm.grouping import Batch, build_batches
+from src.llm.client import Completion, LlmClient, LlmTransportError
+from src.llm.grouping import Batch, build_batches, reverse_for_evaluation
 from src.llm.request import assert_lossless, build_request, serialize_request
 from src.llm.response import LlmResponseError, Verdict, state_for_verdict, validate_response
 from src.logging_setup import log, redact_error
@@ -76,6 +78,62 @@ def assess_alerts(
     now: datetime,
     max_batch_size: int | None = None,
     existing_verdicts: Mapping[str, Mapping[str, Any]] | None = None,
+    journal: SqlLlmJournal | None = None,
+    clock: Callable[[], datetime] | None = None,
+    audit_settings: dict[str, Any] | None = None,
+    factored: bool = True,
+    reverse_order: bool = False,
+) -> AssessmentResult:
+    """Assess eligible identities; live requests require durable pre-call SQL audit."""
+    if getattr(client, "requires_audit", False) and journal is None:
+        raise ValueError("live LLM assessment requires a SQL audit journal")
+    if (not factored or reverse_order) and journal is not None and journal.kind != "evaluation":
+        raise ValueError("representation and ordering trials require an evaluation scope")
+    with journal.locked() if journal is not None else nullcontext():
+        if journal is not None:
+            journal.configure(
+                system_prompt,
+                prompt_version,
+                model_version,
+                {
+                    **(audit_settings or {}),
+                    "max_batch_size": max_batch_size or 200,
+                    "factored": factored,
+                    "reverse_order": reverse_order,
+                },
+            )
+        return _assess_alerts(
+            alerts=alerts,
+            client=client,
+            system_prompt=system_prompt,
+            run_id=run_id,
+            prompt_version=prompt_version,
+            model_version=model_version,
+            now=now,
+            max_batch_size=max_batch_size,
+            existing_verdicts=existing_verdicts,
+            journal=journal,
+            clock=clock or (lambda: now),
+            factored=factored,
+            reverse_order=reverse_order,
+        )
+
+
+def _assess_alerts(
+    *,
+    alerts: Sequence[AlertRecord],
+    client: LlmClient,
+    system_prompt: str,
+    run_id: str,
+    prompt_version: str,
+    model_version: str,
+    now: datetime,
+    max_batch_size: int | None = None,
+    existing_verdicts: Mapping[str, Mapping[str, Any]] | None = None,
+    journal: SqlLlmJournal | None,
+    clock: Callable[[], datetime],
+    factored: bool,
+    reverse_order: bool,
 ) -> AssessmentResult:
     """Assess every eligible alert."""
     existing = existing_verdicts or {}
@@ -101,10 +159,20 @@ def assess_alerts(
         result.reused_verdicts += 1
 
     batches = build_batches(to_request, run_id, prompt_version, model_version, max_batch_size)
+    if reverse_order:
+        batches = [
+            reverse_for_evaluation(batch, run_id, prompt_version, model_version)
+            for batch in batches
+        ]
     result.requested_batches = len(batches)
 
     for batch in batches:
         request = build_request(batch, RULESET_VERSION, prompt_version)
+        if not factored:
+            # Evaluation-only representation trial. Every source field is retained.
+            request["shared_fields"] = {}
+            for item, alert in zip(request["alerts"], batch.alerts, strict=True):
+                item["fields"] = alert.source
         # Losslessness is asserted before the first call, so a factoring bug fails loudly
         # instead of quietly sending the model documents with fields missing.
         assert_lossless(request, batch)
@@ -112,7 +180,7 @@ def assess_alerts(
         # Serialized ONCE and reused byte-for-byte on every retry.
         request_text, request_hash = serialize_request(request)
 
-        verdicts, failure_reason = _attempt_batch(
+        verdicts, failure_reason, classified_at = _attempt_batch(
             batch=batch,
             request_text=request_text,
             request_hash=request_hash,
@@ -121,6 +189,8 @@ def assess_alerts(
             run_id=run_id,
             now=now,
             batch_attempts=result.batch_attempts,
+            journal=journal,
+            clock=clock,
         )
 
         if verdicts is not None:
@@ -150,7 +220,7 @@ def assess_alerts(
                         # the model judged is stored here or the verdict is unauditable.
                         "representative_doc": compact_json(alert.source),
                         "doc_hash": alert.doc_hash,
-                        "classified_at": _naive(now),
+                        "classified_at": _naive(classified_at),
                         "ruleset_version": RULESET_VERSION,
                         "first_run_id": run_id,
                     }
@@ -182,7 +252,9 @@ def _attempt_batch(
     run_id: str,
     now: datetime,
     batch_attempts: list[dict[str, Any]],
-) -> tuple[list[Verdict] | None, str]:
+    journal: SqlLlmJournal | None,
+    clock: Callable[[], datetime],
+) -> tuple[list[Verdict] | None, str, datetime]:
     """Run one batch through at most three attempts.
 
     Each retry sends the IDENTICAL batch as a unit: same membership, same ordering, same
@@ -190,30 +262,72 @@ def _attempt_batch(
     alert is the worst output this system can produce.
     """
     failure_reason = "unknown failure"
+    cycle = journal.prepare(batch.batch_id, request_text, request_hash) if journal else ""
+    completed_at = now
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         started = time.monotonic()
         status = "succeeded"
         reason: str | None = None
         verdicts: list[Verdict] | None = None
+        response_text: str | None = None
+        metadata: dict[str, Any] = {}
+        saved = journal.attempt(cycle, attempt) if journal else None
+        created_at = saved["created_at"] if saved else clock()
+        if journal is not None and saved is None:
+            journal.start(cycle, attempt, created_at)
 
         try:
-            text = client.complete(
-                system_prompt=system_prompt,
-                request_text=request_text,
-                batch_id=batch.batch_id,
-                attempt=attempt,
-            )
+            if saved is not None:
+                metadata = json.loads(saved["metadata_json"])
+                if saved["status"] == "started":
+                    raise LlmTransportError(
+                        "previous process ended without a committed response; remote outcome unknown",
+                        "interrupted",
+                    )
+                if saved["status"] != "succeeded":
+                    raise LlmTransportError(
+                        saved["failure_reason"] or "stored failed attempt", saved["status"]
+                    )
+                response_text = str(saved["response_text"])
+            else:
+                completion = client.complete(
+                    system_prompt=system_prompt,
+                    request_text=request_text,
+                    batch_id=batch.batch_id,
+                    attempt=attempt,
+                )
+                if isinstance(completion, Completion):
+                    response_text, metadata = completion.text, completion.metadata
+                else:
+                    response_text = completion
             try:
-                parsed = json.loads(text)
+                parsed = json.loads(response_text)
             except json.JSONDecodeError as exc:
-                raise LlmResponseError(f"response is not valid JSON: {exc}") from exc
+                raise LlmResponseError("response is not valid JSON") from exc
 
-            verdicts = validate_response(parsed, batch.batch_id, batch.alert_ids)
+            verdicts = validate_response(
+                parsed, batch.batch_id, batch.alert_ids, alerts=batch.alerts
+            )
         except LlmTransportError as exc:
             # A timeout or transport error consumes one recorded attempt like any other
             # failed call.
-            status = "timeout" if exc.kind == "timeout" else "transport_error"
+            status = (
+                exc.kind
+                if exc.kind
+                in {
+                    "timeout",
+                    "refusal",
+                    "incomplete",
+                    "empty",
+                    "interrupted",
+                    "invalid_response",
+                    "transport_error",
+                }
+                else "transport_error"
+            )
+            metadata = exc.metadata or metadata
+            response_text = exc.response_text or response_text
             reason = redact_error(exc)
             failure_reason = f"{status}: {reason}"
             verdicts = None
@@ -223,6 +337,21 @@ def _attempt_batch(
             failure_reason = f"{status}: {reason}"
             verdicts = None
 
+        completed_at = saved["completed_at"] if saved and saved["completed_at"] else clock()
+        duration = (
+            int(saved["duration_ms"] or 0) if saved else int((time.monotonic() - started) * 1000)
+        )
+        if journal is not None and (saved is None or saved["status"] == "started"):
+            completed_at = journal.finish(
+                cycle,
+                attempt,
+                status=status,
+                response=response_text,
+                reason=None if reason is None else reason[:1000],
+                metadata=metadata,
+                duration_ms=duration,
+                completed_at=completed_at,
+            )
         batch_attempts.append(
             {
                 "run_id": run_id,
@@ -239,8 +368,9 @@ def _attempt_batch(
                 "request_payload": request_text,
                 "status": status,
                 "failure_reason": None if reason is None else reason[:1000],
-                "duration_ms": int((time.monotonic() - started) * 1000),
-                "created_at": _naive(now),
+                "duration_ms": duration,
+                "created_at": _naive(created_at),
+                "metadata": metadata,
             }
         )
 
@@ -251,7 +381,9 @@ def _attempt_batch(
                 attempt=attempt,
                 alerts=len(batch.alerts),
             )
-            return verdicts, ""
+            if journal is not None:
+                journal.complete_batch(cycle, succeeded=True)
+            return verdicts, "", completed_at
 
         log.warn(
             "llm.batch_attempt_failed", batch_id=batch.batch_id, attempt=attempt, status=status
@@ -263,7 +395,9 @@ def _attempt_batch(
         attempts=MAX_ATTEMPTS,
         alerts=len(batch.alerts),
     )
-    return None, f"batch exhausted {MAX_ATTEMPTS} attempts - {failure_reason}"[:500]
+    if journal is not None:
+        journal.complete_batch(cycle, succeeded=False)
+    return None, f"batch exhausted {MAX_ATTEMPTS} attempts - {failure_reason}"[:500], completed_at
 
 
 def mark_all_unassessed(alerts: Sequence[AlertRecord], reason: str) -> dict[str, AssessmentOutcome]:

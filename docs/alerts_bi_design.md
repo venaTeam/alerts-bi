@@ -1,6 +1,6 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12)
+**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13)
 **Last updated:** 2026-09-24
 
 ---
@@ -796,3 +796,83 @@ Scheduling is otherwise unchanged from the design: the CronJob is the only trigg
 **Access.** The app has no login of its own. It sits behind OpenShift's `oauth-proxy`, which signs the person in and admits only the standardization team (a SubjectAccessReview that only that group's role satisfies), and passes their name in `X-Forwarded-User`. The app trusts that header, which is safe only because nothing else can reach the app: it binds to loopback and refuses any other address, and the proxy is a sidecar sharing the pod's loopback. Every write is a POST carrying an HMAC token of the user and date under `ADMIN_SECRET`, and a browser-declared cross-site request is refused, so a page elsewhere on the network cannot act through a signed-in operator's browser. It runs with the owning SQL credential, has its own internal-only Route, and is never mounted on the portal or the trigger surface.
 
 No alerting was added: problems surface as failed CronJob runs and on the admin app's team list.
+
+### 7.13 LLM review quality, evaluation and durable audit
+
+**Implementation approved 2026-09-24** following the review in `llm_review_upgrade_plan.md`.
+This adds a prompt candidate, narrow applicability enforcement and local evaluation tooling.
+It does not establish measured semantic improvement or promote LLM findings into deterministic
+quality totals. Representative human adjudication and opt-in trials on the on-prem endpoint
+remain release activities. No live model deployment or change to existing publications is implied.
+
+**Prompt 1.2.0** preserves both guides verbatim, the catalogue wording and the existing response
+fields. It renders principle scope, distinguishes warnings and non-production context from
+critical paging, reads message and impact together, requires observed evidence and useful
+corrective guidance, and treats source-field instructions as untrusted data. Missing context,
+an unfamiliar name, API provenance or an unread runbook cannot establish a violation by
+themselves. R5/R6 remain legal catalogue IDs; the prompt explicitly forbids inferring panel
+suppression or volume history from neighbours. Ambiguity still defaults to `no_violation`.
+There is no new lifecycle rule, abstention state, external retrieval or historical input.
+
+After binding verdicts to exact alert IDs, validation rejects objectively inapplicable citations:
+P7–P9 and R8–R10 on v1, P7 without v2 critical severity, R7 on v2, or R4 outside Grafana.
+Rejection consumes an attempt for the entire batch; it never converts a failed response into
+a good verdict. The three total attempts and byte-identical complete-batch retries remain.
+
+**Pre-call audit is independent of completed runs.** Migration `004_llm_review_audit` adds:
+
+- `llm_prompt_artifacts`: the exact system prefix and response schema with hashes, immutable
+  per prompt version. Changing either under an existing version fails before a call.
+- `llm_review_scopes`: a production run ID or isolated evaluation ID, prompt/model versions,
+  and hashed settings including batch cap, representation, ordering, deployment and output cap.
+- `llm_review_batches`: the exact serialized request and hash, and numbered execution cycles.
+- `llm_review_attempts`: a committed start before each call, followed by its result, raw
+  response text when returned through the adapter, failure category, latency and available
+  model/token metadata. Missing usage is unknown, not zero. Complete payloads stay in SQL.
+
+A SQL session application lock prevents simultaneous assessment/resume of the same scope.
+The request and attempt start commit before the network call. A crash after a committed
+successful response replays that response locally; a started attempt with no committed
+response becomes `interrupted` and consumes its slot because the remote outcome is unknown.
+There is no exactly-once guarantee across the network/SQL boundary. A resumed cycle uses
+only its remaining slots. A later explicit run or scheduled retry after exhaustion creates
+a new numbered cycle with three slots and retains the earlier evidence. Changed request
+bytes under the same batch ID fail rather than silently rewriting the audit.
+
+The completed run, metrics, findings, projected batch attempts and durable verdict cache
+still commit together in `persist_run`. Journal-only records never appear in the portal.
+Successful responses survive failure before that final transaction; cache identity remains
+`(application, key_field, prompt_version, model_version)`. `classified_at` is the actual
+assessment event, preserved on replay, rather than the reporting window's captured `run_at`.
+Published runs refuse further assessment and replacement. Reader credentials are denied all
+four audit tables; no audit routes are added to the portal.
+
+**Endpoint provenance and capacity.** `LLM_MODEL_REVISION`, when supplied, is the immutable
+cache/model version; `LLM_MODEL` remains the deployment sent to the endpoint. Without a
+revision the existing deployment-as-version behavior remains, so operators must change the
+version when replacing weights behind an alias. Returned model IDs are also audited.
+`LLM_MAX_COMPLETION_TOKENS=0` omits the parameter; a positive value is opt-in after endpoint
+compatibility testing. Refusal, incomplete output and empty responses consume attempts.
+SDK retries remain disabled. Production retains balanced, deterministic partitions and the
+200-alert ceiling; no capacity-based or post-failure splitting is introduced.
+
+**Evaluation isolation.** `scripts/evaluate_llm.py` uses the same assessment protocol with no
+production cache lookup, run persistence or publication. It expands separate semantic cases
+through the existing mock generator. Annotations identify accepted principles/confidences,
+evidence fields and rationales; families and actual rule/application groups cannot cross
+development/holdout splits. The starter cases are explicitly draft proposals requiring human
+review, not a new acceptance oracle. `expected-results.json` is unchanged.
+
+The runner compares fixed caps 1/10/25/50/100/200, full and factored documents, within-partition
+normal/reversed order and repeated trials. It reports actual exercised batch sizes, per-case
+and per-group results, schema/provider/severity/principle slices, misses, unassessed cases,
+tokens, retries and latency. An all-good fake has undefined precision, not perfect precision.
+Only an evaluation scope may change representation or ordering; production retains its
+original behavior. Live execution requires `LLM_LIVE_TEST=true` and an explicit audit database;
+draft labels additionally require `--allow-draft`. Summaries exclude alert/response text.
+
+No trial automatically enables a prompt, publishes a review or claims a quality threshold.
+Before deployment, freeze and independently adjudicate representative labels (including good
+verdicts), compare baseline/candidate and inspect explanations and group-level uncertainty,
+exercise realistic long/large batches, and record the chosen version/cap and rollback release.
+The proposed gates and remaining policy decisions remain in `llm_review_upgrade_plan.md`.

@@ -263,7 +263,11 @@ needs defending.
 | `representative_hash` | `alert_findings` | SHA-256 of that document, so "is this the same alert we judged?" is answerable exactly |
 | `representative_at` | `alert_findings` | When the representative row was received |
 | `findings_evidence` | `alert_findings` | Per-rule evidence: one entry per matched rule with a matched-row count and one sample. Summarised per rule, not per row, because a v1 alert re-firing every five minutes would otherwise store thousands of near-identical objects |
-| `request_payload` | `llm_batch_attempts` | The exact bytes sent to the model, stored **before** the call, so a disputed verdict can be replayed |
+| `request_payload` | `llm_review_batches` | The serialized user request, committed **before** the call; completed runs also project it into `llm_batch_attempts` |
+| `system_prompt`, `response_schema` and their hashes | `llm_prompt_artifacts` | Exact prompt/schema provenance, frozen per prompt version |
+| `settings_json`, `settings_hash`, `scope_kind` | `llm_review_scopes` | Recorded batch/deployment/output settings and run-versus-evaluation isolation |
+| `response_text`, `metadata_json`, `status`, `completed_at` | `llm_review_attempts` | Available raw response, returned model/token usage, failure category and assessment event time; unknown usage stays null |
+| `cycle_number` | `llm_review_batches` | Distinguishes later explicit retries after exhaustion from resuming an interrupted three-attempt cycle |
 
 Alert documents, credentials and complete LLM payloads never appear in logs — logs carry
 identifiers, hashes, counts, timings and redacted errors only. The audit payloads live in

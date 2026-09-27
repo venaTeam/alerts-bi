@@ -50,6 +50,10 @@ BASE_TABLES: Final = (
     "run_panels",
     "review_publications",
     "finding_decisions",
+    "llm_prompt_artifacts",
+    "llm_review_scopes",
+    "llm_review_batches",
+    "llm_review_attempts",
 )
 
 

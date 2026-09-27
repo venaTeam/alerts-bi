@@ -16,20 +16,22 @@ from typing import Any
 from openai import APITimeoutError, OpenAI, OpenAIError
 
 from src.config import LlmConfig
-from src.llm.client import LlmTransportError
+from src.llm.client import Completion, LlmTransportError
 from src.llm.response import response_json_schema
 
 __all__ = ["OpenAiLlmClient"]
 
 
 class OpenAiLlmClient:
+    requires_audit = True
+
     def __init__(self, config: LlmConfig, client: Any | None = None) -> None:
         if not config.base_url:
             raise ValueError("LLM_BASE_URL is required to call the model")
         if not config.model:
             raise ValueError("LLM_MODEL is required to call the model")
         self.config = config
-        self.model_version = config.model
+        self.model_version = config.model_revision or config.model
         self.client = client or OpenAI(
             base_url=config.base_url,
             api_key=config.api_key or "not-used",
@@ -39,7 +41,10 @@ class OpenAiLlmClient:
 
     def complete(
         self, *, system_prompt: str, request_text: str, batch_id: str, attempt: int
-    ) -> str:
+    ) -> Completion:
+        options: dict[str, Any] = {}
+        if self.config.max_completion_tokens is not None:
+            options["max_completion_tokens"] = self.config.max_completion_tokens
         try:
             completion = self.client.chat.completions.create(
                 model=self.config.model,
@@ -56,13 +61,37 @@ class OpenAiLlmClient:
                         "schema": response_json_schema(),
                     },
                 },
+                **options,
             )
         except APITimeoutError as exc:
-            raise LlmTransportError(f"APITimeoutError: {str(exc)[:300]}", "timeout") from exc
+            raise LlmTransportError("model request timed out", "timeout") from exc
         except OpenAIError as exc:
-            raise LlmTransportError(f"{type(exc).__name__}: {str(exc)[:300]}", "transport") from exc
+            raise LlmTransportError(
+                f"model request failed: {type(exc).__name__}", "transport"
+            ) from exc
 
-        content = completion.choices[0].message.content if completion.choices else None
+        choice = completion.choices[0] if completion.choices else None
+        usage = completion.usage
+        details = usage.prompt_tokens_details if usage is not None else None
+        metadata = {
+            "model": completion.model,
+            "finish_reason": choice.finish_reason if choice is not None else None,
+            "input_tokens": usage.prompt_tokens if usage is not None else None,
+            "output_tokens": usage.completion_tokens if usage is not None else None,
+            "cached_tokens": details.cached_tokens if details is not None else None,
+        }
+        content = choice.message.content if choice is not None else None
+        if choice is not None and choice.message.refusal:
+            raise LlmTransportError(
+                "model refused the request", "refusal", metadata=metadata, response_text=content
+            )
+        if choice is not None and choice.finish_reason != "stop":
+            raise LlmTransportError(
+                "model did not complete the response",
+                "incomplete",
+                metadata=metadata,
+                response_text=content,
+            )
         if not isinstance(content, str) or content.strip() == "":
-            raise LlmTransportError("model returned an empty message", "empty")
-        return content
+            raise LlmTransportError("model returned an empty message", "empty", metadata=metadata)
+        return Completion(content, metadata)

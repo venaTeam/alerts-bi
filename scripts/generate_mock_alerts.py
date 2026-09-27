@@ -24,17 +24,18 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.domain.severity import code_for_name
 
-from _jsrandom import Random
-from acceptance_teams import acceptance_teams
+from scripts._jsrandom import Random
+from scripts.acceptance_teams import acceptance_teams
 
 ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
 NOW = datetime(2026, 8, 25, 18, 0, 0, tzinfo=UTC)
@@ -232,6 +233,38 @@ def expand_v2(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
             }
         )
     return rows
+
+
+def review_documents(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expand semantic-review cases with the existing fixture builders, without seeding ES.
+
+    Explicit timestamps/operators avoid consuming the ordinary fixture's random stream.
+    Stable synthetic source IDs keep the complete documents byte-stable across trials.
+    """
+    team = {"v1Operators": ["review-evaluation"], "v2Operator": "review-evaluation-v2"}
+    documents = []
+    for case in cases:
+        if ("source" in case) == ("definition" in case):
+            raise ValueError(
+                "each review case needs exactly one frozen source or fixture definition"
+            )
+        if "source" in case:
+            # Operator-supplied, already selected representative: preserve every field.
+            documents.append(deepcopy(case["source"]))
+            continue
+        definition = {
+            **case["definition"],
+            "key_field": case["case_id"],
+            "rowsAt": ["2026-08-25T12:00:00.000Z"],
+            "operatorPick": "review-evaluation",
+        }
+        expand = expand_v1 if case["schema"] == "v1" else expand_v2
+        document = expand(team, definition)[0]["doc"]
+        document["id"] = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, "alerts-bi-evaluation:" + case["case_id"])
+        )
+        documents.append(document)
+    return documents
 
 
 # ---- explicit index mappings, so a clean reload is reproducible ----
