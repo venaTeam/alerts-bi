@@ -914,10 +914,13 @@ a stuck or spamming alert already has a concrete fix. The facts behind it (`clea
 so history can be re-scored if the thresholds change. Volume itself stays displayed and
 unscored (section 2).
 
-**The prompt is deliberately unchanged at 1.2.0.** Its catalogue line still calls R6 a label
-not evaluated deterministically. Every R6 alert is withheld from the model, so the line
-cannot affect a verdict, and changing it would force a new prompt version and the
-re-classification of every alert. The wording is corrected at the next planned prompt release.
+**Prompt 1.3.0 ships with R6** (decided 2026-10-01, revising the spec's first choice to keep
+1.2.0). The system prompt embeds `ruleset_version`, so the ruleset bump to 1.1.0 changes the
+prompt text, and prompt artifacts are immutable per prompt version (section 7.13): keeping
+1.2.0 would make every live assessment fail. 1.3.0 is 1.2.0 with the R6 catalogue line
+describing the deterministic rule; the instruction not to infer volume from neighbours stays.
+Re-classification under the new version costs little in practice, because alert keys rarely
+recur across weeks (section 3.3), so few stored verdicts would have been reused anyway.
 
 **`unseen` is restored as a visibility measure** (section 3.2): rows that every one of the
 team's panels for that schema leaves out through a positive identity predicate (`=`, `IN`,
