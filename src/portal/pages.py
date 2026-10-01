@@ -496,15 +496,17 @@ def team_page(
         f'<span><span class="k">Published</span>{h(format_instant(selected.published_at))}</span>'
         "</section>"
         f"{note}"
-        '<section><div class="section-h"><h2>This week</h2><p>v1 and v2 are counted separately: '
-        "they repeat at different intervals and identify alerts differently.</p></div>"
+        '<section><div class="section-h"><h2>This week</h2><p>Where the move to v2 stands. '
+        "The phase is derived from which schemas fired this week.</p></div>"
         '<div class="card phase">'
         f'<div><div class="eyebrow">Migration phase</div><div class="steps">{steps}</div></div>'
         f'<div><div class="eyebrow">Phase-2 readiness</div><div class="meter">{meter}</div></div>'
         "</div>"
         "</section>"
         '<section id="summary"><div class="section-h"><h2>Summary</h2><p>What the alerts '
-        "did this week, why they were flagged and what is left to do.</p></div>"
+        "did this week, why they were flagged and what is left to do. v1 and v2 are counted "
+        "separately: they repeat at different intervals and identify alerts differently."
+        "</p></div>"
         f"{summary}"
         "</section>"
         '<section><div class="section-h"><h2>Over time</h2><p>One point per published week, '

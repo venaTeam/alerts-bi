@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from datetime import date
+from datetime import date, timedelta
 
 from src.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
 from src.portal.charts import TIMES, Segment, level_bar, ratio_bar, stacked_bar
@@ -28,7 +28,16 @@ from src.portal.explain import (
     rule_explanation,
 )
 from src.portal.pages import PHASE_STEPS, REPEATS, SCHEMA_NAMES, h, safe_link
-from src.rules.catalogs import V2_READINESS_RULE_IDS
+from src.rules.catalogs import (
+    R6_API_MIN_SPAN,
+    R6_API_SPAM_PER_24H,
+    R6_FLAP_CYCLES,
+    R6_FLAP_WINDOW,
+    R6_SPAM_RATIO,
+    R6_STUCK_MIN_SPAN,
+    R6_STUCK_RATIO,
+    V2_READINESS_RULE_IDS,
+)
 
 __all__ = ["format_projected_week", "render_summary_sections"]
 
@@ -37,7 +46,7 @@ RuleLink = Callable[[str | None], str]
 SCHEMAS = ("v1", "v2")
 #: How many rows the longer widgets show; the work list below has every alert.
 TOP_APPLICATIONS = 10
-TOP_FIRING = 8
+TOP_FIRING_PER_SCHEMA = 4
 TOP_LISTED = 8
 TOP_RULE_APPLICATIONS = 3
 
@@ -48,27 +57,6 @@ DONE_WHEN = {
     "phase_2": "every critical v2 alert has an impact and a runbook.",
     "done": "all of the above hold.",
 }
-
-#: The three R6 patterns, in the priority the rule applies them (design section 7.14).
-FIRE_THRESHOLDS = (
-    (
-        "flapping",
-        "Flapping",
-        "3 or more fire-and-clear cycles inside any 24 hours, on any provider.",
-    ),
-    (
-        "spamming",
-        "Spamming",
-        f"a Grafana alert firing at 2{TIMES} its repeat interval or more; an API alert with 24 "
-        "or more events per 24 hours, over at least 6 hours.",
-    ),
-    (
-        "stuck",
-        "Stuck",
-        f"a Grafana alert firing at 0.9{TIMES} its repeat interval or more for at least 72 "
-        "hours, never cleared.",
-    ),
-)
 
 _STATES = (
     ("rule_flagged", "q-rule"),
@@ -97,6 +85,35 @@ def _dec(value: float) -> str:
     """At most one decimal place, without a trailing ``.0``: ``0``, ``0.5``, ``1,250``."""
     text = f"{value:,.1f}"
     return text[:-2] if text.endswith(".0") else text
+
+
+def _hours(span: timedelta) -> str:
+    return _dec(span.total_seconds() / 3600)
+
+
+#: The three R6 patterns, in the priority the rule applies them (design section 7.14). The
+#: copy is built from the catalogue constants R6 itself uses, so the two cannot drift.
+FIRE_THRESHOLDS = (
+    (
+        "flapping",
+        "Flapping",
+        f"{R6_FLAP_CYCLES} or more fire-and-clear cycles inside any {_hours(R6_FLAP_WINDOW)} "
+        "hours, on any provider.",
+    ),
+    (
+        "spamming",
+        "Spamming",
+        f"a Grafana alert firing at {_dec(R6_SPAM_RATIO)}{TIMES} its repeat interval or more; "
+        f"an API alert with {_dec(R6_API_SPAM_PER_24H)} or more events per 24 hours, over at "
+        f"least {_hours(R6_API_MIN_SPAN)} hours.",
+    ),
+    (
+        "stuck",
+        "Stuck",
+        f"a Grafana alert firing at {_dec(R6_STUCK_RATIO)}{TIMES} its repeat interval or more "
+        f"for at least {_hours(R6_STUCK_MIN_SPAN)} hours, never cleared.",
+    ),
+)
 
 
 def _rule_order(rule_id: str) -> tuple[int, str]:
@@ -347,10 +364,14 @@ def _by_application(summary: TeamSummary, rule_link: RuleLink) -> str:
     apps = summary.by_application
     if not apps:
         return _card("apps", "Noisy alerts by application", "", _empty("No alerts this week."))
+
+    def found(alerts: int, events: int) -> str:
+        if not alerts:
+            return '<span class="sub">—</span>'
+        return f"{_plural(alerts, 'alert')} · {_plural(events, 'event')}"
+
     rows = []
     for app in apps[:TOP_APPLICATIONS]:
-        flagged = app.rule_flagged_alerts + app.llm_flagged_alerts
-        flagged_events = app.rule_flagged_events + app.llm_flagged_events
         rules = (
             " ".join(
                 f'<a class="chip rule" href="{rule_link(rid)}">{h(rid)}</a>' for rid in app.rules
@@ -359,21 +380,38 @@ def _by_application(summary: TeamSummary, rule_link: RuleLink) -> str:
         )
         rows.append(
             f"<tr><td>{h(app.application)}</td><td>{_chip(app.schema)}</td>"
-            f'<td class="num">{flagged:,} of {app.alerts:,}</td>'
-            f'<td class="num">{flagged_events:,} of {app.events:,}</td>'
+            f'<td class="num">{app.alerts:,}</td><td class="num">{app.events:,}</td>'
+            f'<td class="num">{found(app.rule_flagged_alerts, app.rule_flagged_events)}</td>'
+            f'<td class="num">{found(app.llm_flagged_alerts, app.llm_flagged_events)}</td>'
             f"<td>{rules}</td></tr>"
         )
-    more = (
-        f'<p class="sub">Showing {TOP_APPLICATIONS} of {len(apps):,} applications, most flagged '
-        "events first.</p>"
-        if len(apps) > TOP_APPLICATIONS
-        else ""
-    )
+    more = ""
+    if len(apps) > TOP_APPLICATIONS:
+        per_schema = " and ".join(
+            f"{sum(1 for app in apps if app.schema == schema):,} {schema}"
+            for schema in SCHEMAS
+            if any(app.schema == schema for app in apps)
+        )
+        more = (
+            f'<p class="sub">The {TOP_APPLICATIONS} with the most flagged events, of '
+            f"{per_schema} applications.</p>"
+        )
     return _card(
         "apps",
         "Noisy alerts by application",
-        "Flagged means a rule finding or an advisory model finding.",
-        _table(("Application", "Schema", "Flagged alerts", "Flagged events", "Rules seen"), rows)
+        "Rule findings and advisory model findings are counted in separate columns.",
+        _table(
+            (
+                "Application",
+                "Schema",
+                "Alerts",
+                "Events",
+                "Rule-flagged",
+                "Model (advisory)",
+                "Rules seen",
+            ),
+            rows,
+        )
         + more,
     )
 
@@ -407,32 +445,43 @@ def _fire(summary: TeamSummary) -> str:
         return _card(
             "fire", "How often alerts fire", "", _empty("No alerts this week.") + legend_html
         )
-    rows = []
-    for row in summary.fire[:TOP_FIRING]:
-        pattern = (
-            f'<span class="pill {h(row.pattern)}">{h(row.pattern)}</span>'
-            if row.pattern
-            else '<span class="sub">—</span>'
+
+    def block(schema: str) -> str:
+        # Ranked within the schema: v2 repeats 144 times more slowly than v1, so a shared
+        # ranking by events would push every v2 alert out of sight.
+        top = [row for row in summary.fire if row.alert.schema == schema][:TOP_FIRING_PER_SCHEMA]
+        heading = (
+            f'<div class="eyebrow">{_chip(schema)} {SCHEMA_NAMES[schema]} · {REPEATS[schema]}</div>'
         )
-        rows.append(
-            f'<tr><td class="alert">{_alert_line(row.alert)}</td>'
-            f'<td class="num">{row.alert.row_count:,}</td>'
-            f'<td class="num">{_span(row.span_hours)}</td>'
-            f"<td>{_fire_rate(row)}</td>"
-            f'<td class="num">{row.alert.max_clear_cycles_24h:,}</td>'
-            f"<td>{pattern}</td></tr>"
-        )
-    return _card(
-        "fire",
-        "How often alerts fire",
-        f"The {min(len(summary.fire), TOP_FIRING)} alerts with the most events this week, "
-        "against their schema's repeat interval.",
-        _table(
+        if not top:
+            return heading + _empty(f"No {schema} alerts this week.")
+        rows = []
+        for row in top:
+            pattern = (
+                f'<span class="pill {h(row.pattern)}">{h(row.pattern)}</span>'
+                if row.pattern
+                else '<span class="sub">—</span>'
+            )
+            rows.append(
+                f'<tr><td class="alert">{_alert_line(row.alert)}</td>'
+                f'<td class="num">{row.alert.row_count:,}</td>'
+                f'<td class="num">{_span(row.span_hours)}</td>'
+                f"<td>{_fire_rate(row)}</td>"
+                f'<td class="num">{row.alert.max_clear_cycles_24h:,}</td>'
+                f"<td>{pattern}</td></tr>"
+            )
+        return heading + _table(
             ("Alert", "Events", "Active for", "Fire rate", "Clear cycles in 24 h", "Pattern"),
             rows,
             "fire",
         )
-        + legend_html,
+
+    return _card(
+        "fire",
+        "How often alerts fire",
+        f"Each schema's {TOP_FIRING_PER_SCHEMA} alerts with the most events this week, against "
+        "that schema's repeat interval.",
+        "".join(block(schema) for schema in SCHEMAS) + legend_html,
     )
 
 
@@ -549,12 +598,17 @@ def _listed(alerts: Sequence[AlertRow]) -> str:
         f'<li>{_alert_line(alert)}<span class="cnt">{_plural(alert.row_count, "event")}</span></li>'
         for alert in ordered[:TOP_LISTED]
     )
-    more = (
-        f'<p class="sub">The {TOP_LISTED} with the most events; the work list has all '
-        f"{len(ordered):,}.</p>"
-        if len(ordered) > TOP_LISTED
-        else ""
-    )
+    more = ""
+    if len(ordered) > TOP_LISTED:
+        per_schema = " and ".join(
+            f"{sum(1 for alert in ordered if alert.schema == schema):,} {schema}"
+            for schema in SCHEMAS
+            if any(alert.schema == schema for alert in ordered)
+        )
+        more = (
+            f'<p class="sub">The {TOP_LISTED} with the most events; the work list has all of '
+            f"them: {per_schema}.</p>"
+        )
     return f'<ul class="listed">{items}</ul>{more}' if items else ""
 
 
@@ -574,11 +628,14 @@ def _hidden(summary: TeamSummary, rule_link: RuleLink) -> str:
         if totals.suppressed == 0 and totals.unseen is None:
             lines.append(_no_dashboard(schema))
             continue
-        text = (
-            f"<b>{totals.suppressed:,} events</b> hidden by a filter in your own panels"
-            if totals.suppressed
-            else "Nothing hidden by your own panels"
-        )
+        if totals.suppressed:
+            text = f"<b>{_plural(totals.suppressed, 'event')}</b> hidden by a filter in your own panels"
+        elif admin and totals.suppression_unmeasured == 0:
+            text = "Nothing hidden by your own panels"
+        else:
+            # The portal cannot see unmeasured clauses, and an operator may have some: claim
+            # only what was checked.
+            text = "No event matched a panel filter that could be checked"
         if admin and totals.suppression_unmeasured:
             text += (
                 f' <span class="sub">· {_plural(totals.suppression_unmeasured, "clause")} '
@@ -609,12 +666,13 @@ def _unseen(summary: TeamSummary) -> str:
             lines.append(_no_dashboard(schema))
             continue
         if totals.unseen:
+            verb = "reaches" if totals.unseen == 1 else "reach"
             text = (
-                f"<b>{totals.unseen:,} events</b> from "
-                f"{_plural(totals.unseen_alerts or 0, 'alert')} reach none of your dashboards"
+                f"<b>{_plural(totals.unseen, 'event')}</b> from "
+                f"{_plural(totals.unseen_alerts or 0, 'alert')} {verb} none of your dashboards"
             )
         else:
-            text = f"Every {schema} alert appears on at least one of your dashboards"
+            text = "No alert falls outside every panel's narrowing."
         if admin and totals.unseen_unmeasured:
             text += (
                 f' <span class="sub">· {_plural(totals.unseen_unmeasured, "clause")} '

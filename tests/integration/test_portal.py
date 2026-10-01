@@ -25,7 +25,9 @@ from src.db.migrate import reset_test_database
 from src.db.reader import grant_reader, read_only_problems
 from src.db.repositories import PersistencePayload, RunIsPublished, persist_run
 from src.portal.app import build_portal
+from src.portal.charts import TIMES
 from src.portal.explain import EN_DASH
+from src.portal.summary_queries import load_portal_summary
 from src.review.decisions import DecisionRefused, record_decision
 from src.review.publication import PublicationRefused, publish_run, unpublish_run
 
@@ -725,6 +727,8 @@ def test_paging_keeps_the_filters(portal: TestClient) -> None:
 PACE_TEAM = "pace-team"
 #: Four back-to-back published weeks whose v1 rules shrink a, b, c, d -> a.
 PACE_WEEKS = {
+    # Older than the lookback of the latest week: never read for it.
+    "pace0": (W1 - 2 * WEEK, "abcdefgh"),
     "pace1": (W1 - WEEK, "abcd"),
     "pace2": (W1, "abc"),
     "pace3": (W2, "ab"),
@@ -792,13 +796,19 @@ def test_the_estimate_is_drawn_from_published_weeks_only(portal: TestClient) -> 
     assert "cleanup rather than migration" in progress
     assert "registry" not in page and "per day" not in page
 
+    # Only the selected week and the three before it are read: the oldest week's extra
+    # rules (e..h) would otherwise be there to retire.
+    with connect(CONFIG.sql, DB) as db:
+        history = load_portal_summary(db, PACE_TEAM, _run_id("pace4")).history
+    assert [week.week_end for week in history] == [W1 - WEEK, W1, W2, W3]
+
     # An earlier week sees only the weeks before it, never a later one: one earlier week.
-    earlier = portal.get(f"/teams/{PACE_TEAM}/weeks/{W1.date()}").text
+    earlier = portal.get(f"/teams/{PACE_TEAM}/weeks/{(W1 - WEEK).date()}").text
     progress = earlier[earlier.index("Migration progress") : earlier.index("Over time")]
     assert "No estimate:" in progress
     assert "Needs at least 2 earlier published weeks back to back; found 1." in progress
-    assert "1.5 working days" in progress
-    assert "0.5 working days each (default)" in progress
+    assert "2 working days" in progress
+    assert f"4 v1 alert rules {TIMES} 0.5 working days each (default)" in progress
 
 
 def _alert(portal: TestClient, schema: str, application: str, key: str, week: datetime = W3) -> str:

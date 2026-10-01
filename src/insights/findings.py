@@ -8,6 +8,21 @@ from src.insights.model import AlertRow, KeyFinding, SummaryInputs
 
 _CORE_RULES = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
 _MAX_FINDINGS = 5
+_SCHEMAS = ("v1", "v2")
+
+
+def _count(n: int, noun: str) -> str:
+    """``1 v1 alert``, ``2 v1 alerts``, ``1,000 events``."""
+    return f"{n:,} {noun}{'' if n == 1 else 's'}"
+
+
+def _verb(parts: list[tuple[int, str]], singular: str, plural: str) -> str:
+    """Agree with a list of counts: singular only for exactly one thing."""
+    return singular if len(parts) == 1 and parts[0][0] == 1 else plural
+
+
+def _joined(parts: list[tuple[int, str]]) -> str:
+    return " and ".join(text for _, text in parts)
 
 
 def _largest(inputs: SummaryInputs) -> KeyFinding | None:
@@ -23,8 +38,7 @@ def _largest(inputs: SummaryInputs) -> KeyFinding | None:
     per_schema = {r.schema: r for r in inputs.rules if r.rule_id == rid}
     schema = min(per_schema, key=lambda s: (-per_schema[s].events, s))
     total = per_schema[schema]
-    noun = "alert" if total.alerts == 1 else "alerts"
-    body = f"{total.events:,} {schema} events from {total.alerts:,} {noun}."
+    body = f"{_count(total.events, f'{schema} event')} from {_count(total.alerts, 'alert')}."
     carriers = [a for a in inputs.alerts if a.schema == schema and rid in a.core_rule_ids]
     others = {tuple(sorted(set(a.core_rule_ids) - {rid})) for a in carriers}
     if carriers and len(others) == 1 and len(next(iter(others))) == 1:
@@ -33,12 +47,18 @@ def _largest(inputs: SummaryInputs) -> KeyFinding | None:
 
 
 def _unassessed(inputs: SummaryInputs) -> KeyFinding | None:
-    total = sum(s.states.get("unassessed", 0) for s in inputs.schemas.values())
-    if total <= 0:
+    """Per schema: v1 and v2 are never added together."""
+    parts = [
+        (count, _count(count, f"{schema} alert"))
+        for schema in _SCHEMAS
+        if schema in inputs.schemas
+        and (count := inputs.schemas[schema].states.get("unassessed", 0)) > 0
+    ]
+    if not parts:
         return None
     return KeyFinding(
         "unassessed",
-        f"{total:,} alerts could not be classified",
+        f"{_joined(parts)} could not be classified",
         "Unassessed should be zero. A non-zero count is a classifier failure, not a finding.",
         None,
         None,
@@ -77,16 +97,17 @@ def _concentration(inputs: SummaryInputs) -> KeyFinding | None:
 
 def _hidden(inputs: SummaryInputs) -> KeyFinding | None:
     parts = [
-        f"{inputs.schemas[s].suppressed:,} {s} events"
-        for s in ("v1", "v2")
+        (inputs.schemas[s].suppressed, _count(inputs.schemas[s].suppressed, f"{s} event"))
+        for s in _SCHEMAS
         if s in inputs.schemas and inputs.schemas[s].suppressed > 0
     ]
     if not parts:
         return None
+    verb = _verb(parts, "matches", "match")
     return KeyFinding(
         "hidden",
         "Your own panels hide alerts you still send",
-        " and ".join(parts) + " match a filter in your dashboard (R5).",
+        f"{_joined(parts)} {verb} a filter in your dashboard (R5).",
         None,
         "R5",
     )
@@ -97,13 +118,18 @@ def _unseen(inputs: SummaryInputs) -> KeyFinding | None:
     if not shown:
         return None
     parts = [
-        f"{s.unseen_alerts or 0:,} {s.schema} alerts ({s.unseen or 0:,} events)"
+        (
+            s.unseen_alerts or 0,
+            f"{_count(s.unseen_alerts or 0, f'{s.schema} alert')} "
+            f"({_count(s.unseen or 0, 'event')})",
+        )
         for s in sorted(shown, key=lambda t: t.schema)
     ]
+    verb = _verb(parts, "is", "are")
     return KeyFinding(
         "unseen",
         "Some alerts reach none of your dashboards",
-        " and ".join(parts) + " are outside every panel's narrowing.",
+        f"{_joined(parts)} {verb} outside every panel's narrowing.",
         "Widen a panel to include them, or confirm they are meant to stay out of view.",
         None,
     )
