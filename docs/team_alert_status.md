@@ -7,7 +7,7 @@
 This describes the **synthetic fixture**, not any real team. It is documentation of the
 mock, and it is deliberately **not an acceptance oracle**: the oracle is the hand-authored
 [`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json), which covers
-the four `acceptance-*` teams. The seven realistic teams exist to give the pipeline
+the six `acceptance-*` teams. The seven realistic teams exist to give the pipeline
 lifelike shapes and volumes to run against.
 
 ## Rewritten 2026-08-30 — what changed and why
@@ -81,14 +81,15 @@ A dash under readiness means **no v2 identities fired in this window**, which is
 ### payments-core — done
 
 Fully migrated, well-formed alerts. Only 5 rows over 3 identities reach the window because
-v2 re-fires every 12 hours rather than every 5 minutes — the single most important
-arithmetic fact in this dataset. No core findings, no readiness gaps, 100% readiness, and
+Grafana writes a v2 row per 12-hour evaluation rather than every 5 minutes — the single most
+important arithmetic fact in this dataset. (These are evaluation rows; the notification
+repeat interval is disabled on both schemas.) No core findings, no readiness gaps, 100% readiness, and
 with no v1 identities the derived phase is `done`.
 
 ### legacy-batch-jobs — phase_0, the classic stuck-alert shape
 
 4,355 rows over 36 daily-distinct identities: **roughly 622 rows per distinct alert**. That
-is one thing stuck and re-firing, not a team flooding the pipeline, and it is precisely why
+is one thing stuck and evaluated again and again, not a team flooding the pipeline, and it is precisely why
 `alerts` and `distinct_alerts` are always published side by side.
 
 Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R7 1/1`
@@ -138,13 +139,17 @@ does not need a second, advisory opinion first.
 
 ---
 
-## The four acceptance teams
+## The six acceptance teams
 
 These are pinned fixtures, defined in
-[`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py). Every row sits on
-`2026-08-20T12:00:00Z` or `2026-08-21T12:00:00Z` with an exact expected outcome, so
+[`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py). Outside
+`acceptance-fire-patterns`, every row sits on `2026-08-23T12:00:00Z` or
+`2026-08-24T12:00:00Z` with an exact expected outcome, so
 [`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json) can be
-computed by hand.
+computed by hand. (They sat on 2026-08-20 and 2026-08-21 until R6 began judging firing
+episodes: a Grafana alert still firing 72 hours before the window ends is stuck, and those
+days are more than 72 hours back. 2026-08-23 is 54 hours back, so no alert there is stuck,
+and every other count is unchanged by the move.)
 
 ### acceptance-core — one row per rule boundary
 
@@ -162,7 +167,7 @@ computed by hand.
 | message `i am alive` | R2 |
 | `object` = `Unknown` | R3 |
 | Grafana alert with no rule URL | R4 |
-| identity spanning two dates, bad row on the second | R1 on 08-21 only; whole identity withheld from the model |
+| identity spanning two dates, bad row on the second | R1 on 08-24 only; whole identity withheld from the model |
 | v2 missing `impact` | R8, not completion-ready |
 | v2 `critical` with no runbook | R9, **blocks** completion |
 | v2 `high` with no runbook | R9 visible, does **not** reduce readiness |
@@ -196,6 +201,32 @@ Result: 1 suppressed row, 2 unmeasured leaves.
 
 One panel excluding 3 of 5 owned rows (60%). The leaf is refused, so nothing is suppressed
 and one leaf is counted as unmeasured.
+
+### acceptance-fire-patterns — R6 by firing episodes
+
+One identity per boundary of design section 7.14, with rows from 2026-08-20 to 2026-08-24:
+
+| Case | Expected |
+|---|---|
+| Grafana, one firing row exactly 72h before the window ends | stuck (inclusive) |
+| Grafana, one firing row 71h59m before | none |
+| Grafana F, F, C and F, F, F, C | none — repeated Grafana rows are evaluations, not spam |
+| Grafana F, C, F, F, C | none |
+| Grafana, three firing rows from 114h before, never cleared | stuck |
+| Grafana, three fire → clear cycles within 20h | flapping |
+| API, three F, F, F, C cycles within 8h at 12 rows / 8h | flapping, over spamming |
+| Grafana, three cycles 26h apart first to last | none |
+| API, 24 rows over exactly 24h | spamming (inclusive) |
+| API, 23 rows over 24h; 30 rows over 4h50m; 5 rows over 100h | none |
+| v2 with per-row `resolved`, three cycles within 12h | flapping |
+| v2 evaluated every 12h for 90h, never resolved | stuck |
+
+### acceptance-unseen — dashboard visibility
+
+One v1 panel narrowed to `application = 'shown-app'`, with an `OR`-nested `node_name`
+leaf and a `node_name != 'junk'` exclusion; no v2 panel. One alert outside the narrowing is
+unseen on both of its dates; the two `junk` alerts are suppressed and never counted as
+unseen; the `OR` leaf is one unmeasured leaf; and v2 `unseen` is `NULL`, not 0.
 
 ---
 

@@ -7,6 +7,7 @@ blocks of the manifest (team summary spec sections 5 and 6).
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from src.run.verify import VerificationResult, _verify_team
@@ -50,6 +51,8 @@ def _finding(schema: str, key_field: str, **overrides: Any) -> dict[str, Any]:
         "clear_count": 0,
         "max_clear_cycles_24h": 0,
         "fire_pattern": None,
+        "max_episode_firing_rows": 0,
+        "open_since": None,
         "unseen": None,
     }
     row.update(overrides)
@@ -128,17 +131,49 @@ def test_unseen_totals_sum_the_days_and_stay_null_without_a_panel() -> None:
 
 
 def test_fire_patterns_are_compared_per_alert() -> None:
+    # open_since comes back from DATETIME2 as a naive UTC datetime.
     findings = [
-        _finding("v1", "k-stuck", fire_pattern="stuck"),
-        _finding("v1", "k-flap", fire_pattern="flapping", clear_count=3, max_clear_cycles_24h=3),
-        _finding("v1", "k-none"),
+        _finding(
+            "v1",
+            "k-stuck",
+            fire_pattern="stuck",
+            max_episode_firing_rows=1,
+            open_since=datetime(2026, 8, 22, 18, 0),
+        ),
+        _finding(
+            "v1",
+            "k-flap",
+            fire_pattern="flapping",
+            clear_count=3,
+            max_clear_cycles_24h=3,
+            max_episode_firing_rows=3,
+        ),
+        _finding("v1", "k-none", max_episode_firing_rows=2),
     ]
     expected = {
         "fire_patterns": {
             "v1": {
-                "k-stuck": {"fire_pattern": "stuck", "clear_count": 0, "max_clear_cycles_24h": 0},
-                "k-flap": {"fire_pattern": "flapping", "clear_count": 3, "max_clear_cycles_24h": 3},
-                "k-none": {"fire_pattern": None, "clear_count": 0, "max_clear_cycles_24h": 0},
+                "k-stuck": {
+                    "fire_pattern": "stuck",
+                    "clear_count": 0,
+                    "max_clear_cycles_24h": 0,
+                    "max_episode_firing_rows": 1,
+                    "open_since": "2026-08-22T18:00:00.000Z",
+                },
+                "k-flap": {
+                    "fire_pattern": "flapping",
+                    "clear_count": 3,
+                    "max_clear_cycles_24h": 3,
+                    "max_episode_firing_rows": 3,
+                    "open_since": None,
+                },
+                "k-none": {
+                    "fire_pattern": None,
+                    "clear_count": 0,
+                    "max_clear_cycles_24h": 0,
+                    "max_episode_firing_rows": 2,
+                    "open_since": None,
+                },
             }
         }
     }
@@ -146,14 +181,29 @@ def test_fire_patterns_are_compared_per_alert() -> None:
     assert check.ok, check.failures
 
     findings[0]["fire_pattern"] = "spamming"
+    findings[0]["open_since"] = datetime(2026, 8, 22, 18, 1)
     findings[1]["max_clear_cycles_24h"] = 2
+    findings[1]["max_episode_firing_rows"] = 2
     findings[2]["fire_pattern"] = "stuck"
+    findings[2]["open_since"] = datetime(2026, 8, 23, 12, 0)
     check = _verify(expected, [], findings)
     assert _failures(check) == [
         "team.v1.fire_patterns.k-stuck.fire_pattern",
+        "team.v1.fire_patterns.k-stuck.open_since",
         "team.v1.fire_patterns.k-flap.max_clear_cycles_24h",
+        "team.v1.fire_patterns.k-flap.max_episode_firing_rows",
         "team.v1.fire_patterns.k-none.fire_pattern",
+        "team.v1.fire_patterns.k-none.open_since",
     ]
+
+
+def test_a_fact_the_work_list_lacks_is_a_mismatch_not_a_crash() -> None:
+    finding = _finding("v1", "k")
+    del finding["max_episode_firing_rows"]
+    expected = {"fire_patterns": {"v1": {"k": {"max_episode_firing_rows": 1}}}}
+    check = _verify(expected, [], [finding])
+    assert _failures(check) == ["team.v1.fire_patterns.k.max_episode_firing_rows"]
+    assert check.failures[0].actual is None
 
 
 def test_an_alert_the_manifest_lists_but_the_work_list_lacks_fails() -> None:

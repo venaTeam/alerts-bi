@@ -13,6 +13,12 @@ The seven realistic teams' definitions live in ``mock_teams.json``, which was ex
 mechanically from the superseded JavaScript generator during the port so that not one
 fixture definition was retyped. The acceptance teams live in ``acceptance_teams.py``
 because they are hand-authored against exact expected outcomes.
+
+Row cadence: Grafana writes an Elasticsearch row on EVERY rule evaluation while an alert is
+firing - every 5 minutes in v1 and every 12 hours in v2 - which is why production carries
+about 100 rows per alert per day. The notification repeat interval is a different setting
+and is disabled on both schemas (design sections 1.1 and 7.14). A def's ``rowsAt`` pins its
+rows exactly; that is how the acceptance teams author an exact firing episode.
 """
 
 from __future__ import annotations
@@ -48,14 +54,15 @@ RNG = Random(20260825)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-# ---- notification-policy repeat intervals (design doc section 1.1) ----
-# v1 re-fires a still-active Grafana alert every 5 MINUTES; v2 every 12 HOURS.
-# A def's (refireCount x intervalHours) authors how long the alert was firing; the actual
-# row count is that duration divided by the schema's real repeat interval. Only
-# Grafana-provider alerts are re-fired by the notification policy - API alerts are sent by
-# the client at whatever cadence it chooses, so those keep their authored cadence.
-V1_REPEAT = timedelta(minutes=5)
-V2_REPEAT = timedelta(hours=12)
+# ---- evaluation cadence (design doc sections 1.1 and 7.14) ----
+# Grafana writes a row per evaluation of a still-firing rule: every 5 MINUTES in v1 and every
+# 12 HOURS in v2. The notification repeat interval is disabled; these rows are evaluations,
+# not re-sent notifications. A def's (refireCount x intervalHours) authors how long the
+# alert was firing; the row count is that duration divided by the schema's evaluation
+# cadence. Only Grafana-provider alerts are evaluated this way - API alerts are sent by the
+# client at whatever cadence it chooses, so those keep their authored cadence.
+V1_EVALUATION_CADENCE = timedelta(minutes=5)
+V2_EVALUATION_CADENCE = timedelta(hours=12)
 
 TWENTY_FOUR_HOURS = timedelta(hours=24)
 
@@ -107,7 +114,7 @@ def _iso(value: datetime) -> str:
     return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _repeats(definition: dict[str, Any], repeat: timedelta) -> tuple[int, timedelta]:
+def _evaluation_rows(definition: dict[str, Any], cadence: timedelta) -> tuple[int, timedelta]:
     if (definition.get("provider") or "grafana") != "grafana":
         return definition.get("refireCount", 1), timedelta(
             hours=definition.get("intervalHours", 12)
@@ -115,7 +122,7 @@ def _repeats(definition: dict[str, Any], repeat: timedelta) -> tuple[int, timede
     firing = (definition.get("refireCount", 1) - 1) * timedelta(
         hours=definition.get("intervalHours", 12)
     )
-    return int(firing / repeat) + 1, repeat
+    return int(firing / cadence) + 1, cadence
 
 
 def _time_created_for(definition: dict[str, Any], timestamp: datetime) -> str | None:
@@ -138,14 +145,14 @@ def _time_created_for(definition: dict[str, Any], timestamp: datetime) -> str | 
     return _iso(timestamp)
 
 
-def _row_timestamps(definition: dict[str, Any], repeat: timedelta) -> list[datetime]:
+def _row_timestamps(definition: dict[str, Any], cadence: timedelta) -> list[datetime]:
     """Explicit timestamps when the def pins them, otherwise the authored cadence."""
     if definition.get("rowsAt"):
         return [
             datetime.fromisoformat(str(value).replace("Z", "+00:00"))
             for value in definition["rowsAt"]
         ]
-    count, step = _repeats(definition, repeat)
+    count, step = _evaluation_rows(definition, cadence)
     recency = definition.get("recencyDays")
     end_offset = recency * DAY if recency is not None else RNG.integer(0, 3) * DAY
     last = NOW - end_offset
@@ -154,7 +161,7 @@ def _row_timestamps(definition: dict[str, Any], repeat: timedelta) -> list[datet
 
 def expand_v1(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str, Any]]:
     operator = definition.get("operatorPick") or RNG.pick(team["v1Operators"])
-    timestamps = _row_timestamps(definition, V1_REPEAT)
+    timestamps = _row_timestamps(definition, V1_EVALUATION_CADENCE)
     invalid_time = 7 in (definition.get("badRule") or [])
     rows = []
 
@@ -196,7 +203,7 @@ def expand_v1(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
 
 def expand_v2(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str, Any]]:
     operator = team["v2Operator"]
-    timestamps = _row_timestamps(definition, V2_REPEAT)
+    timestamps = _row_timestamps(definition, V2_EVALUATION_CADENCE)
     base = {
         "application": definition["application"],
         "component": definition["obj"],
@@ -392,14 +399,14 @@ def main() -> None:
             rows.extend(expanded)
             v1_rows += len(expanded)
             v1_distinct += 1
-        _tally_rules(rule_breakdown, team, "v1", team.get("v1Defs") or [], V1_REPEAT)
+        _tally_rules(rule_breakdown, team, "v1", team.get("v1Defs") or [], V1_EVALUATION_CADENCE)
 
         for definition in team.get("v2Defs") or []:
             expanded = expand_v2(team, definition)
             rows.extend(expanded)
             v2_rows += len(expanded)
             v2_distinct += 1
-        _tally_rules(rule_breakdown, team, "v2", team.get("v2Defs") or [], V2_REPEAT)
+        _tally_rules(rule_breakdown, team, "v2", team.get("v2Defs") or [], V2_EVALUATION_CADENCE)
 
         summary.append(
             {
@@ -416,7 +423,7 @@ def main() -> None:
     # Unattributed orphans - match no team's registry (design section 6).
     unattributed_v1 = 0
     for definition in unattributed["v1"]:
-        for timestamp in _row_timestamps(definition, V1_REPEAT):
+        for timestamp in _row_timestamps(definition, V1_EVALUATION_CADENCE):
             unattributed_v1 += 1
             rows.append(
                 {
@@ -445,7 +452,7 @@ def main() -> None:
 
     unattributed_v2 = 0
     for definition in unattributed["v2"]:
-        timestamps = _row_timestamps(definition, V2_REPEAT)
+        timestamps = _row_timestamps(definition, V2_EVALUATION_CADENCE)
         for index, timestamp in enumerate(timestamps):
             status = (
                 "resolved"
@@ -534,14 +541,14 @@ def _tally_rules(
     team: dict[str, Any],
     schema: str,
     definitions: list[dict[str, Any]],
-    repeat: timedelta,
+    cadence: timedelta,
 ) -> None:
     per_rule: dict[int, dict[str, int]] = {}
     for definition in definitions:
         row_count = (
             len(definition["rowsAt"])
             if definition.get("rowsAt")
-            else _repeats(definition, repeat)[0]
+            else _evaluation_rows(definition, cadence)[0]
         )
         for rule in definition.get("badRule") or []:
             entry = per_rule.setdefault(rule, {"rows": 0, "distinct": 0})
