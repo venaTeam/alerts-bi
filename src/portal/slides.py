@@ -394,18 +394,20 @@ def _not_consumed_tile(summary: TeamSummary, schema: str) -> str:
     # alerts are what the charts above count. Events stay beside it as the secondary line.
     totals = summary.inputs.schemas[schema]
     if totals.unseen is None:
-        # No panel was supplied for this schema, so nothing was measured: a "0" here would
-        # say the team's panel hides nothing when no panel was read (design 3.2).
+        # Visibility was not measured: no panel was supplied for this schema, or the week
+        # was published before the measure existed. A "0" here would say the team's panel
+        # hides nothing when no panel was read (design 3.2), and "no dashboard supplied"
+        # could be false for an older week.
         return (
             f'<div class="sl-nc {schema}">'
             f'<p class="sl-nc-n">{_chip(schema)}<b>{DASH}</b></p>'
-            '<p class="sl-na">no dashboard supplied</p></div>'
+            '<p class="sl-na">not measured this week</p></div>'
         )
     filtered = sum(
         r.alerts for r in summary.inputs.rules if r.schema == schema and r.rule_id == "R5"
     )
     unseen = (
-        '<span class="sl-na">no dashboard supplied</span>'
+        '<span class="sl-na">not measured this week</span>'
         if totals.unseen_alerts is None
         else f"{_plural(totals.unseen_alerts, 'alert')} on no dashboard"
     )

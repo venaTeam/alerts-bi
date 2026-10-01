@@ -459,7 +459,7 @@ def test_not_consumed_never_turns_a_missing_dashboard_into_zero() -> None:
     )
     v2 = nc[nc.index('"sl-chip v2"') :]
     assert '<span class="sl-chip v2">v2</span><b>—</b></p>' in nc
-    assert '<p class="sl-na">no dashboard supplied</p>' in v2
+    assert '<p class="sl-na">not measured this week</p>' in v2
     assert "<b>0</b>" not in v2 and "events" not in v2 and "filtered out" not in v2
 
     no_panel = {
@@ -468,7 +468,8 @@ def test_not_consumed_never_turns_a_missing_dashboard_into_zero() -> None:
     }
     nc = block(frame(slides(build_summary(schemas=no_panel)), 2), "Not consumed by your dashboards")
     v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
-    assert "<b>—</b>" in v1 and "no dashboard supplied" in v1 and "events" not in v1
+    assert "<b>—</b>" in v1 and "not measured this week" in v1 and "events" not in v1
+    assert "dashboard supplied" not in slides(build_summary(schemas=no_panel))
 
 
 def test_not_consumed_reads_the_r5_alerts_of_its_own_schema_only() -> None:
