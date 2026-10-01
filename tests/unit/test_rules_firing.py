@@ -45,7 +45,7 @@ def _even(n: int, length: timedelta) -> list[datetime]:
     return [T0 + timedelta(seconds=round(i * secs / (n - 1))) for i in range(n)]
 
 
-API = {"provider": "api", "alert_rule_url": None}
+API: dict[str, Any] = {"provider": "api", "alert_rule_url": None}
 
 
 # ------------------------------------------------------------------------- stuck
