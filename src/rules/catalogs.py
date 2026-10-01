@@ -82,7 +82,9 @@ R6_API_SPAM_PER_24H: Final = 24
 R6_API_RATE_WINDOW: Final = timedelta(hours=24)
 #: ... and only when the span is at least this long.
 R6_API_MIN_SPAN: Final = timedelta(hours=6)
-#: Stuck (Grafana): the open episode has lasted at least this long at the window's end.
+#: Stuck (Grafana): the open episode's firing rows span at least this long, from its first
+#: firing row to its last (inclusive). Measured to the last firing row, never to the
+#: window's end: Grafana writes a row per evaluation, so silence means it stopped firing.
 R6_STUCK_OPEN: Final = timedelta(hours=72)
 
 #: Rule set membership (design section 3.6): core rules read v1 and v2 side by side.

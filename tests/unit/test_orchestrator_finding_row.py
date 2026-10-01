@@ -25,7 +25,7 @@ def _stored(rows: list[AlertRecord]) -> dict[str, Any]:
 
 def test_open_episode_facts_are_stored_with_a_naive_utc_open_since() -> None:
     opened = WINDOW_END - timedelta(hours=80)
-    row = _stored([_row(opened), _row(opened + timedelta(hours=1))])
+    row = _stored([_row(opened), _row(opened + timedelta(hours=72))])
     assert row["max_episode_firing_rows"] == 2
     assert row["open_since"] == opened.replace(tzinfo=None)
     assert row["open_since"].tzinfo is None

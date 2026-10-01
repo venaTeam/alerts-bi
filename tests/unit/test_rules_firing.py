@@ -20,10 +20,8 @@ def _iso(t: datetime) -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def _facts(
-    rows: list[AlertRecord], schema: str = "v1", window_end: datetime = WINDOW_END
-) -> FiringFacts:
-    return firing_facts(schema, rows, select_representative(rows).provider, window_end)
+def _facts(rows: list[AlertRecord], schema: str = "v1") -> FiringFacts:
+    return firing_facts(schema, rows, select_representative(rows).provider)
 
 
 def _v1(times: list[datetime], clears: set[int] | None = None, **kw: Any) -> list[AlertRecord]:
@@ -51,20 +49,63 @@ API: dict[str, Any] = {"provider": "api", "alert_rule_url": None}
 # ------------------------------------------------------------------------- stuck
 
 
-def test_one_grafana_row_open_exactly_72h_is_stuck() -> None:
-    facts = _facts(_v1([WINDOW_END - timedelta(hours=72)]))
-    assert facts.span == timedelta(0)
+def test_open_episode_whose_firing_rows_span_exactly_72h_is_stuck() -> None:
+    # One row per 12-hour evaluation; the rows span 72h exactly (inclusive).
+    times = [T0 + i * timedelta(hours=12) for i in range(7)]
+    facts = _facts(_v1(times))
+    assert facts.open_since == T0
+    assert facts.open_span == timedelta(hours=72)
     assert facts.pattern == "stuck"
 
 
-def test_one_grafana_row_open_71h59m_is_not_stuck() -> None:
-    facts = _facts(_v1([WINDOW_END - timedelta(hours=71, minutes=59)]))
+def test_open_episode_whose_firing_rows_span_71h59m_is_not_stuck() -> None:
+    times = [T0 + i * timedelta(hours=12) for i in range(6)]
+    times.append(T0 + timedelta(hours=71, minutes=59))
+    facts = _facts(_v1(times))
+    assert facts.open_span == timedelta(hours=71, minutes=59)
+    assert facts.pattern is None
+
+
+def test_one_grafana_firing_row_then_silence_is_never_stuck() -> None:
+    # C1: one firing row 100h before the week ends, then nothing. Grafana writes a row on
+    # every evaluation, so silence means it stopped firing; one row spans zero.
+    facts = _facts(_v1([WINDOW_END - timedelta(hours=100)]))
+    assert facts.open_since == WINDOW_END - timedelta(hours=100)
+    assert facts.open_span == timedelta(0)
+    assert facts.span == timedelta(0)
+    assert facts.pattern is None
+
+
+def test_a_short_burst_long_before_the_week_ends_is_not_stuck() -> None:
+    # Three rows in ten minutes, 100h before the end: the rows span 10 minutes.
+    start = WINDOW_END - timedelta(hours=100)
+    facts = _facts(_v1([start, start + timedelta(minutes=5), start + timedelta(minutes=10)]))
+    assert facts.open_span == timedelta(minutes=10)
+    assert facts.pattern is None
+
+
+def test_stuck_does_not_depend_on_how_long_ago_the_last_row_was() -> None:
+    # The rows span 72h and end four days before the week ends: still stuck, because the
+    # open episode as its rows show it lasted 72h.
+    end = WINDOW_END - timedelta(hours=96)
+    facts = _facts(_v1([end - timedelta(hours=72), end - timedelta(hours=36), end]))
+    assert facts.open_span == timedelta(hours=72)
+    assert facts.pattern == "stuck"
+
+
+def test_stuck_measures_only_the_open_episode_not_earlier_episodes() -> None:
+    # 80h of rows overall, but the clear at +60h leaves an open episode spanning 20h.
+    times = [T0, T0 + timedelta(hours=59), T0 + timedelta(hours=60), T0 + timedelta(hours=80)]
+    facts = _facts(_v1(times, clears={2}))
+    assert facts.open_since == T0 + timedelta(hours=80)
+    assert facts.open_span == timedelta(0)
     assert facts.pattern is None
 
 
 def test_a_grafana_alert_that_cleared_is_not_stuck_and_has_no_open_episode() -> None:
     facts = _facts(_v1([T0, T0 + HOUR], clears={1}))
     assert facts.open_since is None
+    assert facts.open_span is None
     assert facts.pattern is None
 
 
@@ -74,9 +115,8 @@ def test_open_since_is_the_first_firing_row_after_the_last_clear() -> None:
 
 
 def test_api_alert_firing_for_100h_is_never_stuck() -> None:
-    facts = _facts(
-        _v1([T0, T0 + timedelta(hours=100)], **API), window_end=T0 + timedelta(hours=200)
-    )
+    facts = _facts(_v1([T0, T0 + timedelta(hours=100)], **API))
+    assert facts.open_span == timedelta(hours=100)
     assert facts.pattern is None
 
 
@@ -96,11 +136,12 @@ def test_the_longest_of_several_episodes_counts() -> None:
     assert facts.pattern is None
 
 
-def test_a_288_row_grafana_episode_open_at_least_72h_is_stuck() -> None:
+def test_a_288_row_grafana_episode_spanning_at_least_72h_is_stuck() -> None:
     step = timedelta(minutes=25)
     times = [WINDOW_END - timedelta(hours=120) + i * step for i in range(288)]
     facts = _facts(_v1(times))
     assert facts.open_since == times[0]
+    assert facts.open_span == timedelta(minutes=25 * 287)  # 119h35m
     assert facts.max_episode_firing_rows == 288
     assert facts.pattern == "stuck"
 
@@ -225,7 +266,10 @@ def test_a_clear_at_the_same_instant_as_a_firing_row_closes_the_episode() -> Non
         < firing.doc_hash
     )
     assert clear.doc_hash < firing.doc_hash
-    for rows in ([firing, clear], [clear, firing]):
+    # An earlier firing row makes the would-be open episode span 96h, so without the
+    # same-instant clear closing it, this would be stuck.
+    earlier = v1_row(**{"@timestamp": _iso(at - timedelta(hours=96)), "severity": 5})
+    for rows in ([earlier, firing, clear], [clear, firing, earlier]):
         facts = _facts(rows)
         assert facts.open_since is None
         assert facts.pattern is None
@@ -255,7 +299,13 @@ def test_ties_on_timestamp_are_ordered_by_document_hash() -> None:
 
 
 def test_engine_attaches_r6_to_every_row_and_withholds_from_llm() -> None:
-    times = [WINDOW_END - timedelta(hours=72), WINDOW_END - timedelta(hours=60)]
+    # The rows span 72h and the last one is 10h before the week ends: open_hours is the
+    # span of the open episode's firing rows (72), not the time to the week's end (82).
+    times = [
+        WINDOW_END - timedelta(hours=82),
+        WINDOW_END - timedelta(hours=40),
+        WINDOW_END - timedelta(hours=10),
+    ]
     rows = _v1(times)
     evaluation = evaluate_rows(rows, WINDOW_END)
     (identity,) = evaluation.identities.values()
@@ -268,6 +318,7 @@ def test_engine_attaches_r6_to_every_row_and_withholds_from_llm() -> None:
     for item in evaluation.rows:
         (finding,) = item.core_findings
         assert finding.rule_id == "R6"
+        assert finding.evidence["pattern"] == "stuck"
         assert finding.evidence["open_hours"] == 72.0
         assert finding.evidence["max_episode_firing_rows"] == len(rows)
     dates = sorted({r.snapshot_date for r in rows})

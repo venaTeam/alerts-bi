@@ -159,7 +159,8 @@ class FireRow:
     max_episode_firing_rows: int
     """The most firing rows in any one episode."""
     open_hours: float | None
-    """Hours from ``open_since`` to the week's end; None when no episode is open."""
+    """Hours from ``open_since`` to the open episode's last firing row (how long its firing
+    rows span); None when no episode is open."""
     events_per_24h: float | None
     """None when the span is under 6 hours. Display only."""
     pattern: str | None

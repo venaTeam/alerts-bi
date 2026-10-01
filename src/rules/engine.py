@@ -106,7 +106,11 @@ class RuleBucketCount:
 
 
 def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluation:
-    """Evaluate every row of one schema and aggregate to identities."""
+    """Evaluate every row of one schema and aggregate to identities.
+
+    ``window_end`` is kept for callers; no rule reads it. R6 stuck is measured from the
+    rows alone (``src.rules.firing``), not to the window's end.
+    """
     evaluated = [
         EvaluatedRow(
             row=row,
@@ -127,10 +131,7 @@ def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluati
         # R6 judges the identity's whole firing pattern, so a match belongs to every row
         # of the identity and the per-bucket allocation then applies unchanged.
         facts = firing_facts(
-            representative.schema,
-            [item.row for item in group],
-            representative.provider,
-            window_end,
+            representative.schema, [item.row for item in group], representative.provider
         )
         if facts.pattern is not None:
             evidence = {
@@ -139,10 +140,12 @@ def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluati
                 "clear_count": facts.clear_count,
                 "max_clear_cycles_24h": facts.max_clear_cycles_24h,
                 "max_episode_firing_rows": facts.max_episode_firing_rows,
+                # How long the open episode's firing rows span (last firing row minus
+                # open_since), never the time to the window's end; None when none is open.
                 "open_hours": (
                     None
-                    if facts.open_since is None
-                    else round((window_end - facts.open_since).total_seconds() / 3600, 2)
+                    if facts.open_span is None
+                    else round(facts.open_span.total_seconds() / 3600, 2)
                 ),
                 "span_hours": round(facts.span.total_seconds() / 3600, 2),
                 "events_per_24h": (
