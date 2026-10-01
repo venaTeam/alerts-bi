@@ -158,7 +158,7 @@ count with at least one finding is `flagged_by_rule` in `daily_metrics.csv`.
 
 ---
 
-## 6. `alert_worklist.csv` — 25 columns
+## 6. `alert_worklist.csv` — 27 columns
 
 One row per identity. This is the deliverable a team acts on.
 
@@ -181,11 +181,14 @@ One row per identity. This is the deliverable a team acts on.
 | `clear_count` | Rows in the window that clear the alert: v1 severity `clear`, v2 `status = resolved`. `0` when none |
 | `max_clear_cycles_24h` | The most fire-then-clear cycles inside any rolling 24 hours; a cycle is a clear row immediately preceded by a non-clear row. `0` when none |
 | `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
+| `max_episode_firing_rows` | The most firing rows in any one episode. An episode is a run of consecutive non-clear rows; a clear row closes it. `0` when the identity has no firing rows |
+| `open_since` | When the open episode began: the first firing row after the last clear, set only when the identity's **last** row is firing. Empty when it ended on a clear |
 | `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 
-`clear_count`, `max_clear_cycles_24h`, `fire_pattern` and `unseen` are the last four
-columns, after `message`. The first three are the stored facts behind R6 and are computed
-over every row of the identity in the window, not the representative row alone.
+`clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows`
+and `open_since` are the last six columns, after `message`. All but `unseen` are the stored
+facts behind R6 and are computed over every row of the identity in the window, not the
+representative row alone.
 
 Every field from `component` to `message` comes from the **representative row**: the identity's most
 recent row in the window. An alert enriched on Tuesday is judged as it stands on Friday.
@@ -333,7 +336,7 @@ section 7.4.
 * **No combined v1 + v2 volume conclusion.** The two schemas' row counts are not
   like-for-like, and neither are their distinct counts: v1's key is
   `application + object + node_name`, v2's is a hash of roughly a dozen fields.
-* **R6 never scores volume.** It flags one alert's firing pattern against its repeat
-  interval; it never scores a team's total volume.
+* **R6 never scores volume.** It flags one alert's firing episodes (stuck, spamming or
+  flapping); it never scores a team's total volume.
 * **`unseen` is a count, not a verdict.** It is empty, not zero, for a schema with no supplied
   panel, because zero would claim the team's dashboard was checked.

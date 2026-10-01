@@ -54,7 +54,6 @@ __all__ = [
 ]
 
 SCHEMA_NAMES = {"v1": "Appchi", "v2": "Appchi V2"}
-REPEATS = {"v1": "repeats every 5 minutes", "v2": "repeats every 12 hours"}
 PHASE_STEPS = (
     ("phase_0", "Phase 0 · Clean up"),
     ("phase_1", "Phase 1 · New rules"),

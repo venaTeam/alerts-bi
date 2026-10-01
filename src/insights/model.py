@@ -74,6 +74,8 @@ class AlertRow:
     max_clear_cycles_24h: int
     fire_pattern: str | None
     unseen: bool | None
+    max_episode_firing_rows: int = 0
+    open_since: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,10 +139,13 @@ class AppRow:
 class FireRow:
     alert: AlertRow
     span_hours: float
-    """``last_seen - first_seen + repeat interval``, in hours."""
-    ratio: float | None
-    """Rows / expected rows at the repeat interval. None for API alerts."""
-    events_per_24h: float
+    """``last_seen - first_seen``, in hours."""
+    max_episode_firing_rows: int
+    """The most firing rows in any one episode."""
+    open_hours: float | None
+    """Hours from ``open_since`` to the week's end; None when no episode is open."""
+    events_per_24h: float | None
+    """None when the span is under 6 hours. Display only."""
     pattern: str | None
     """The stored ``fire_pattern``."""
 

@@ -58,14 +58,14 @@ def _text(value: Any) -> str:
 _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
     # pattern: (title, next step, what the pattern means)
     "stuck": (
-        "Stuck: re-fired for days without clearing",
+        "Stuck: still firing with no clear for days",
         "Resolve the cause or clear the alert when it recovers; a stuck alert hides new problems.",
-        "It kept re-firing at its repeat interval for days and never cleared.",
+        "It was still firing at the end of the week and had not cleared for days.",
     ),
     "spamming": (
-        "Spamming: fires faster than its repeat interval",
-        "Send each alert from one place, once per repeat interval.",
-        "It fired faster than its repeat interval allows.",
+        "Spamming: sent again while already firing",
+        "Send each alert once when it fires and once when it clears; remove duplicate senders.",
+        "It was sent again and again while it was already firing.",
     ),
     "flapping": (
         "Flapping: fires and clears over and over",
@@ -74,8 +74,7 @@ _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
     ),
     "neutral": (
         "Firing pattern: stuck, spamming or flapping",
-        "Fix how often this alert fires: clear it on recovery and send it once per repeat "
-        "interval.",
+        "Fix how often this alert fires: send it once when it fires and once when it clears.",
         "Its firing pattern was stuck, spamming or flapping.",
     ),
 }
@@ -90,20 +89,23 @@ def _r6_why(evidence: Evidence) -> str:
     pattern = _r6_pattern(evidence)
     if evidence.get("rows") is None:
         return _R6_COPY[pattern][2]
+    open_hours = evidence.get("open_hours")
+    open_part = "" if open_hours is None else f" It had been open for {_text(open_hours)} hours."
     return (
-        f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))} over "
-        f"{_text(evidence.get('span_hours'))} hours, {_text(evidence.get('clear_count'))} "
-        f"clears, {_text(evidence.get('max_clear_cycles_24h'))} fire-and-clear cycles in "
-        "the busiest 24 hours."
+        f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))}, "
+        f"{_text(evidence.get('max_episode_firing_rows'))} in the longest firing episode, "
+        f"{_text(evidence.get('clear_count'))} clears, "
+        f"{_text(evidence.get('max_clear_cycles_24h'))} fire-and-clear cycles in the busiest "
+        f"24 hours.{open_part}"
     )
 
 
 def _r6_observed(evidence: Evidence) -> str:
-    ratio = evidence.get("ratio")
+    open_hours = evidence.get("open_hours")
     return (
-        f"{_r6_pattern(evidence)} · {_text(evidence.get('rows'))} events · "
-        f"{_text(evidence.get('span_hours'))} h"
-        + (f" · fire rate {_text(ratio)}x" if ratio is not None else "")
+        f"{_r6_pattern(evidence)} \u00b7 {_text(evidence.get('rows'))} events \u00b7 "
+        f"{_text(evidence.get('max_episode_firing_rows'))} in one episode"
+        + (f" \u00b7 open {_text(open_hours)} h" if open_hours is not None else "")
     )
 
 

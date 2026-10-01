@@ -539,7 +539,7 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
   <li>Enriching a v2 alert mints a new <code>key_field</code>, so a team that just added
       <code>impact</code> or <code>runbook_url</code> can look briefly worse. The artefact
       clears within a week.</li>
-  <li>R6 flags one alert's firing pattern against its repeat interval; it never scores a
+  <li>R6 flags one alert's firing episodes (stuck, spamming or flapping); it never scores a
       team's total volume.</li>
   <li>Phase and readiness describe only alerts that fired in this window; silent rules and
       the external alert inventory are invisible to this tool.</li>

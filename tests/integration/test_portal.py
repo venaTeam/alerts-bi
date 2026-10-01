@@ -593,7 +593,7 @@ def test_history_has_one_point_per_published_week(portal: TestClient) -> None:
     # exactly the four history lines.
     assert page.count("<polyline") == 4
     summary = page[page.index('id="summary"') : page.index("Over time")]
-    assert "<polyline" not in summary and '<svg class="ratio"' in summary
+    assert "<polyline" not in summary and "<rect" in summary
     assert page.count('class="dot v1') == 6 and page.count('class="dot v2') == 6
 
 
