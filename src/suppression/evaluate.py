@@ -24,6 +24,8 @@ from src.rules.core import Finding
 from src.suppression.fields import (
     MECHANICAL_MACROS,
     classify_field,
+    identity_attribute_for,
+    is_identity_field,
     record_attribute_for,
 )
 from src.suppression.parser import Leaf, SqlParseError, collect_leaves, parse_panel_sql
@@ -48,7 +50,11 @@ BLAST_RADIUS_LIMIT: Final = 0.5
 @dataclass(slots=True)
 class LeafOutcome:
     kind: str
-    """``suppression`` | ``ignored`` | ``unmeasured``"""
+    """``suppression`` | ``ignored`` | ``unmeasured`` | ``identity`` | ``identity_unmeasured``
+
+    The two ``identity`` kinds serve `unseen` only: a positive narrowing predicate that can
+    hide a row from the panel, and one that could not be evaluated. Neither is suppression.
+    """
     field: str | None = None
     operator: str | None = None
     reason: str | None = None
@@ -134,6 +140,81 @@ def _leaf_excludes_row(leaf: LeafOutcome, row: AlertRecord) -> bool:
     return raw in leaf.values
 
 
+def _leaf_hides_row(leaf: LeafOutcome, row: AlertRecord) -> bool:
+    """Does an identity leaf positively mismatch this row?
+
+    A NULL (or non-string) value never hides: an alert with no ``node_name`` is not shown to
+    be outside a panel that narrows on ``node_name``.
+    """
+    raw = getattr(row, leaf.attribute) if leaf.attribute else None
+    if not isinstance(raw, str):
+        return False
+    if leaf.operator == "LIKE":
+        return not any(like_to_regex(pattern).search(raw) is not None for pattern in leaf.values)
+    return raw not in leaf.values
+
+
+def _positive_form(leaf: Leaf) -> tuple[str, tuple[object, ...]] | None:
+    """Recognize ``=``, ``IN`` and ``LIKE`` (not negated) and return their operands."""
+    if leaf.type == "comparison" and leaf.operator == "=":
+        return "=", (leaf.value,)
+    if leaf.type == "in" and not leaf.negated:
+        return "IN", tuple(leaf.values)
+    if leaf.type == "like" and not leaf.negated:
+        return "LIKE", (leaf.pattern,)
+    return None
+
+
+def _interpret_identity_leaf(
+    leaf: Leaf,
+    field_name: str,
+    nested: bool,
+    definitions: Sequence[PanelVariable],
+) -> LeafOutcome | None:
+    """Interpret a positive narrowing predicate for `unseen`, or None if it is not one."""
+    positive = _positive_form(leaf)
+    if positive is None:
+        return None
+    operator, operands = positive
+
+    if nested:
+        return LeafOutcome(
+            "identity_unmeasured",
+            field=field_name,
+            operator=operator,
+            reason="identity leaf is nested inside OR/NOT and cannot be evaluated safely",
+        )
+
+    values: list[str] = []
+    for operand in operands:
+        resolved = resolve_operand(operand, definitions)  # type: ignore[arg-type]
+        if not resolved.resolved:
+            return LeafOutcome(
+                "identity_unmeasured",
+                field=field_name,
+                operator=operator,
+                reason=resolved.reason or "operand could not be resolved",
+            )
+        if resolved.all_selected:
+            # "All" shows every alert, so the leaf can hide nothing.
+            return LeafOutcome(
+                "ignored", field=field_name, reason="multi-value variable with all selected"
+            )
+        values.extend(resolved.values)
+
+    attribute = identity_attribute_for(field_name)
+    if not values or attribute is None:
+        return LeafOutcome(
+            "identity_unmeasured",
+            field=field_name,
+            operator=operator,
+            reason="identity leaf resolved to no values or has no alert attribute",
+        )
+    return LeafOutcome(
+        "identity", field=field_name, operator=operator, values=tuple(values), attribute=attribute
+    )
+
+
 def _negation_of(leaf: Leaf) -> tuple[str, tuple[object, ...]] | None:
     """Recognize the negation forms and return the operands they exclude."""
     if leaf.type == "comparison" and leaf.operator in ("!=", "<>"):
@@ -162,6 +243,13 @@ def _interpret_leaf(
 
     field_name = str(leaf.field.name)
     field_class = classify_field(field_name)
+
+    # Decided before the classification branch: `operator` is a classification field for
+    # suppression but an identity field for `unseen`. Negations fall through unchanged.
+    if is_identity_field(field_name):
+        identity = _interpret_identity_leaf(leaf, field_name, nested, definitions)
+        if identity is not None:
+            return identity
 
     if field_class == "classification":
         # Scoping, not suppression - and this distinction is the one that cannot be dropped.
@@ -267,12 +355,20 @@ def evaluate_suppression(rows: Sequence[AlertRecord], panels: Sequence[Panel]) -
     interpretations = [interpret_panel(panel) for panel in panels]
     unmeasured_leaves = 0
     excluded_per_panel: list[set[int]] = []
+    hidden_per_panel: list[set[int]] = []
+    unseen_unmeasured = 0
 
     for interpretation in interpretations:
         excluded: set[int] = set()
+        # Rows this panel hides by a positive identity narrowing. An unparseable panel
+        # hides nothing, so it can never make a row unseen on incomplete evidence.
+        hidden: set[int] = set()
+        hidden_per_panel.append(hidden)
 
         if interpretation.safety_state == "unparseable":
             unmeasured_leaves += 1
+            # The panel's narrowing is unknown too, so `unseen` is under-reported.
+            unseen_unmeasured += 1
             notes.append(f"panel {interpretation.panel_id}: {interpretation.unmeasured_reason}")
             # An unparseable panel cannot be shown to exclude anything, and unanimity
             # requires every panel to exclude a row, so it contributes an empty set -
@@ -282,6 +378,14 @@ def evaluate_suppression(rows: Sequence[AlertRecord], panels: Sequence[Panel]) -
             continue
 
         for leaf in interpretation.leaves:
+            if leaf.kind == "identity_unmeasured":
+                unseen_unmeasured += 1
+                notes.append(f"panel {interpretation.panel_id}: {leaf.field} - {leaf.reason}")
+                continue
+            if leaf.kind == "identity":
+                # No blast-radius guard: nothing is marked bad.
+                hidden.update(id(row) for row in rows if _leaf_hides_row(leaf, row))
+                continue
             if leaf.kind == "unmeasured":
                 unmeasured_leaves += 1
                 notes.append(f"panel {interpretation.panel_id}: {leaf.field} - {leaf.reason}")
@@ -319,11 +423,21 @@ def evaluate_suppression(rows: Sequence[AlertRecord], panels: Sequence[Panel]) -
         for other in excluded_per_panel[1:]:
             suppressed &= other
 
+    unseen: set[int] | None = None
+    if hidden_per_panel:
+        # Unanimity again, then disjoint from suppression: a suppressed row counts once.
+        unseen = set(hidden_per_panel[0])
+        for other in hidden_per_panel[1:]:
+            unseen &= other
+        unseen -= suppressed
+
     return SuppressionResult(
         suppressed_row_ids=suppressed,
         unmeasured_leaves=unmeasured_leaves,
         interpretations=interpretations,
         notes=notes,
+        unseen_row_ids=unseen,
+        unseen_unmeasured=unseen_unmeasured,
     )
 
 

@@ -20,10 +20,13 @@ from typing import Final, Literal
 
 __all__ = [
     "CLASSIFICATION_FIELDS",
+    "IDENTITY_FIELDS",
     "INSTANCE_FIELDS",
     "MECHANICAL_MACROS",
     "FieldClass",
     "classify_field",
+    "identity_attribute_for",
+    "is_identity_field",
     "record_attribute_for",
 ]
 
@@ -52,6 +55,11 @@ CLASSIFICATION_FIELDS: Final = frozenset(
     {"severity", "environment", "status", "provider", "operator"}
 )
 
+#: A POSITIVE predicate on one of these narrows a panel to a team's own alerts. It is read
+#: only for `unseen` (spec section 6), never for ownership and never as suppression.
+#: `operator` stays a classification field for suppression and is an identity field here.
+IDENTITY_FIELDS: Final = frozenset({"operator", "application", "node_name", "object", "component"})
+
 #: Mechanical constructs that carry no ownership or suppression meaning.
 MECHANICAL_MACROS: Final = frozenset({"__timeFilter", "__timeFrom", "__timeTo", "__interval"})
 
@@ -69,6 +77,25 @@ _RECORD_ATTRIBUTES: Final = {
     "alert_rule_url": "alert_rule_url",
     "application": "application",
 }
+
+
+#: Which record attribute an identity field reads. ``operator`` is mapped here only; the
+#: suppression table above deliberately has no entry for it.
+_IDENTITY_ATTRIBUTES: Final = {
+    "operator": "operator",
+    "application": "application",
+    "node_name": "node_name",
+    "object": "component",
+    "component": "component",
+}
+
+
+def is_identity_field(field_name: str) -> bool:
+    return field_name.lower() in IDENTITY_FIELDS
+
+
+def identity_attribute_for(field_name: str) -> str | None:
+    return _IDENTITY_ATTRIBUTES.get(field_name.lower())
 
 
 def classify_field(field_name: str) -> FieldClass:

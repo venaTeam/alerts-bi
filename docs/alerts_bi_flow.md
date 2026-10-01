@@ -64,6 +64,7 @@ Core findings affect the quality score and prevent the alert from being sent to 
 - **R3:** a required identity/ownership field is empty, or an identity/ownership field contains an exact placeholder value. An absent optional `node_name` is valid.
 - **R4:** missing alert-rule URL, but only when `provider = grafana`. API alerts never match R4.
 - **R5:** alert suppressed by the approved panel-filter logic.
+- **R6** (ruleset 1.1.0, design section 7.14): evaluated per identity over all of its rows in the window: stuck, spamming or flapping against the schema's repeat interval. When it matches, every row of that identity carries the R6 finding.
 - **R7:** invalid v1 `time_created`. It is valid only when it falls within the inclusive interval from 24 hours before `@timestamp` through `@timestamp`. Future values and older values are flagged.
 
 An alert row may match several rules. For each rule, `count` is the number of matching rows and `distinct_count` is the number of identities with at least one matching row. `flagged_by_rule` counts the union of matching rows; `flagged_by_rule_distinct` counts the union of matching identities. Findings are not copied onto other non-matching rows under the same identity.
@@ -90,6 +91,8 @@ Suppression is measurable only when all applicable conditions are safe:
 - The resulting suppression set does not exceed the 50% blast-radius guard.
 
 If these conditions are not met, the alert is recorded as `suppression_unmeasured`; it is not silently suppressed. A valid suppression becomes the core R5 finding.
+
+The same parse yields `unseen` (design section 7.14): rows every panel for the schema leaves out through a positive identity predicate, minus suppressed rows. It is a visibility count, not a finding, and is `NULL` for a schema with no supplied panel.
 
 The MVP does not call Grafana. Query variables and missing required definitions remain unresolved and make the affected suppression leaf unmeasured.
 
