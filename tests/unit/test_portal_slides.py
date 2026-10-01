@@ -16,7 +16,8 @@ import pytest
 from src.insights import KeyFinding, RuleTotal, TeamSummary
 from src.portal.assets import STYLESHEET
 from src.portal.explain import EN_DASH
-from src.portal.slides import MESSAGE_LIMIT, render_slides
+from src.portal.pages import h
+from src.portal.slides import MESSAGE_LIMIT, percent, render_slides
 from src.portal.summary_view import render_summary_sections
 
 from tests.unit.test_portal_summary_view import (
@@ -133,7 +134,60 @@ def test_the_subtitle_names_the_week_the_phase_and_readiness() -> None:
     unknown = dataclasses.replace(
         unknown, inputs=dataclasses.replace(unknown.inputs, phase2_readiness_pct=None)
     )
-    assert "phase-2 ready" not in frame(slides(unknown), 1)
+    one = frame(slides(unknown), 1)
+    assert "<span>Phase-2 readiness: —</span>" in one
+    assert "phase-2 ready" not in one
+
+
+def readiness_of(pct: float | None, phase: str = "phase_1") -> str:
+    summary = build_summary()
+    summary = dataclasses.replace(
+        summary,
+        inputs=dataclasses.replace(summary.inputs, phase2_readiness_pct=pct, phase=phase),
+    )
+    sub = re.search(r'<p class="sl-sub">(.*?)</p>', frame(slides(summary), 1))
+    assert sub is not None
+    return str(sub.group(1))
+
+
+def test_a_week_with_no_alerts_has_no_readiness_to_show() -> None:
+    sub = readiness_of(0.0, phase="no_data")
+    assert "Phase-2 readiness: —" in sub and "0%" not in sub
+
+
+@pytest.mark.parametrize(
+    ("pct", "shown"),
+    [(12.5, "13%"), (2.5, "3%"), (0.4, "<1%"), (99.6, "99%"), (100.0, "100%"), (0.0, "0%")],
+)
+def test_readiness_uses_the_shared_percent_rules(pct: float, shown: str) -> None:
+    assert f"<span>{h(shown)} phase-2 ready</span>" in readiness_of(pct)
+
+
+@pytest.mark.parametrize(
+    ("part", "whole", "shown"),
+    [
+        (1, 8, "13%"),  # 12.5 rounds half up, never to even
+        (5, 200, "3%"),  # 2.5 -> 3, where round() gives 2
+        (1, 1000, "<1%"),  # something is never "0%"
+        (5000, 1234567, "<1%"),
+        (996, 1000, "99%"),  # 99.6 is not done
+        (999999, 1000000, "99%"),
+        (7, 7, "100%"),  # only the whole is 100%
+        (0, 7, "0%"),
+        (3, 0, "0%"),
+    ],
+)
+def test_percent_rounds_half_up_and_never_overstates(part: int, whole: int, shown: str) -> None:
+    assert percent(part, whole) == shown
+
+
+def test_shares_on_the_slide_use_the_shared_percent_rules() -> None:
+    loud = alert(key_field="loud", row_count=5000)
+    v1 = schema_totals("v1", events=1234567, rule_flagged_events=1)
+    summary = build_summary(alerts=(*ALERTS, loud), schemas={"v1": v1, "v2": schema_totals("v2")})
+    one = frame(slides(summary), 1)
+    assert "2 rule-flagged alerts (&lt;1% of events)" in one
+    assert "1 alert produced <b>5,000</b> of 1,234,567 v1 events (&lt;1%)" in one
 
 
 def test_each_schema_has_its_own_figures_and_they_are_never_summed() -> None:
@@ -287,7 +341,7 @@ def test_the_estimate_with_a_projected_week() -> None:
     time = block(frame(slides(), 2), "Time to finish phase 1")
     assert "week of 12 Oct 2026" in time
     assert "2 v1 alert rules left" in time
-    assert "≈ 1 working days (0.2 weeks) at 0.5 days per rule, configured" in time
+    assert "≈ 1 working day (0.2 weeks) at 0.5 days per rule, configured" in time
     assert "A projection. v1 falling may be cleanup rather than migration." in time
 
 

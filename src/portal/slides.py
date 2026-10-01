@@ -17,13 +17,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from src.insights import AlertRow, AppRow, Estimate, RuleTotal, SchemaTotals, TeamSummary
 from src.portal.explain import EN_DASH, rule_explanation
 from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h
 from src.rules.catalogs import CORE_RULE_IDS
 
-__all__ = ["render_slides"]
+__all__ = ["percent", "render_slides"]
 
 SCHEMAS = ("v1", "v2")
 #: Caps, so a busy week cannot push content out of the frame.
@@ -61,8 +62,22 @@ def _clip(text: str, limit: int) -> str:
     return text[: limit - 1].rstrip() + ELLIPSIS
 
 
-def _pct(part: int, whole: int) -> int:
-    return round(100 * part / whole) if whole else 0
+def percent(part: float, whole: float) -> str:
+    """``part`` as a share of ``whole``, the one way every percentage on the slides is written.
+
+    Rounds half up exactly (``12.5`` is ``13%``), never to even. A share that is not nothing
+    never reads ``0%``: it reads ``<1%``. And only the whole reads ``100%``: anything short
+    of it stops at ``99%``, so a team 99.6% ready is not shown as done.
+    """
+    if whole <= 0 or part <= 0:
+        return "0%"
+    if part >= whole:
+        return "100%"
+    share = Decimal(str(part)) * 100 / Decimal(str(whole))
+    rounded = int(share.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    if rounded < 1:
+        return "<1%"
+    return f"{min(rounded, 99)}%"
 
 
 def _day(moment: datetime | date) -> str:
@@ -155,7 +170,7 @@ def _schema_panel(totals: SchemaTotals, schema: str) -> str:
         '<ul class="sl-facts">'
         f"<li>{_plural(totals.events, 'event')}</li>"
         f"<li>{flagged:,} rule-flagged {'alert' if flagged == 1 else 'alerts'} "
-        f"({_pct(totals.rule_flagged_events, totals.events)}% of events)</li>"
+        f"({h(percent(totals.rule_flagged_events, totals.events))} of events)</li>"
         "</ul></div>"
         f"{_split_bar(totals)}</div>"
     )
@@ -183,7 +198,7 @@ def _biggest(summary: TeamSummary) -> str:
         "sl-big1",
         "Biggest single source",
         f'<p class="sl-lead">1 alert produced <b>{alert.row_count:,}</b> of {total:,} '
-        f"{h(alert.schema)} events ({_pct(alert.row_count, total)}%)</p>"
+        f"{h(alert.schema)} events ({h(percent(alert.row_count, total))})</p>"
         f'<p class="sl-app">{_chip(alert.schema)}<span class="sl-app-n">{h(alert.application)}</span></p>'
         f'<p class="sl-msg">“{h(message)}”</p>',
     )
@@ -192,10 +207,11 @@ def _biggest(summary: TeamSummary) -> str:
 def _slide_one(summary: TeamSummary) -> str:
     inputs = summary.inputs
     start, end = inputs.window_start, inputs.window_end
+    # A week with no alerts has no readiness to speak of, whatever the stored value.
     readiness = (
-        DASH
-        if inputs.phase2_readiness_pct is None
-        else f"{round(inputs.phase2_readiness_pct)}% phase-2 ready"
+        f"Phase-2 readiness: {DASH}"
+        if inputs.phase2_readiness_pct is None or inputs.phase == "no_data"
+        else f"{percent(inputs.phase2_readiness_pct, 100)} phase-2 ready"
     )
     subtitle = (
         '<p class="sl-sub">'
@@ -325,7 +341,8 @@ def _time_left(estimate: Estimate) -> str:
         "Time to finish phase 1",
         f"{when}"
         f"<p>{h(_plural(estimate.rules_left, 'v1 alert rule'))} left</p>"
-        f"<p>≈ {_g(estimate.effort_days)} working days ({estimate.effort_weeks:.1f} weeks) at "
+        f"<p>≈ {_g(estimate.effort_days)} working {'day' if estimate.effort_days == 1 else 'days'} "
+        f"({estimate.effort_weeks:.1f} weeks) at "
         f"{_g(estimate.effort_days_per_rule)} days per rule, configured</p>"
         '<p class="sl-note">A projection. v1 falling may be cleanup rather than migration.</p>',
     )
