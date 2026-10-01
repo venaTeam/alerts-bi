@@ -305,6 +305,13 @@ def _arc_path(start: float, end: float) -> str:
     )
 
 
+def _share(n: int, total: int) -> str:
+    """A whole percent, rounded half up exactly (never banker's rounding); a nonzero slice
+    too small to reach 1% reads ``<1%`` rather than 0. Shares need not sum to 100."""
+    percent = (200 * n + total) // (2 * total)
+    return "<1%" if n and percent == 0 else f"{percent}%"
+
+
 def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:
     """One schema's rule-flagged alerts by primary rule. Never combined with the other."""
     counts = primary_rule_counts(summary.inputs.alerts, schema)
@@ -341,7 +348,7 @@ def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:
         f'<li class="dk"><svg viewBox="0 0 9 9" aria-hidden="true"><rect class="{rule_id.lower()}" '
         f'width="9" height="9" rx="2"/></svg><a href="{rule_link(rule_id)}">{h(rule_id)}</a> '
         f'{h(_rule_title(rule_id))} <b class="num">{n:,}</b> '
-        f'<span class="sub">{round(100 * n / total)}%</span></li>'
+        f'<span class="sub">{_share(n, total)}</span></li>'
         for rule_id, n in counts
     )
     return (

@@ -226,10 +226,13 @@ ol.phases li.on{border-color:var(--ink);background:var(--surface);box-shadow:ins
 .estc .sub,.estc .noest{margin:0}
 /* ---- Why alerts were flagged: Bars / Donut toggle (team summary, task E2) ----
    Two radios and their labels precede the two views as siblings, so the checked radio
-   hides the other view without script. Rule colours are a fixed categorical order. */
-:root{--r1:#3460C8;--r2:#C8701E;--r3:#16877A;--r4:#8A43BF;--r5:#C23A63;--r6:#5E7F12;--r7:#86602A}
-@media (prefers-color-scheme: dark){:root{--r1:#7FA4F0;--r2:#F0A65E;--r3:#5CC7B7;--r4:#C08BEA;--r5:#EE7D9C;--r6:#A9C95E;--r7:#D2AE78}}
-.vtoggle{display:flex;flex-wrap:wrap;align-items:center}
+   hides the other view without script. Rule colours are the first seven slots of the
+   validated categorical palette, in its fixed order, with its separate dark steps; the
+   validator passes both modes on the card surfaces (#FFFFFF, #161D24). Three light slots
+   sit below 3:1, so every slice is also named in the visible legend. */
+:root{--r1:#2a78d6;--r2:#eb6834;--r3:#1baf7a;--r4:#eda100;--r5:#e87ba4;--r6:#008300;--r7:#4a3aa7}
+@media (prefers-color-scheme: dark){:root{--r1:#3987e5;--r2:#d95926;--r3:#199e70;--r4:#c98500;--r5:#d55181;--r6:#008300;--r7:#9085e9}}
+.vtoggle{position:relative;display:flex;flex-wrap:wrap;align-items:center}
 .vtoggle > input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
 .vtoggle > label{font-size:12.5px;padding:4px 12px;border:1px solid var(--line-strong);color:var(--ink-2);background:var(--surface);cursor:pointer}
 .vtoggle > label[for$="-bars"]{border-radius:6px 0 0 6px}

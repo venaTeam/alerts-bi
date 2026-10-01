@@ -27,7 +27,7 @@ from src.insights import (
 )
 from src.portal.charts import TIMES
 from src.portal.explain import rule_explanation
-from src.portal.summary_view import format_projected_week, render_summary_sections
+from src.portal.summary_view import _share, format_projected_week, render_summary_sections
 from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_MIN_SPAN
 
 END = datetime(2026, 9, 28)
@@ -626,3 +626,30 @@ def test_the_toggle_names_are_stable_and_distinct_per_week() -> None:
     )
     name = _attr(re.findall(r"<input [^>]*>", _why(first))[0], "name")
     assert name not in render(later)
+
+
+@pytest.mark.parametrize(
+    ("n", "total", "shown"),
+    [
+        (1, 8, "13%"),  # 12.5 rounds half up; banker's rounding would say 12
+        (1, 200, "1%"),  # exactly 0.5 rounds up
+        (5, 8, "63%"),  # 62.5
+        (1, 201, "<1%"),  # nonzero but under half a percent: never shown as 0
+        (2, 2, "100%"),
+    ],
+)
+def test_legend_shares_round_half_up_and_never_show_zero(n: int, total: int, shown: str) -> None:
+    assert _share(n, total) == shown
+
+
+def test_the_admin_surface_renders_the_toggle_and_both_views() -> None:
+    why = _why(render(build_summary(surface="admin")))
+    radios = re.findall(r"<input [^>]*>", why)
+    assert len(radios) == 2 and " checked" in radios[0]
+    assert ">Bars</label>" in why and ">Donut</label>" in why
+    assert 'class="view-bars"' in why and 'class="view-donut"' in why
+    donut = why[why.index('class="view-donut"') :]
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert "No rule-flagged v2 alerts this week." in donut
+    portal_name = _attr(re.findall(r"<input [^>]*>", _why(render()))[0], "name")
+    assert _attr(radios[0], "name") != portal_name, "distinct per surface"
