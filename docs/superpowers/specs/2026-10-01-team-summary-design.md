@@ -171,7 +171,9 @@ reaches the model and gets no blast-radius guard, because nothing is marked bad.
   multi-value selection never hides. A row is **unseen** when every panel for its schema hides
   it, minus rows already suppressed, so the two counts are disjoint.
 - **Unmeasured:** identity leaves nested in `OR`, or with an unresolved `query` variable, add to
-  `unseen_unmeasured`. That panel is treated as showing the row.
+  `unseen_unmeasured`, and that leaf never hides a row. Another top-level identity leaf of
+  the same panel can still hide it. An unparseable panel hides nothing and adds 1 to
+  `unseen_unmeasured`.
 - **No panel for a schema:** `unseen` is `NULL`.
 - **Allocation:** `unseen` per bucket by row date; `unseen_unmeasured` on the schema's first
   bucket, like `suppression_unmeasured` (design 7.6).

@@ -927,7 +927,7 @@ team's panels for that schema leaves out through a positive identity predicate (
 `LIKE` on `operator`, `application`, `node_name`, `object` / `component`), minus rows already
 suppressed, so the two are disjoint. Positive-match and case-sensitive like suppression: a
 `NULL` value or an "all" selection never hides a row. Leaves nested under `OR` or carrying an
-unresolved `query` variable are counted in `unseen_unmeasured`. A schema with no supplied
+unresolved `query` variable are counted in `unseen_unmeasured` and never hide a row; an unparseable panel hides nothing and counts one. Because the interpretation stored per panel gained identity leaves, `PARSER_VERSION` moved to 1.1.0. A schema with no supplied
 panel reports `NULL`, never zero. It is not a rule, never counts toward `flagged`, and has no
 blast-radius guard because nothing is marked bad.
 
