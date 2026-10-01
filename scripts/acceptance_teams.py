@@ -14,7 +14,7 @@ The acceptance window is the exact 168 hours ending at the generator's fixed clo
 
 Every acceptance team except ``acceptance-fire-patterns`` puts its rows on two instants,
 DAY1 = 2026-08-23T12:00Z and DAY2 = 2026-08-24T12:00Z, so both single-date and multi-date
-allocation are exercised inside the window's partial first and last buckets.
+allocation are exercised on two full UTC days well inside the window.
 
 Why those two days: R6 (design section 7.14) calls a Grafana alert stuck when its last row
 is firing and its open episode began 72 hours or more before window_end. DAY1 is 54 hours
@@ -25,7 +25,7 @@ and unseen paths from the model. Moving the rows keeps every count the same, whe
 a clear row to each alert would have changed the counts and the representative rows.
 
 ``acceptance-fire-patterns`` is the one team that exercises R6 on purpose; its rows run
-from 2026-08-20 to 2026-08-24, still entirely inside the window.
+from 2026-08-20 to 2026-08-25, still entirely inside the window.
 """
 
 from __future__ import annotations

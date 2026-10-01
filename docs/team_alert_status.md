@@ -40,7 +40,7 @@ uv run alerts-bi run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
 
 R6 is now a core rule (ruleset 1.1.0, design section 7.14), judged by firing episodes:
 flapping on any provider, spamming for API alerts only, stuck for a Grafana alert still
-firing 72 hours or more before the window ends. Several realistic teams carry long-firing
+firing at the window end in an episode that began 72 hours or more before it. Several realistic teams carry long-firing
 Grafana alerts, so their **flagged rows** rose where R6 (stuck) now applies; volumes are
 unchanged, because the generator is unchanged. `acceptance-fire-patterns` and
 `acceptance-unseen` were added, and the other acceptance teams' rows moved from 08-20/08-21
@@ -106,8 +106,8 @@ is one thing stuck and evaluated again and again, not a team flooding the pipeli
 `alerts` and `distinct_alerts` are always published side by side.
 
 Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R6 4323/19`,
-`R7 1/1` (row count / distinct identity-days). R6 is stuck: those alerts were still firing
-72 hours and more before the window ended.
+`R7 1/1` (row count / distinct identity-days). R6 is stuck: those alerts were still firing at the end of the
+window, in an episode that began at least 72 hours before it ended.
 
 Its panel hides a heartbeat node and anything matching `%test%`, so those alerts are its
 own written admission of what to delete — the phase-0 work list.
@@ -219,7 +219,7 @@ and one leaf is counted as unmeasured.
 
 ### acceptance-fire-patterns — R6 by firing episodes
 
-One identity per boundary of design section 7.14, with rows from 2026-08-20 to 2026-08-24:
+One identity per boundary of design section 7.14, with rows from 2026-08-20 to 2026-08-25:
 
 | Case | Expected |
 |---|---|

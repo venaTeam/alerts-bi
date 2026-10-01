@@ -659,6 +659,8 @@ Reconcile before building the pipeline against the mock, or the first thing the 
 
 **Rule 6 data remains in the mock and is simply not consumed**, which is the intended state: the rule stays documented and its fixtures stay generated, so switching R6 on later does not require re-seeding.
 
+**Amended 2026-10-01 (section 7.14).** R6 is now consumed, and the mock's v1 5-minute and v2 12-hour row cadences are read as what they model: Grafana writes a row on every evaluation, so a long-firing Grafana alert yields many firing rows in one episode, never re-sent notifications. The generator logic is unchanged; only its comments and names now say so. Two `acceptance-*` teams were appended, making six: `acceptance-fire-patterns`, one identity per R6 boundary (stuck at exactly 72 hours and one minute short, Grafana row runs that are never spamming, API rate and span edges, flapping inside and outside 24 hours, flapping outranking spamming, and v2 stuck and flapping), and `acceptance-unseen` for the visibility measure. The other acceptance teams' rows moved from 2026-08-20/21 to 2026-08-23/24, 54 hours before the window end, so no single-row Grafana alert there is incidentally stuck; every count and representative row is unchanged and only the oracle's date keys moved.
+
 ### 7.6 Boundaries settled during implementation
 
 The MVP build hit nine cases this document did not fix. None changes an approved decision; each resolves an unstated edge in the direction the surrounding decision already points. Recorded here so they read as choices rather than as accidents of code.
