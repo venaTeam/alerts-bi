@@ -421,7 +421,7 @@ def test_the_interpretation_is_keyed_by_sql_text_hash_and_parser_version() -> No
     c = interpret_panel(panel("SELECT * FROM t WHERE node_name != 'y'"))
     assert a.sql_text_hash == b.sql_text_hash
     assert a.sql_text_hash != c.sql_text_hash
-    assert a.parser_version == "1.0.0"
+    assert a.parser_version == "1.1.0"
 
 
 def test_every_panel_in_the_checked_in_registry_interprets_without_a_parse_failure() -> None:
@@ -554,6 +554,8 @@ def test_unseen_an_unparseable_panel_hides_nothing() -> None:
     row = v1_row()
     result = _unseen([row], panel("SELECT * FROM t WHERE node_name !="))
     assert result.unseen_row_ids == set()
+    # The unmeasured zero must read as under-reported rather than as a measured zero.
+    assert result.unseen_unmeasured == 1
 
 
 def test_unseen_component_maps_the_v1_object_field() -> None:

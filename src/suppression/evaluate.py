@@ -367,6 +367,8 @@ def evaluate_suppression(rows: Sequence[AlertRecord], panels: Sequence[Panel]) -
 
         if interpretation.safety_state == "unparseable":
             unmeasured_leaves += 1
+            # The panel's narrowing is unknown too, so `unseen` is under-reported.
+            unseen_unmeasured += 1
             notes.append(f"panel {interpretation.panel_id}: {interpretation.unmeasured_reason}")
             # An unparseable panel cannot be shown to exclude anything, and unanimity
             # requires every panel to exclude a row, so it contributes an empty set -

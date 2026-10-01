@@ -97,6 +97,7 @@ def test_unseen_round_trips_as_null_and_as_an_integer(db: Database) -> None:
             findings=[
                 sample_finding(run_id=run["run_id"], unseen=None),
                 sample_finding(run_id=run["run_id"], key_field="other-key", unseen=True),
+                sample_finding(run_id=run["run_id"], key_field="third-key", unseen=False),
             ],
         ),
     )
@@ -110,6 +111,7 @@ def test_unseen_round_trips_as_null_and_as_an_integer(db: Database) -> None:
     findings = {row["key_field"]: row for row in get_findings(db, run["run_id"])}
     assert findings["checkout-api:cart:node-1"]["unseen"] is None
     assert findings["other-key"]["unseen"] is True
+    assert findings["third-key"]["unseen"] is False
 
 
 def test_re_persisting_the_same_run_id_replaces_its_rows(db: Database) -> None:
