@@ -12,10 +12,20 @@ The acceptance window is the exact 168 hours ending at the generator's fixed clo
   window_start 2026-08-18T18:00:00Z (inclusive)
   window_end   2026-08-25T18:00:00Z (exclusive)
 
-The first four teams' rows sit on 2026-08-20 and 2026-08-21 so both single-date and
-multi-date allocation are exercised, well inside the window's partial first and last
-buckets. ``acceptance-fire-patterns`` needs days of continuous firing for R6, so its rows
-run from 2026-08-19 to 2026-08-24 - still entirely inside the window.
+Every acceptance team except ``acceptance-fire-patterns`` puts its rows on two instants,
+DAY1 = 2026-08-23T12:00Z and DAY2 = 2026-08-24T12:00Z, so both single-date and multi-date
+allocation are exercised inside the window's partial first and last buckets.
+
+Why those two days: R6 (design section 7.14) calls a Grafana alert stuck when its last row
+is firing and its open episode began 72 hours or more before window_end. DAY1 is 54 hours
+before window_end, so a firing row there is an ordinary alert, not a stuck one. These
+instants were 2026-08-20 and 2026-08-21 until R6 moved to episodes; there every single-row
+Grafana alert would have been stuck, which would have withheld the batching, suppression
+and unseen paths from the model. Moving the rows keeps every count the same, where adding
+a clear row to each alert would have changed the counts and the representative rows.
+
+``acceptance-fire-patterns`` is the one team that exercises R6 on purpose; its rows run
+from 2026-08-20 to 2026-08-24, still entirely inside the window.
 """
 
 from __future__ import annotations
@@ -23,11 +33,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-__all__ = ["T20", "T21", "acceptance_teams"]
+__all__ = ["DAY1", "DAY2", "acceptance_teams"]
 
-#: Every acceptance row lands on one of these two instants.
-T20 = "2026-08-20T12:00:00.000Z"
-T21 = "2026-08-21T12:00:00.000Z"
+#: Every acceptance row outside acceptance-fire-patterns lands on one of these instants.
+DAY1 = "2026-08-23T12:00:00.000Z"
+DAY2 = "2026-08-24T12:00:00.000Z"
 
 RULE_URL = "https://grafana.internal/d/acc-core-1"
 GOOD_V1_MESSAGE = "Checkout error rate above 2% of requests over 5m"
@@ -44,7 +54,7 @@ def _v1(obj: str, **overrides: Any) -> dict[str, Any]:
         "message": GOOD_V1_MESSAGE,
         "operatorPick": "acc-core",
         "alert_rule_url": RULE_URL,
-        "rowsAt": [T20],
+        "rowsAt": [DAY1],
         **overrides,
     }
 
@@ -58,7 +68,7 @@ def _v2(obj: str, **overrides: Any) -> dict[str, Any]:
         "impact": GOOD_IMPACT,
         "runbook_url": GOOD_RUNBOOK,
         "alert_rule_url": RULE_URL,
-        "rowsAt": [T20],
+        "rowsAt": [DAY1],
         **overrides,
     }
 
@@ -91,11 +101,12 @@ ACCEPTANCE_CORE: dict[str, Any] = {
         _v1("c09-r7-future", timeCreated="future"),
         _v1("c10-r7-stale", timeCreated="stale"),
         # --- multi-row identity spanning two dates: three rows, one identity ---
-        # The R1 match is on the 08-21 row only, which proves findings are not projected
-        # onto the 08-20 rows that did not match, and that one core finding anywhere in the
+        # The R1 match is on the DAY2 row only, which proves findings are not projected
+        # onto the DAY1 rows that did not match, and that one core finding anywhere in the
         # window still withholds the whole identity from the model.
-        _v1("c11-multiday", message="Alert triggered", rowsAt=[T21]),
-        _v1("c11-multiday", rowsAt=[T20, T20]),
+        # Three firing rows opened at DAY1, 54h before window_end: not stuck, so no R6.
+        _v1("c11-multiday", message="Alert triggered", rowsAt=[DAY2]),
+        _v1("c11-multiday", rowsAt=[DAY1, DAY1]),
     ],
     "v2Defs": [
         # completion-ready
@@ -136,7 +147,7 @@ def _batching_team() -> dict[str, Any]:
                 "runbook_url": "https://runbooks.internal/acceptance/batch",
                 "alert_rule_url": big_rule_url,
                 "key_field": f"acc-batch-big-{suffix}",
-                "rowsAt": [T20],
+                "rowsAt": [DAY1],
             }
         )
 
@@ -152,7 +163,7 @@ def _batching_team() -> dict[str, Any]:
                 "alert_rule_url": None,
                 "provider": "api",
                 "key_field": f"acc-batch-api-{index}",
-                "rowsAt": [T20],
+                "rowsAt": [DAY1],
             }
         )
 
@@ -189,7 +200,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
         # Hidden by panel A only (its message matches A's NOT LIKE) -> NOT suppressed.
         {
@@ -199,7 +210,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": "canary probe reported a fault",
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
         # Named only inside panel B's OR-nested leaf -> unmeasured, never suppressed.
         {
@@ -209,7 +220,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
         # Named only by an unresolved query variable -> unmeasured, never suppressed.
         {
@@ -219,7 +230,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
         # Visible in both panels.
         {
@@ -229,7 +240,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
         {
             "application": "acc-sup-app",
@@ -238,7 +249,7 @@ ACCEPTANCE_SUPPRESSION: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-suppression",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         },
     ],
 }
@@ -265,7 +276,7 @@ ACCEPTANCE_BLAST_RADIUS: dict[str, Any] = {
             "message": GOOD_V1_MESSAGE,
             "operatorPick": "acc-blast",
             "alert_rule_url": RULE_URL,
-            "rowsAt": [T20],
+            "rowsAt": [DAY1],
         }
         for index, obj in enumerate(["b01", "b02", "b03", "b04", "b05"])
     ],
@@ -305,36 +316,63 @@ def _fire(obj: str, rows_at: list[str], **overrides: Any) -> dict[str, Any]:
     }
 
 
-def _fire_api(obj: str, rows_at: list[str]) -> dict[str, Any]:
-    # API alerts carry no rule URL (R4 is Grafana-only) and have no repeat interval.
-    return _fire(obj, rows_at, application="acc-fire-api", alert_rule_url=None, provider="api")
+def _clear(obj: str, rows_at: list[str]) -> dict[str, Any]:
+    """v1 clear rows: severity ``clear`` under the same application/object/node_name.
+
+    The v1 key does not include severity, so these share the firing rows' identity.
+    """
+    return _fire(obj, rows_at, severity="clear")
 
 
-def _fire_v2_episode(fired: str, resolved: str) -> dict[str, Any]:
-    # One fire -> resolve cycle. `resolves` marks the def's LAST row resolved, and the v2 key
-    # excludes status, so the three episode defs below are one identity; the explicit
-    # key_field just makes that identity readable in the oracle.
+def _fire_api(obj: str, rows_at: list[str], **overrides: Any) -> dict[str, Any]:
+    # API alerts carry no rule URL (R4 is Grafana-only).
+    return _fire(
+        obj,
+        rows_at,
+        application="acc-fire-api",
+        alert_rule_url=None,
+        provider="api",
+        **overrides,
+    )
+
+
+def _fire_v2(obj: str, key_field: str, rows_at: list[str], **overrides: Any) -> dict[str, Any]:
+    # `resolves` marks the def's LAST row resolved. The v2 key excludes status, so several
+    # defs with the same fields are one identity; the explicit key_field just makes that
+    # identity readable in the oracle.
     return {
         "application": "acc-fire-app-v2",
-        "obj": "f-h-flap",
+        "obj": obj,
         "message": GOOD_V2_MESSAGE,
         "severity": "high",
         "impact": GOOD_IMPACT,
         "runbook_url": GOOD_RUNBOOK,
         "alert_rule_url": FIRE_V2_URL,
         "provider": "grafana",
-        "key_field": "acc-fire-h-flap-v2",
-        "rowsAt": [fired, resolved],
-        "resolves": True,
+        "key_field": key_field,
+        "rowsAt": rows_at,
+        **overrides,
     }
 
 
-#: acceptance-fire-patterns - R6 boundaries (team summary spec section 5).
+def _fire_v2_episode(fired: str, resolved: str) -> dict[str, Any]:
+    """One fire -> resolve cycle of the v2 flapping identity."""
+    return _fire_v2("f-v2-flap", "acc-fire-v2-flap", [fired, resolved], resolves=True)
+
+
+#: acceptance-fire-patterns - R6 boundaries judged by firing EPISODES (design section 7.14).
 #:
-#: One identity per case; every v1 case is a distinct ``obj``. A v1 clear is a row with
-#: severity ``clear`` (code 1) under the SAME application/object/node_name - the v1 key does
-#: not include severity - so a fire -> clear sequence is two defs sharing one identity.
-#: Span = last - first + repeat interval (v1 5 min, v2 12 h).
+#: An episode is a run of consecutive firing rows closed by a clear; firing rows after the
+#: last clear form the open episode. flapping: >= 3 fire -> clear cycles in a rolling 24h,
+#: any provider. spamming: API (non-Grafana) only, n * 24h >= 24 * span and span >= 6h
+#: (span = last - first, nothing added); Grafana writes a row per evaluation, so repeated
+#: Grafana rows are never spamming. stuck: Grafana whose last row is firing and whose open
+#: episode began >= 72h before window_end (2026-08-25T18:00Z), so at or before
+#: 2026-08-22T18:00Z. Priority flapping -> spamming -> stuck. max_episode_firing_rows is
+#: stored as a diagnostic only.
+#:
+#: One identity per case; every v1 case is a distinct ``obj``. Every Grafana case that
+#: should NOT be stuck either ends on a clear or opened less than 72h before window_end.
 ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
     "name": "acceptance-fire-patterns",
     "phase": "acceptance",
@@ -345,73 +383,106 @@ ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
     "v1PanelQuery": None,
     "v2PanelQuery": None,
     "v1Defs": [
-        # (a) stuck: every 5 min from 08-21 00:00 through 08-24 00:00 = 865 rows, span
-        #     exactly 72h05m, ratio 1.0, no clear.
-        _fire("f-a-stuck", _every("2026-08-21T00:00:00.000Z", FIVE_MINUTES, 865)),
-        # (b) none: every 5 min from 08-21 00:00 through 08-23 23:00 = 853 rows, span
-        #     71h05m < 72h.
-        _fire("f-b-short", _every("2026-08-21T00:00:00.000Z", FIVE_MINUTES, 853)),
-        # (c) spamming: two definitions with one key firing on the SAME 5-minute ticks for
-        #     24h. 576 rows over a span of exactly 24h (288 intervals): ratio exactly 2.0,
-        #     the inclusive boundary.
-        _fire("f-c-dup", _every("2026-08-20T00:00:00.000Z", FIVE_MINUTES, 288)),
-        _fire("f-c-dup", _every("2026-08-20T00:00:00.000Z", FIVE_MINUTES, 288)),
-        # (c2) none: the same two definitions interleaved at a 2.5-minute offset instead.
-        #     576 rows over a span of 24h02m30s (288.5 intervals): ratio 2n/(n+1) =
-        #     576/288.5 = 1.9965 < 2.0. Interleaving can never reach 2.0; pinned here so
-        #     that property is visible rather than surprising.
-        _fire("f-c2-offset", _every("2026-08-19T00:00:00.000Z", FIVE_MINUTES, 288)),
-        _fire("f-c2-offset", _every("2026-08-19T00:02:30.000Z", FIVE_MINUTES, 288)),
-        # (d) flapping: three fire -> clear cycles on 08-24, clears at 00:05, 10:05 and 20:05
+        # (a) stuck, inclusive: one firing row exactly 72h before window_end.
+        _fire("f-a-stuck-72h", ["2026-08-22T18:00:00.000Z"]),
+        # (b) none: one firing row 71h59m before window_end.
+        _fire("f-b-open-71h59m", ["2026-08-22T18:01:00.000Z"]),
+        # (c) none: F, F, C - one episode of two firing rows, closed.
+        _fire("f-c-ffc", ["2026-08-24T01:00:00.000Z", "2026-08-24T01:05:00.000Z"]),
+        _clear("f-c-ffc", ["2026-08-24T01:10:00.000Z"]),
+        # (d) none: F, F, F, C - three firing rows (evaluations) in one closed episode.
+        #     Repeated Grafana rows are not spamming.
+        _fire(
+            "f-d-fffc",
+            ["2026-08-24T02:00:00.000Z", "2026-08-24T02:05:00.000Z", "2026-08-24T02:10:00.000Z"],
+        ),
+        _clear("f-d-fffc", ["2026-08-24T02:15:00.000Z"]),
+        # (e) none: F, C, F, F, C - the largest episode has two firing rows.
+        _fire(
+            "f-e-fcffc",
+            ["2026-08-24T03:00:00.000Z", "2026-08-24T03:10:00.000Z", "2026-08-24T03:15:00.000Z"],
+        ),
+        _clear("f-e-fcffc", ["2026-08-24T03:05:00.000Z", "2026-08-24T03:20:00.000Z"]),
+        # (f) stuck: an open episode of 3 firing rows that began 114h before window_end.
+        #     Many rows in the open episode do not make it spamming.
+        _fire(
+            "f-f-open-stuck",
+            ["2026-08-21T00:00:00.000Z", "2026-08-22T00:00:00.000Z", "2026-08-23T00:00:00.000Z"],
+        ),
+        # (g) flapping: three single-row episodes on 08-24, clears 00:05, 10:05 and 20:05
         #     (20h apart, inside one rolling 24h).
         _fire(
-            "f-d-flap",
+            "f-g-flap",
             ["2026-08-24T00:00:00.000Z", "2026-08-24T10:00:00.000Z", "2026-08-24T20:00:00.000Z"],
         ),
-        _fire(
-            "f-d-flap",
+        _clear(
+            "f-g-flap",
             ["2026-08-24T00:05:00.000Z", "2026-08-24T10:05:00.000Z", "2026-08-24T20:05:00.000Z"],
+        ),
+        # (h) flapping over spamming, API: three F, F, F, C episodes on 08-23 (clears 01:30,
+        #     04:30 and 08:00). 12 rows over a span of 8h: 12 x 24h >= 24 x 8h, so it is also
+        #     spamming; flapping has priority.
+        _fire_api(
+            "f-h-api-flap-spam",
+            [
+                *_every("2026-08-23T00:00:00.000Z", timedelta(minutes=30), 3),
+                *_every("2026-08-23T03:00:00.000Z", timedelta(minutes=30), 3),
+                *_every("2026-08-23T06:00:00.000Z", timedelta(minutes=30), 3),
+            ],
+        ),
+        _fire_api(
+            "f-h-api-flap-spam",
+            ["2026-08-23T01:30:00.000Z", "2026-08-23T04:30:00.000Z", "2026-08-23T08:00:00.000Z"],
             severity="clear",
         ),
-        # (e) none: three cycles with clears at 08-22 18:05, 08-23 07:05 and 08-23 20:05 -
-        #     26h from first to last clear, so no rolling 24h holds more than two.
+        # (i) none: three cycles with clears 26h apart first to last (08-22 18:05, 08-23
+        #     07:05, 08-23 20:05), so no rolling 24h holds more than two. Ends on a clear.
         _fire(
-            "f-e-spread",
+            "f-i-spread",
             ["2026-08-22T18:00:00.000Z", "2026-08-23T07:00:00.000Z", "2026-08-23T20:00:00.000Z"],
         ),
-        _fire(
-            "f-e-spread",
+        _clear(
+            "f-i-spread",
             ["2026-08-22T18:05:00.000Z", "2026-08-23T07:05:00.000Z", "2026-08-23T20:05:00.000Z"],
-            severity="clear",
         ),
-        # (f) spamming: v1 API, 24 rows - hourly 00:00..22:00 plus 23:55 on 08-22. Span
-        #     23h55m + 5m = exactly 24h, so exactly 24 events per 24h, the inclusive
-        #     boundary, with span >= 6h.
+        # (j) spamming: API, 24 rows over exactly 24h - hourly 08-22 00:00..22:00, then
+        #     08-23 00:00. 24 x 24h >= 24 x 24h, span >= 6h.
         _fire_api(
-            "f-f-api24",
+            "f-j-api24",
             [
                 *_every("2026-08-22T00:00:00.000Z", timedelta(hours=1), 23),
-                "2026-08-22T23:55:00.000Z",
+                "2026-08-23T00:00:00.000Z",
             ],
         ),
-        # (g) none: v1 API, 23 rows over the same 24h span - hourly 00:00..21:00 plus 23:55.
+        # (k) none: API, 23 rows over the same 24h - hourly 08-22 00:00..21:00, then 08-23
+        #     00:00. 23 x 24h < 24 x 24h.
         _fire_api(
-            "f-g-api23",
+            "f-k-api23",
             [
                 *_every("2026-08-22T00:00:00.000Z", timedelta(hours=1), 22),
-                "2026-08-22T23:55:00.000Z",
+                "2026-08-23T00:00:00.000Z",
             ],
         ),
+        # (l) none: API, 30 rows 10 minutes apart from 08-24 00:00 - span 4h50m < 6h.
+        _fire_api("f-l-api30-short", _every("2026-08-24T00:00:00.000Z", timedelta(minutes=10), 30)),
+        # (m) none: API firing for 100h with no clear - 5 rows 25h apart from 08-20 00:00.
+        #     Stuck is Grafana-only, and 5 x 24h < 24 x 100h.
+        _fire_api("f-m-api-100h", _every("2026-08-20T00:00:00.000Z", timedelta(hours=25), 5)),
     ],
     "v2Defs": [
-        # (h) flapping: v2 Grafana with per-row `resolved`. One long firing row on 08-21,
-        #     then resolved at 08-23 02:00, 08:00 and 14:00 - three cycles inside 12h.
-        #     Span 62h (50h + 12h) gives ratio 6/(62/12) = 1.16, deliberately below 2.0, so
-        #     flapping is the ONLY pattern that can match: if per-row resolved were not
-        #     read, this identity would be R6-free and acceptance would fail.
+        # (n) v2 flapping with per-row `resolved`: one firing row on 08-21, then resolved at
+        #     08-23 02:00, firing 06:00, resolved 08:00, firing 12:00, resolved 14:00 - three
+        #     clears inside 12h. Ends resolved, so it is not stuck.
         _fire_v2_episode("2026-08-21T12:00:00.000Z", "2026-08-23T02:00:00.000Z"),
         _fire_v2_episode("2026-08-23T06:00:00.000Z", "2026-08-23T08:00:00.000Z"),
         _fire_v2_episode("2026-08-23T12:00:00.000Z", "2026-08-23T14:00:00.000Z"),
+        # (o) v2 stuck: firing since 08-21 00:00 (90h before window_end), one row per 12-hour
+        #     evaluation through 08-25 12:00 - 10 rows, never resolved.
+        _fire_v2(
+            "f-v2-stuck",
+            "acc-fire-v2-stuck",
+            _every("2026-08-21T00:00:00.000Z", timedelta(hours=12), 10),
+        ),
     ],
 }
 
@@ -460,15 +531,15 @@ ACCEPTANCE_UNSEEN: dict[str, Any] = {
     "v2PanelQuery": None,
     "v1Defs": [
         # Outside the panel's application narrowing -> unseen, on both dates.
-        _unseen_v1("u01-other", "other-app", "n1", [T20, T21]),
+        _unseen_v1("u01-other", "other-app", "n1", [DAY1, DAY2]),
         # Inside the narrowing -> seen.
-        _unseen_v1("u02-shown", "shown-app", "n1", [T20, T21]),
+        _unseen_v1("u02-shown", "shown-app", "n1", [DAY1, DAY2]),
         # Excluded by node_name != 'junk' -> suppressed (R5), not unseen.
-        _unseen_v1("u03-junk", "shown-app", "junk", [T20]),
+        _unseen_v1("u03-junk", "shown-app", "junk", [DAY1]),
         # Fails only the OR-nested node_name = 'n1' leaf, which is unmeasured -> seen.
-        _unseen_v1("u04-or", "shown-app", "n2", [T20]),
+        _unseen_v1("u04-or", "shown-app", "n2", [DAY1]),
         # Outside the narrowing AND suppressed -> counted only as suppressed.
-        _unseen_v1("u05-other-junk", "other-app", "junk", [T20]),
+        _unseen_v1("u05-other-junk", "other-app", "junk", [DAY1]),
     ],
     # No v2 panel, so v2 `unseen` is NULL rather than 0.
     "v2Defs": [_unseen_v2("uv01"), _unseen_v2("uv02")],

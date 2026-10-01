@@ -33,6 +33,7 @@ from src.llm.fake import FakeLlmClient
 from src.llm.grouping import build_batches
 from src.report.render import render_run_report
 from src.run.orchestrator import execute_run
+from src.timefmt import iso_instant
 
 __all__ = ["MANIFEST_PATH", "Failure", "VerificationResult", "verify_acceptance"]
 
@@ -141,8 +142,27 @@ _SUM_ALIASES = {
 #: Daily columns that are NULL when the schema has no supplied panel (team summary spec 6).
 _NULLABLE_SUM_FIELDS = ("unseen", "unseen_unmeasured")
 
-#: Per-alert work-list values the manifest's ``fire_patterns`` block pins (spec 5.1).
-_FIRE_PATTERN_FIELDS = ("fire_pattern", "clear_count", "max_clear_cycles_24h")
+#: Per-alert work-list values the manifest's ``fire_patterns`` block pins: the R6 facts
+#: judged by firing episodes and the pattern derived from them (design section 7.14).
+_FIRE_PATTERN_FIELDS = (
+    "fire_pattern",
+    "clear_count",
+    "max_clear_cycles_24h",
+    "max_episode_firing_rows",
+    "open_since",
+)
+
+
+def _fact(finding: Mapping[str, Any], name: str) -> Any:
+    """One stored R6 fact, with ``open_since`` in the pipeline's one instant format.
+
+    A column the work list does not carry reads as None, so it fails as a mismatch against
+    the manifest instead of raising.
+    """
+    value = finding.get(name)
+    if name == "open_since" and isinstance(value, datetime):
+        return iso_instant(value)
+    return value
 
 
 def _sum_daily(daily: Sequence[Mapping[str, Any]]) -> dict[str, float | None]:
@@ -190,7 +210,7 @@ def _verify_alerts(
                 continue
             for name in _FIRE_PATTERN_FIELDS:
                 if name in fields:
-                    check.equal(f"{where}.{name}", fields[name], finding[name])
+                    check.equal(f"{where}.{name}", fields[name], _fact(finding, name))
 
     for schema, block in expected.get("unseen", {}).items():
         for key_field, value in block.get("worklist_unseen", {}).items():
