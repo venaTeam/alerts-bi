@@ -14,10 +14,12 @@ import pytest
 from src.portal.explain import (
     EN_DASH,
     decision_question,
+    dominant_r6_pattern,
     format_instant,
     format_week,
     principle_next_step,
     principle_title,
+    r6_next_step,
     rule_explanation,
 )
 from src.rules.catalogs import ALL_RULE_IDS, PRINCIPLE_CATALOG, V2_READINESS_RULE_IDS
@@ -113,11 +115,47 @@ def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
             e = rule_explanation("R6", evidence)
             text = " ".join((e.title, e.reason, e.why, e.observed, e.next_step)).lower()
             assert not [f for f in forbidden if f in text]
-    assert "once when it fires" in principle_next_step("R6")
 
 
 def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:
     assert "stuck" not in principle_next_step("R6").lower()
+    # Grafana writes a row per evaluation, so send-once advice is for API spamming only.
+    assert "once when it fires" not in principle_next_step("R6")
+    assert "send" not in principle_next_step("R6").lower()
+
+
+def test_each_r6_pattern_has_its_own_next_step() -> None:
+    assert r6_next_step("stuck") == (
+        "Fix the condition or threshold so the alert clears once the problem is handled; "
+        "silence or delete an alert nobody acts on."
+    )
+    flapping = r6_next_step("flapping")
+    assert "hysteresis" in flapping and '"for" duration' in flapping
+    assert "once when it fires" in r6_next_step("spamming")
+    for pattern in (None, "bogus", "neutral"):
+        assert r6_next_step(pattern) == principle_next_step("R6")
+        assert "once when it fires" not in r6_next_step(pattern)
+    for pattern in ("stuck", "flapping"):
+        assert "once when it fires" not in r6_next_step(pattern)
+        explained = rule_explanation("R6", {**SAMPLES["R6"], "pattern": pattern})
+        assert explained.next_step == r6_next_step(pattern)
+
+
+def test_stuck_open_hours_mean_the_span_of_the_open_episode() -> None:
+    explained = rule_explanation("R6", SAMPLES["R6"])
+    # Stuck is judged on the open episode's own firing rows, never measured to the week end.
+    assert "Its firing events since the last clear span 80.0 hours." in explained.why
+    assert "end of the week" not in explained.why
+    assert "open 80.0 h" in explained.observed
+
+
+def test_the_dominant_r6_pattern_is_the_one_most_alerts_carry() -> None:
+    assert dominant_r6_pattern([]) is None
+    assert dominant_r6_pattern([(None, 900), ("bogus", 5)]) is None
+    assert dominant_r6_pattern([("stuck", 10), ("stuck", 10), ("spamming", 999)]) == "stuck"
+    # A tie on alerts goes to more events, then to R6's own priority order.
+    assert dominant_r6_pattern([("stuck", 10), ("spamming", 30)]) == "spamming"
+    assert dominant_r6_pattern([("stuck", 10), ("flapping", 10)]) == "flapping"
 
 
 def test_api_spamming_shows_the_rate_that_justifies_it() -> None:

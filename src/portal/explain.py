@@ -14,7 +14,7 @@ The wording of each principle is taken from the pinned catalogue in
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -26,12 +26,14 @@ __all__ = [
     "QUALITY_STATE_LABELS",
     "Evidence",
     "decision_question",
+    "dominant_r6_pattern",
     "format_date",
     "format_instant",
     "format_week",
     "list_reason",
     "principle_next_step",
     "principle_title",
+    "r6_next_step",
     "rule_explanation",
 ]
 
@@ -59,8 +61,9 @@ _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
     # pattern: (title, next step, what the pattern means)
     "stuck": (
         "Stuck: still firing with no clear for days",
-        "Resolve the cause or clear the alert when it recovers; a stuck alert hides new problems.",
-        "It was still firing at the end of the week and had not cleared for days.",
+        "Fix the condition or threshold so the alert clears once the problem is handled; "
+        "silence or delete an alert nobody acts on.",
+        "Its last event was still firing, and its firing events had run for days without a clear.",
     ),
     "spamming": (
         "Spamming: sent again while already firing",
@@ -69,20 +72,54 @@ _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
     ),
     "flapping": (
         "Flapping: fires and clears over and over",
-        "Add hysteresis or a longer pending period so the alert settles before it fires.",
+        'Add hysteresis or a pending period (a "for" duration) so the alert does not toggle '
+        "between firing and clear.",
         "It fired and cleared at least three times inside 24 hours.",
     ),
     "neutral": (
         "Firing pattern: stuck, spamming or flapping",
-        "Fix how often this alert fires: send it once when it fires and once when it clears.",
+        "Fix the condition behind the firing pattern so the alert fires only while there is a "
+        "problem and clears once it is handled; each alert names its own pattern.",
         "Its firing pattern was stuck, spamming or flapping.",
     ),
 }
 
 
+#: R6's own priority order (design 7.14): an alert carries the first pattern it matches.
+_R6_PRIORITY: Final = ("flapping", "spamming", "stuck")
+
+
 def _r6_pattern(evidence: Evidence) -> str:
     pattern = _text(evidence.get("pattern"))
     return pattern if pattern in _R6_COPY else "neutral"
+
+
+def r6_next_step(pattern: str | None) -> str:
+    """The R6 next step for one firing pattern; the neutral step for none or an unknown one.
+
+    Only spamming (API alerts, which send their own rows) is told to send once on fire and
+    once on clear: a Grafana alert writes a row on every evaluation (design 1.1), so that
+    advice cannot be followed for stuck or flapping alerts.
+    """
+    return _R6_COPY[pattern if pattern in _R6_COPY else "neutral"][1]
+
+
+def dominant_r6_pattern(alerts: Iterable[tuple[str | None, int]]) -> str | None:
+    """The firing pattern carried by the most alerts, from ``(fire_pattern, events)`` pairs.
+
+    Ties go to the pattern with more events, then to R6's own priority order (flapping,
+    spamming, stuck). ``None`` when no alert carries a pattern.
+    """
+    alerts_by: dict[str, int] = {}
+    events_by: dict[str, int] = {}
+    for pattern, events in alerts:
+        if pattern not in _R6_PRIORITY:
+            continue
+        alerts_by[pattern] = alerts_by.get(pattern, 0) + 1
+        events_by[pattern] = events_by.get(pattern, 0) + events
+    if not alerts_by:
+        return None
+    return min(alerts_by, key=lambda p: (-alerts_by[p], -events_by[p], _R6_PRIORITY.index(p)))
 
 
 def _r6_rate(evidence: Evidence) -> str:
@@ -100,7 +137,11 @@ def _r6_why(evidence: Evidence) -> str:
     if evidence.get("rows") is None:
         return _R6_COPY[pattern][2]
     open_hours = evidence.get("open_hours")
-    open_part = "" if open_hours is None else f" It had been open for {_text(open_hours)} hours."
+    open_part = (
+        ""
+        if open_hours is None
+        else (f" Its firing events since the last clear span {_text(open_hours)} hours.")
+    )
     rate = _r6_rate(evidence) if pattern == "spamming" else ""
     open_part += f" {rate[0].upper()}{rate[1:]}." if rate else ""
     return (

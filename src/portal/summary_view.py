@@ -19,15 +19,18 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from datetime import date, timedelta
 from hashlib import sha256
+from typing import Final
 
 from src.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
 from src.insights.aggregate import primary_rule_counts
 from src.portal.charts import TIMES, Segment, level_bar, stacked_bar
 from src.portal.explain import (
     QUALITY_STATE_LABELS,
+    dominant_r6_pattern,
     format_instant,
     principle_next_step,
     principle_title,
+    r6_next_step,
     rule_explanation,
 )
 from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h, safe_link
@@ -42,7 +45,7 @@ from src.rules.catalogs import (
     V2_READINESS_RULE_IDS,
 )
 
-__all__ = ["format_projected_week", "render_summary_sections"]
+__all__ = ["NOT_MEASURED", "format_projected_week", "render_summary_sections"]
 
 RuleLink = Callable[[str | None], str]
 
@@ -99,7 +102,7 @@ FIRE_THRESHOLDS = (
     (
         "stuck",
         "Stuck",
-        f"still firing, no clear for \u2265{_hours(R6_STUCK_OPEN)} h before the week ends",
+        f"still firing, with firing rows spanning \u2265{_hours(R6_STUCK_OPEN)} h and no clear",
     ),
     (
         "spamming",
@@ -141,6 +144,18 @@ def _rule_label(rule_id: str) -> str:
 
 def _next_step(rule_id: str) -> str:
     return rule_explanation(rule_id, None).next_step
+
+
+def _rule_step(rule_id: str, alerts: Iterable[AlertRow]) -> str:
+    """The next step for a rule across these alerts. R6's depends on the firing pattern, so it
+    is the step of the pattern most of the rule's alerts carry (send-once only for spamming)."""
+    if rule_id != "R6":
+        return _next_step(rule_id)
+    return r6_next_step(
+        dominant_r6_pattern(
+            (a.fire_pattern, a.row_count) for a in alerts if "R6" in a.core_rule_ids
+        )
+    )
 
 
 def _card(css: str, title: str, intro: str, body: str) -> str:
@@ -447,7 +462,7 @@ def _key_findings(summary: TeamSummary, rule_link: RuleLink) -> str:
     for finding in summary.key_findings:
         step = finding.fix
         if step is None and finding.rule_filter:
-            step = _next_step(finding.rule_filter) or None
+            step = _rule_step(finding.rule_filter, summary.inputs.alerts) or None
         action = f'<div class="next"><b>Next step:</b> {h(step)}</div>' if step else ""
         show = (
             f'<a class="more" href="{rule_link(finding.rule_filter)}">Show these alerts</a>'
@@ -544,7 +559,8 @@ def _fire(summary: TeamSummary) -> str:
         f'<ul class="thresholds">{legend}</ul>'
         '<p class="sub">Grafana records an event on every evaluation, so a Grafana alert\'s '
         "event count shows how often it is evaluated, not how often it notifies. Active time "
-        "runs from the first to the last event.</p>"
+        "runs from the first to the last event; open for is the span of the firing events "
+        "since the last clear.</p>"
     )
     if not summary.fire:
         return _card(
@@ -603,7 +619,7 @@ def _fire(summary: TeamSummary) -> str:
 def _fixes(alert: AlertRow, rule_link: RuleLink) -> list[str]:
     steps = []
     for rule_id in alert.core_rule_ids:
-        step = _next_step(rule_id)
+        step = r6_next_step(alert.fire_pattern) if rule_id == "R6" else _next_step(rule_id)
         steps.append(
             f"<li><b>{h(_rule_label(rule_id))}.</b> {h(step)} "
             f'<a href="{rule_link(rule_id)}">Show alerts with {h(rule_id)}</a></li>'
@@ -675,6 +691,10 @@ def _by_rule(summary: TeamSummary, rule_link: RuleLink) -> str:
     rules = sorted(summary.inputs.rules, key=lambda r: (_rule_order(r.rule_id), r.schema))
     if not rules:
         return _card("rules", "Flagged by rule", "", _empty("No rule matched this week."))
+
+    def schema_alerts(schema: str) -> list[AlertRow]:
+        return [alert for alert in summary.inputs.alerts if alert.schema == schema]
+
     rows = []
     for rule in rules:
         kind = '<span class="chip ready">readiness</span>' if _is_readiness(rule.rule_id) else ""
@@ -687,7 +707,7 @@ def _by_rule(summary: TeamSummary, rule_link: RuleLink) -> str:
             f"<td>{h(_rule_title(rule.rule_id))} {kind}</td><td>{_chip(rule.schema)}</td>"
             f'<td class="num">{rule.events:,}</td><td class="num">{rule.alerts:,}</td>{per_day}'
             f"<td>{_top_applications(summary.inputs.alerts, rule.schema, rule.rule_id)}</td>"
-            f'<td class="step">{h(_next_step(rule.rule_id))}</td></tr>'
+            f'<td class="step">{h(_rule_step(rule.rule_id, schema_alerts(rule.schema)))}</td></tr>'
         )
     head = ["Rule", "What it means", "Schema", "Events", "Alerts"]
     if admin:
@@ -724,11 +744,17 @@ def _listed(alerts: Sequence[AlertRow]) -> str:
     return f'<ul class="listed">{items}</ul>{more}' if items else ""
 
 
-def _no_dashboard(schema: str) -> str:
+#: The NULL-``unseen`` state. NULL means either that no panel was supplied for the schema or
+#: that the week was stored before the measure existed (migration 005), and the copy has to be
+#: true in both cases, so it never claims there was no dashboard.
+NOT_MEASURED: Final = "Not measured this week"
+
+
+def _not_measured(schema: str) -> str:
     return (
-        f"<li>{_chip(schema)} <b>No dashboard supplied</b> "
-        f'<span class="sub">No {schema} panel was supplied, so nothing can be said about '
-        "what it shows.</span></li>"
+        f"<li>{_chip(schema)} <b>{NOT_MEASURED}</b> "
+        f'<span class="sub">No {schema} dashboard was supplied, or the week predates this '
+        "measure.</span></li>"
     )
 
 
@@ -737,11 +763,11 @@ def _hidden(summary: TeamSummary, rule_link: RuleLink) -> str:
     lines = []
     for schema in SCHEMAS:
         totals = summary.inputs.schemas[schema]
-        if totals.suppressed == 0 and totals.unseen is None:
-            lines.append(_no_dashboard(schema))
-            continue
         if totals.suppressed:
             text = f"<b>{_plural(totals.suppressed, 'event')}</b> hidden by a filter in your own panels"
+        elif totals.unseen is None:
+            # No panel, or a week stored before ``unseen`` existed: both are true of this.
+            text = "No event matched a panel filter that could be checked"
         elif admin and totals.suppression_unmeasured == 0:
             text = "Nothing hidden by your own panels"
         else:
@@ -775,7 +801,7 @@ def _unseen(summary: TeamSummary) -> str:
     for schema in SCHEMAS:
         totals: SchemaTotals = summary.inputs.schemas[schema]
         if totals.unseen is None:
-            lines.append(_no_dashboard(schema))
+            lines.append(_not_measured(schema))
             continue
         if totals.unseen:
             verb = "reaches" if totals.unseen == 1 else "reach"
