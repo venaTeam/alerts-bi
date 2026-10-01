@@ -133,7 +133,9 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
                 "max_clear_cycles_24h": facts.max_clear_cycles_24h,
             }
             for item in group:
-                item.core_findings.append(Finding(rule_id="R6", set="core", evidence=evidence))
+                item.core_findings.append(
+                    Finding(rule_id="R6", set="core", evidence=dict(evidence))
+                )
 
         core_rule_ids = {finding.rule_id for item in group for finding in item.core_findings}
 
