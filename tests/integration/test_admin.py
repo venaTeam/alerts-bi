@@ -52,6 +52,70 @@ def _store(run_id: str, end: datetime) -> None:
         persist_run(db, payload)
 
 
+#: A third, never-published week of the same team with a mixed work list, and a run of
+#: another team, for the Summary page.
+RUN0, OTHER = "0" * 64, "9" * 64
+W0 = W1 - WEEK
+
+
+def _store_summary_runs() -> None:
+    def alert(key: str, **overrides: object) -> dict[str, object]:
+        return sample_finding(run_id=RUN0, key_field=key, **overrides)
+
+    payload = PersistencePayload(
+        run=sample_run(
+            run_id=RUN0,
+            run_at=W0,
+            window_start=W0 - WEEK,
+            window_end=W0,
+            registry_entry_snapshot=(
+                '{"team_id":"checkout-api","v1_operators":["checkout"],"v2_operator":"co-v2",'
+                '"panels":[{"panel_id":"main","schema":"v1",'
+                '"sql":"SELECT * FROM alerts WHERE node_name != \'junk\' AND a < 3"}]}'
+            ),
+        ),
+        daily_metrics=[
+            sample_daily(run_id=RUN0),
+            sample_daily(run_id=RUN0, alert_schema="v2", alerts=2, distinct_alerts=1),
+        ],
+        findings=[
+            alert(
+                "k-r1",
+                message="Something went wrong <b>now</b>",
+                core_rule_ids="R1",
+                quality_state="rule_flagged",
+                llm_principle_id=None,
+                llm_confidence=None,
+                llm_justification=None,
+            ),
+            alert(
+                "k-r10",
+                message="Disk full on R10 host",
+                core_rule_ids="R3",
+                quality_state="rule_flagged",
+                llm_principle_id=None,
+                llm_confidence=None,
+                llm_justification=None,
+            ),
+            alert("k-good", message="Checkout latency above 2s"),
+            alert(
+                "k-v2",
+                alert_schema="v2",
+                message="Payment errors above 1%",
+                readiness_rule_ids="R8",
+            ),
+        ],
+    )
+    other = PersistencePayload(
+        run=sample_run(run_id=OTHER, team_id="payments-api", team_display_name="Payments API"),
+        daily_metrics=[sample_daily(run_id=OTHER, team_id="payments-api")],
+        findings=[sample_finding(run_id=OTHER)],
+    )
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, payload)
+        persist_run(db, other)
+
+
 @pytest.fixture(scope="module")
 def client() -> Iterator[TestClient]:
     try:
@@ -60,6 +124,7 @@ def client() -> Iterator[TestClient]:
         pytest.skip(f"SQL Server is not reachable: {exc}")
     _store(RUN1, W1)
     _store(RUN2, W2)
+    _store_summary_runs()
     app = build_admin(AdminSettings(config=CONFIG, database=DB, secret=SECRET))
     with TestClient(app, follow_redirects=False) as test_client:
         yield test_client
@@ -195,3 +260,78 @@ def test_the_full_scorecard_renders_from_sql_with_its_own_policy(client: TestCli
 
 def test_an_unknown_run_is_not_found(client: TestClient) -> None:
     assert client.get("/runs/nope/scorecard", headers=ALICE).status_code == 404
+
+
+# ------------------------------------------------------------------ the Summary page
+
+
+def test_the_summary_needs_the_login_proxys_identity(client: TestClient) -> None:
+    response = client.get(f"/teams/{TEAM}/summary")
+    assert response.status_code == 401
+    assert "content-security-policy" in response.headers
+
+
+def test_the_summary_of_a_persisted_run_renders_for_the_signed_in_operator(
+    client: TestClient,
+) -> None:
+    response = client.get(f"/teams/{TEAM}/summary?run_id={RUN0}", headers=ALICE)
+    assert response.status_code == 200
+    page = response.text
+    assert "Signed in as alice" in page
+    assert "script-src" not in response.headers["content-security-policy"]
+    assert "<script" not in page and " style=" not in page
+    assert "Something went wrong &lt;b&gt;now&lt;/b&gt;" in page
+    assert RUN0 in page and "never published" in page
+    assert "<mark" in page and "a &lt; 3" in page, "panel SQL is escaped and marked"
+    for run_id in (RUN0, RUN1, RUN2):
+        assert f'<option value="{run_id}"' in page, "the run picker lists the team's runs"
+    assert f'<option value="{OTHER}"' not in page
+
+
+def test_the_summary_defaults_to_the_latest_completed_run(client: TestClient) -> None:
+    page = client.get(f"/teams/{TEAM}/summary", headers=ALICE).text
+    assert f'<option value="{RUN2}" selected>' in page
+
+
+def test_the_summary_of_a_published_week_reads_its_published_history(client: TestClient) -> None:
+    with connect(CONFIG.sql, DB) as db:
+        published = db.query_one(
+            "SELECT run_id FROM review_publications WHERE withdrawn_at IS NULL "
+            "AND team_id = :team ORDER BY window_end DESC",
+            {"team": TEAM},
+        )
+    assert published is not None, "the publishing test above left a week published"
+    page = client.get(f"/teams/{TEAM}/summary?run_id={published['run_id']}", headers=ALICE)
+    assert page.status_code == 200 and "published</span>" in page.text
+
+
+def test_an_unknown_run_or_another_teams_run_is_not_found(client: TestClient) -> None:
+    assert client.get(f"/teams/{TEAM}/summary?run_id=nope", headers=ALICE).status_code == 404
+    assert client.get(f"/teams/{TEAM}/summary?run_id={OTHER}", headers=ALICE).status_code == 404
+    assert client.get("/teams/no-such-team/summary", headers=ALICE).status_code == 404
+
+
+def test_the_work_list_filters_by_state_schema_and_rule(client: TestClient) -> None:
+    base = f"/teams/{TEAM}/summary?run_id={RUN0}"
+    everything = client.get(base, headers=ALICE).text
+    assert "Showing 1&ndash;4 of 4" in everything
+    flagged = client.get(base + "&state=rule_flagged&rule=R1", headers=ALICE).text
+    assert "Showing 1&ndash;1 of 1" in flagged
+    worklist = flagged[flagged.index('id="worklist"') :]
+    assert "Something went wrong" in worklist and "Disk full" not in worklist
+    v2 = client.get(base + "&schema=v2", headers=ALICE).text
+    assert "Showing 1&ndash;1 of 1" in v2 and "Payment errors" in v2
+    assert "/findings" in v2, "each row links to the findings and decisions page"
+    for bad in ("&state=bogus", "&schema=v3", "&rule=R11", "&rule=P1"):
+        assert client.get(base + bad, headers=ALICE).status_code == 422
+
+
+def test_the_summary_is_read_only(client: TestClient) -> None:
+    assert client.post(f"/teams/{TEAM}/summary", headers=ALICE).status_code == 405
+    assert client.put(f"/teams/{TEAM}/summary", headers=ALICE).status_code == 405
+
+
+def test_the_team_page_and_dashboard_link_to_the_summary(client: TestClient) -> None:
+    assert f"/teams/{TEAM}/summary" in client.get("/", headers=ALICE).text
+    team = client.get(f"/teams/{TEAM}", headers=ALICE).text
+    assert f"/teams/{TEAM}/summary?run_id={RUN0}" in team
