@@ -307,9 +307,14 @@ def _arc_path(start: float, end: float) -> str:
 
 def _share(n: int, total: int) -> str:
     """A whole percent, rounded half up exactly (never banker's rounding); a nonzero slice
-    too small to reach 1% reads ``<1%`` rather than 0. Shares need not sum to 100."""
+    too small to reach 1% reads ``<1%`` rather than 0, and only the whole reads 100%: a
+    partial slice is clamped to 99%. Shares need not sum to 100."""
     percent = (200 * n + total) // (2 * total)
-    return "<1%" if n and percent == 0 else f"{percent}%"
+    if n and percent == 0:
+        return "<1%"
+    if n < total:
+        percent = min(percent, 99)
+    return f"{percent}%"
 
 
 def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:

@@ -636,6 +636,8 @@ def test_the_toggle_names_are_stable_and_distinct_per_week() -> None:
         (5, 8, "63%"),  # 62.5
         (1, 201, "<1%"),  # nonzero but under half a percent: never shown as 0
         (2, 2, "100%"),
+        (5, 5, "100%"),
+        (199, 200, "99%"),  # 99.5 would round to 100, but a partial slice is never the whole
     ],
 )
 def test_legend_shares_round_half_up_and_never_show_zero(n: int, total: int, shown: str) -> None:
