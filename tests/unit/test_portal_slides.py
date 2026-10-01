@@ -10,19 +10,20 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
-from src.insights import KeyFinding, RuleTotal, TeamSummary
+from src.insights import DailyPoint, KeyFinding, RuleTotal, TeamSummary
 from src.portal.assets import STYLESHEET
 from src.portal.explain import EN_DASH
 from src.portal.pages import h
-from src.portal.slides import MESSAGE_LIMIT, percent, render_slides
+from src.portal.slides import CHART_H, MESSAGE_LIMIT, PARTIAL_NOTE, percent, render_slides
 from src.portal.summary_view import render_summary_sections
 
 from tests.unit.test_portal_summary_view import (
     ALERTS,
     FORBIDDEN,
+    START,
     alert,
     build_summary,
     estimate,
@@ -54,6 +55,29 @@ def with_rules(summary: TeamSummary, rules: tuple[RuleTotal, ...]) -> TeamSummar
     return dataclasses.replace(summary, inputs=dataclasses.replace(summary.inputs, rules=rules))
 
 
+def week(
+    schema: str, distinct: list[int], flagged: list[int], hours: list[float] | None = None
+) -> tuple[DailyPoint, ...]:
+    """One schema's UTC day buckets, starting on the fixture week's first day."""
+    covered = hours or [24.0] * len(distinct)
+    return tuple(
+        DailyPoint(schema, (START + timedelta(days=i)).date(), covered[i], distinct[i], flagged[i])
+        for i in range(len(distinct))
+    )
+
+
+V1_WEEK = week("v1", [3, 3, 2, 3, 3, 2, 3], [2, 2, 1, 2, 2, 1, 2])
+V2_WEEK = week("v2", [0, 0, 1, 1, 1, 1, 1], [0, 0, 0, 0, 0, 0, 0])
+
+
+def with_daily(summary: TeamSummary, daily: tuple[DailyPoint, ...]) -> TeamSummary:
+    return dataclasses.replace(summary, inputs=dataclasses.replace(summary.inputs, daily=daily))
+
+
+def charted(**kwargs: object) -> TeamSummary:
+    return with_daily(build_summary(**kwargs), V1_WEEK + V2_WEEK)  # type: ignore[arg-type]
+
+
 # ------------------------------------------------------------------ the section
 
 
@@ -63,7 +87,8 @@ def test_there_are_two_titled_slides_under_a_presentation_heading() -> None:
     assert "Two 16:9 slides for this week. Screenshot each frame and paste it as a slide." in html
     assert html.count('<section class="slide ') == 2
     assert "Where Data Pipeline / ETL stands" in frame(html, 1)
-    assert "What to fix" in frame(html, 2)
+    assert "The week, day by day" in frame(html, 2)
+    assert "What to fix" not in html
 
 
 def test_the_slides_close_the_summary() -> None:
@@ -100,7 +125,8 @@ def test_both_slides_carry_the_footer_with_no_internals() -> None:
 
 @pytest.mark.parametrize("surface", ["portal", "admin"])
 def test_nothing_executes_nothing_is_styled_inline_and_nothing_links(surface: str) -> None:
-    html = slides(build_summary(surface=surface))
+    html = slides(with_daily(build_summary(surface=surface), V1_WEEK + V2_WEEK))
+    assert '<svg class="sl-chart"' in html
     assert "<script" not in html.lower()
     assert " style=" not in html
     assert "href=" not in html, "a screenshot has nothing to click"
@@ -111,6 +137,8 @@ def test_the_copy_never_names_internals_or_daily_rates() -> None:
         build_summary(),
         build_summary(alerts=(), findings=()),
         build_summary(est=estimate(projected_week_end=None, no_estimate_reason="Too few.")),
+        charted(),
+        with_daily(build_summary(), week("v1", [1, 2], [0, 1], [6.0, 18.0])),
     ]
     for summary in summaries:
         html = slides(summary)
@@ -119,6 +147,16 @@ def test_the_copy_never_names_internals_or_daily_rates() -> None:
     css = STYLESHEET[STYLESHEET.index("Presentation slides") :]
     for word in FORBIDDEN:
         assert word not in css, word
+
+
+def test_no_text_inside_a_frame_is_smaller_than_a_footnote() -> None:
+    """Primary text is 20px and secondary 18px by default; nothing in a frame goes below 14px."""
+    css = STYLESHEET[STYLESHEET.index(".slide{") :]
+    sizes = [int(size) for size in re.findall(r"font-size:(\d+)px", css)]
+    assert sizes and min(sizes) >= 14, sorted(sizes)
+    for rule in (".sl-chart-legend{", ".sl-end{", ".sl-fire-line{", ".sl-nc{", ".sl-af{"):
+        declarations = css[css.index(rule) : css.index("}", css.index(rule))]
+        assert "font-size:18px" in declarations, rule
 
 
 # ------------------------------------------------------------------ slide 1
@@ -228,6 +266,16 @@ def test_a_schema_with_no_alerts_says_so() -> None:
     assert "No v1 alerts this week" not in one
 
 
+def test_key_findings_wrap_to_two_lines_rather_than_one() -> None:
+    css = STYLESHEET[STYLESHEET.index("Presentation slides") :]
+    rule = css[css.index(".sl-lines li{") :]
+    rule = rule[: rule.index("}")]
+    for declaration in ("display:-webkit-box", "-webkit-line-clamp:2", "max-height:2.5em"):
+        assert declaration in rule, declaration
+    nowrap = css[: css.index("{white-space:nowrap;")]
+    assert ".sl-lines li" not in nowrap[nowrap.rindex("}") :]
+
+
 def test_only_the_first_three_key_findings_are_shown() -> None:
     findings = tuple(
         KeyFinding("largest", f"Finding {i}", f"Body {i}.", None, None) for i in range(5)
@@ -243,22 +291,27 @@ def test_short_lists_are_padded_and_empty_ones_say_none() -> None:
     assert block(one, "Key findings").count('<li class="sl-pad">—</li>') == 1
     empty = frame(slides(build_summary(alerts=(), findings=())), 1)
     assert "None this week" in block(empty, "Key findings")
-    assert "None this week" in block(empty, "Biggest single source")
+    assert "None this week" in block(empty, "Biggest single alert")
 
 
-def test_the_biggest_single_source_is_set_against_its_own_schema() -> None:
-    biggest = block(frame(slides(), 1), "Biggest single source")
+def test_the_biggest_single_alert_says_what_one_alert_is() -> None:
+    biggest = block(frame(slides(), 1), "Biggest single alert")
+    assert (
+        '<p class="sl-def">Based on the alert identity: the application field plus the alert '
+        "key.</p>"
+    ) in biggest
     assert "1 alert produced <b>864</b> of 1,024 v1 events (84%)" in biggest
-    assert "etl-loader" in biggest
-    assert "Ingest lag above 15 minutes on node-1" in biggest
+    assert "Application: <b>etl-loader</b>" in biggest
+    assert "Message: “Ingest lag above 15 minutes on node-1”" in biggest
+    assert "Biggest single source" not in frame(slides(), 1)
 
 
 def test_a_long_message_is_cut_with_an_ellipsis_and_escaped() -> None:
     message = "<b>Payment</b> gateway latency " + "very " * 40 + "high"
     loud = alert(key_field="loud", message=message, row_count=5000)
     summary = build_summary(alerts=(*ALERTS, loud))
-    biggest = block(frame(slides(summary), 1), "Biggest single source")
-    shown = re.search(r'<p class="sl-msg">“(.*?)”</p>', biggest)
+    biggest = block(frame(slides(summary), 1), "Biggest single alert")
+    shown = re.search(r'<p class="sl-msg">Message: “(.*?)”</p>', biggest)
     assert shown is not None
     assert "&lt;b&gt;Payment&lt;/b&gt;" in shown.group(1) and "<b>Payment" not in biggest
     assert shown.group(1).endswith("…")
@@ -270,71 +323,200 @@ def test_a_long_message_is_cut_with_an_ellipsis_and_escaped() -> None:
 # ------------------------------------------------------------------ slide 2
 
 
-def test_top_rules_are_core_rules_by_events_capped_at_five_and_kept_per_schema() -> None:
-    rules = (
-        RuleTotal("v1", "R1", 100, 1),
-        RuleTotal("v1", "R2", 900, 3),
-        RuleTotal("v1", "R3", 50, 1),
-        RuleTotal("v1", "R4", 700, 2),
-        RuleTotal("v1", "R6", 800, 2),
-        RuleTotal("v2", "R6", 40, 1),
-        RuleTotal("v1", "R7", 10, 1),
-        RuleTotal("v2", "R8", 5000, 9),
-        RuleTotal("v2", "R9", 4000, 9),
+def chart(html: str, schema: str) -> str:
+    two = frame(html, 2)
+    start = two.index(f'<div class="sl-block sl-chartbox {schema}">')
+    return two[start : two.index('<p class="sl-fire-line">', start)]
+
+
+def test_top_rules_left_the_slides_but_not_the_summary() -> None:
+    summary = charted()
+    assert "Top rules" not in slides(summary)
+    whole = render_summary_sections(summary, rule_link=link)
+    assert "Flagged by rule" in whole[: whole.index(">Presentation</h3>")]
+
+
+def test_each_schema_has_its_own_chart_with_two_series_and_a_legend() -> None:
+    html = slides(charted())
+    for schema in ("v1", "v2"):
+        one = chart(html, schema)
+        assert f"{schema}: distinct alerts by UTC day</h5>" in one
+        legend = one[one.index('<ul class="sl-chart-legend">') : one.index("</ul>")]
+        assert "Distinct alerts" in legend and "Rule-flagged (noisy)" in legend
+        assert one.count('<path class="sl-line') == 2
+        assert one.count('<circle class="sl-pt sl-s1') == 7
+        assert one.count('<circle class="sl-pt sl-s2') == 7
+        assert "Mon 21" in one and "Sun 27" in one
+    assert "<polyline" not in html, "lines are paths; the portal pins its polyline count"
+    assert "per day" not in html and "model" not in frame(html, 2).split("sl-bottom")[0]
+
+
+def test_only_the_last_value_of_each_line_is_labelled() -> None:
+    v1 = chart(slides(charted()), "v1")
+    labels = re.findall(r'<text class="sl-end"[^>]*>([\d,]+)</text>', v1)
+    assert labels == ["3", "2"], "distinct, then rule-flagged, on the last day"
+
+
+def end_label_ys(svg: str) -> list[float]:
+    return [float(y) for y in re.findall(r'<text class="sl-end" x="[\d.]+" y="([\d.]+)"', svg)]
+
+
+def test_end_labels_stay_clear_of_the_baseline_and_of_each_other() -> None:
+    base = CHART_H - 34  # the plot's baseline: chart height minus the bottom margin
+    for distinct, flagged in ((0, 0), (1, 0), (5, 5), (9, 1)):
+        points = week("v1", [9, 9, distinct], [1, 1, flagged])
+        upper, lower = end_label_ys(chart(slides(with_daily(build_summary(), points)), "v1"))
+        assert lower <= base - 4, (distinct, flagged, lower)
+        assert lower - upper >= 22, "18px labels never overlap"
+
+
+def test_the_axis_starts_at_zero_with_three_or_four_gridlines() -> None:
+    for values in ([3], [7], [12], [1234], [0, 1]):
+        points = week("v1", values, [0] * len(values))
+        one = chart(slides(with_daily(build_summary(), points)), "v1")
+        ticks = re.findall(r'<text class="sl-tick" x="62" [^>]*>([\d,]+)</text>', one)
+        assert ticks[0] == "0" and 3 <= len(ticks) <= 4, (values, ticks)
+        assert one.count('<line class="sl-grid"') == len(ticks)
+
+
+def test_overlapping_lines_both_stay_visible() -> None:
+    """Rule-flagged often equals distinct: distinct is drawn first and wide, flagged on top,
+    thin and dashed, with a smaller marker, and the legend shows the same dash."""
+    same = week("v1", [4, 4, 4], [4, 4, 4])
+    v1 = chart(slides(with_daily(build_summary(), same)), "v1")
+    paths = re.findall(r'<path class="sl-line (sl-s\d)"', v1)
+    assert paths == ["sl-s1", "sl-s2"], "distinct first, rule-flagged on top"
+    assert v1.index('<circle class="sl-pt sl-s1') < v1.index('<path class="sl-line sl-s2"')
+    assert set(re.findall(r'<circle class="sl-pt sl-s1[^"]*"[^>]* r="(\d+)"', v1)) == {"6"}
+    assert set(re.findall(r'<circle class="sl-pt sl-s2[^"]*"[^>]* r="(\d+)"', v1)) == {"4"}
+    legend = v1[v1.index('<ul class="sl-chart-legend">') : v1.index("</ul>")]
+    assert '<path class="sl-key-l sl-s1"' in legend and '<path class="sl-key-l sl-s2"' in legend
+    css = STYLESHEET[STYLESHEET.index("Presentation slides") :]
+    wide = css[css.index(".sl-line.sl-s1,.sl-key-l.sl-s1{") :]
+    assert "stroke-width:4" in wide[: wide.index("}")]
+    dashed = css[css.index(".sl-line.sl-s2,.sl-key-l.sl-s2{") :]
+    assert "stroke-width:2" in dashed[: dashed.index("}")]
+    assert "stroke-dasharray:6 4" in dashed[: dashed.index("}")]
+
+
+def test_a_partial_day_is_hollow_and_footnoted() -> None:
+    full = slides(charted())
+    assert "sl-hollow" not in full and PARTIAL_NOTE not in full
+
+    partial = week(
+        "v1", [1, 2, 3, 3, 3, 3, 3, 1], [0, 1, 1, 1, 1, 1, 1, 0], [6] + [24.0] * 6 + [18]
     )
-    two = frame(slides(with_rules(build_summary(), rules)), 2)
-    top = block(two, "Top rules")
-    shown = re.findall(r'<span class="sl-rid">(R\d+)</span><span class="sl-chip (v\d)">', top)
-    assert shown == [("R2", "v1"), ("R6", "v1"), ("R4", "v1"), ("R1", "v1"), ("R3", "v1")]
-    assert "R8" not in top and "R9" not in top, "readiness gaps are not quality rules"
-    assert "3 alerts · 900 events" in top
-    assert "Rewrite the message" in top or "Delete this alert" in top
-    assert "840" not in top, "R6 in v1 and v2 is never summed"
+    html = slides(with_daily(build_summary(), partial + V2_WEEK))
+    v1 = chart(html, "v1")
+    assert v1.count("sl-hollow") == 4, "first and last day, on both lines"
+    assert frame(html, 2).count(PARTIAL_NOTE) == 1
+    assert (
+        PARTIAL_NOTE == "Hollow points are partial days (the week does not start at midnight UTC)."
+    )
 
 
-def test_r6_is_listed_per_schema_with_its_next_step() -> None:
-    rules = (RuleTotal("v1", "R6", 800, 2), RuleTotal("v2", "R6", 40, 1))
-    top = block(frame(slides(with_rules(build_summary(), rules)), 2), "Top rules")
-    assert top.count('<span class="sl-rid">R6</span>') == 2
-    assert "2 alerts · 800 events" in top and "1 alert · 40 events" in top
-    assert top.count('<li class="sl-pad">—</li>') == 3
+def test_the_partial_day_footnote_follows_only_the_charts_drawn() -> None:
+    quiet_partial = week("v1", [0, 0, 0], [0, 0, 0], [6.0, 24.0, 18.0])
+    html = slides(with_daily(build_summary(), quiet_partial + V2_WEEK))
+    assert "No v1 alerts this week" in chart(html, "v1")
+    assert PARTIAL_NOTE not in html, "no hollow point is drawn, so nothing to explain"
+
+
+def test_a_schema_with_no_rows_says_so_in_the_charts_place() -> None:
+    html = slides(with_daily(build_summary(), V1_WEEK))
+    v2 = chart(html, "v2")
+    assert '<p class="sl-chart-empty">No v2 alerts this week</p>' in v2
+    assert "<svg" not in v2 and "sl-chart-legend" not in v2, "no legend over an empty box"
+    assert "<svg" in chart(html, "v1") and "sl-chart-legend" in chart(html, "v1")
+
+
+def test_the_charts_never_combine_v1_and_v2() -> None:
+    html = slides(charted())
+    v1, v2 = chart(html, "v1"), chart(html, "v2")
+    assert "v2" not in v1.replace('class="sl-block sl-chartbox v1"', "")
+    assert "v1" not in v2.replace('class="sl-block sl-chartbox v2"', "")
+    assert ">6<" not in v1 and ">4<" not in v1, "no day of v1 + v2 distinct alerts"
+
+
+def test_not_consumed_by_your_dashboards_leads_with_filtered_alerts() -> None:
+    rules = (*with_rules(build_summary(), ()).inputs.rules, RuleTotal("v1", "R5", 120, 4))
+    nc = block(
+        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
+    )
+    v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
+    assert '<span class="sl-chip v1">v1</span><b>4</b></p>' in nc
+    assert '<p class="sl-nc-u">alerts filtered out by your panel SQL</p>' in v1
+    assert "<p>120 events</p>" in v1 and "<p>1 alert on no dashboard</p>" in v1
+    assert nc.index('"sl-chip v1"') < nc.index('"sl-chip v2"'), "v1 then v2"
+    assert "124" not in nc and "4,321" not in nc, "v1 and v2 are never added"
+
+
+def test_not_consumed_never_turns_a_missing_dashboard_into_zero() -> None:
+    """No panel for a schema (unseen is None) is unmeasured, not zero (design 3.2)."""
+    rules = (RuleTotal("v1", "R5", 120, 4),)
+    nc = block(
+        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
+    )
+    v2 = nc[nc.index('"sl-chip v2"') :]
+    assert '<span class="sl-chip v2">v2</span><b>—</b></p>' in nc
+    assert '<p class="sl-na">not measured this week</p>' in v2
+    assert "<b>0</b>" not in v2 and "events" not in v2 and "filtered out" not in v2
+
+    no_panel = {
+        "v1": schema_totals("v1", unseen=None, unseen_alerts=None),
+        "v2": schema_totals("v2"),
+    }
+    nc = block(frame(slides(build_summary(schemas=no_panel)), 2), "Not consumed by your dashboards")
+    v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
+    assert "<b>—</b>" in v1 and "not measured this week" in v1 and "events" not in v1
+    assert "dashboard supplied" not in slides(build_summary(schemas=no_panel))
+
+
+def test_not_consumed_reads_the_r5_alerts_of_its_own_schema_only() -> None:
+    rules = (
+        RuleTotal("v1", "R5", 900, 7),
+        RuleTotal("v2", "R5", 30, 2),
+        RuleTotal("v1", "R1", 5, 3),
+    )
+    with_panel = {"v1": schema_totals("v1"), "v2": schema_totals("v2", unseen=0, unseen_alerts=0)}
+    summary = with_rules(build_summary(schemas=with_panel), rules)
+    nc = block(frame(slides(summary), 2), "Not consumed by your dashboards")
+    assert '<span class="sl-chip v1">v1</span><b>7</b></p>' in nc
+    assert '<span class="sl-chip v2">v2</span><b>2</b></p>' in nc
+    assert "<b>9</b>" not in nc and "<b>10</b>" not in nc
+    assert "<p>0 alerts on no dashboard</p>" in nc
+
+
+def test_one_filtered_alert_reads_in_the_singular() -> None:
+    rules = (RuleTotal("v1", "R5", 120, 1),)
+    nc = block(
+        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
+    )
+    assert '<p class="sl-nc-u">alert filtered out by your panel SQL</p>' in nc
+    assert "alerts filtered out" not in nc
 
 
 def test_noisiest_applications_keep_rule_and_model_figures_apart() -> None:
     apps = block(frame(slides(), 2), "Noisiest applications")
     loader = apps[apps.index("etl-loader") :]
     assert "<b>2</b> rule-flagged · <b>0</b> model (advisory)" in loader
+    assert '<span class="sl-ae">984 events</span>' in loader
     sync = apps[apps.index("warehouse-sync") :]
     assert "<b>0</b> rule-flagged · <b>1</b> model (advisory)" in sync
     assert apps.count("<li>") == 3
 
 
-def test_firing_patterns_are_counted_per_schema_from_the_stored_pattern() -> None:
+def test_firing_patterns_are_one_line_per_schema_from_the_stored_pattern() -> None:
     extra = (
         alert(key_field="s1", fire_pattern="spamming"),
         alert(key_field="s2", fire_pattern="spamming"),
         alert(schema="v2", key_field="f1", fire_pattern="flapping"),
     )
-    fire = block(frame(slides(build_summary(alerts=(*ALERTS, *extra))), 2), "Firing patterns")
-    found = re.findall(r'<tr><th scope="row">(\w+)</th><td>(\d+)</td><td>(\d+)</td></tr>', fire)
-    rows = {pattern: (v1, v2) for pattern, v1, v2 in found}
-    assert rows == {"stuck": ("1", "0"), "spamming": ("2", "0"), "flapping": ("0", "1")}
-
-
-def test_out_of_view_never_turns_a_missing_dashboard_into_zero() -> None:
-    view = block(frame(slides(), 2), "Out of view")
-    v1 = view[view.index('"sl-chip v1"') : view.index('"sl-chip v2"')]
-    v2 = view[view.index('"sl-chip v2"') :]
-    assert "120 events hidden by your own panels" in v1 and "1 alert on no dashboard" in v1
-    assert "no dashboard supplied" in v2 and "0 events" not in v2
-
-    panel_without_unseen = {
-        "v1": schema_totals("v1", unseen=None, unseen_alerts=None),
-        "v2": schema_totals("v2"),
-    }
-    view = block(frame(slides(build_summary(schemas=panel_without_unseen)), 2), "Out of view")
-    v1 = view[view.index('"sl-chip v1"') : view.index('"sl-chip v2"')]
-    assert "120 events hidden by your own panels" in v1 and "no dashboard supplied" in v1
+    two = frame(slides(build_summary(alerts=(*ALERTS, *extra))), 2)
+    assert "v1: 1 stuck · 2 spamming · 0 flapping</p>" in two
+    assert "v2: 0 stuck · 0 spamming · 1 flapping</p>" in two
+    v1_box = two[two.index("sl-chartbox v1") : two.index("sl-chartbox v2")]
+    assert "Firing patterns · v1: 1 stuck" in v1_box and "v2: 0 stuck" not in v1_box
 
 
 def test_the_estimate_with_a_projected_week() -> None:

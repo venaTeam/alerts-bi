@@ -261,7 +261,8 @@ svg.donut .r7,.dlegend .r7{fill:var(--r7)}
    Two frames of exactly 1280x720 CSS px to screenshot and paste as slides. Always a light
    palette, also in dark mode, for projection: the colours are scoped to .slide and never read
    the page's dark tokens. The strip is page-wide so a frame fits on a wide screen, and
-   scrolls sideways on a narrow one. Text that is too long is cut, never spilled. */
+   scrolls sideways on a narrow one. Text that is too long is cut, never spilled.
+   --sl-s1 and --sl-s2 are categorical slots 1 and 2, validated together on #FFFFFF. */
 .slides{display:flex;flex-direction:column;gap:10px;min-width:0}
 .sl-intro h3{font-size:17px;font-weight:600}
 .sl-intro p{margin:2px 0 0;color:var(--muted);font-size:13px}
@@ -270,6 +271,7 @@ svg.donut .r7,.dlegend .r7{fill:var(--r7)}
   --sl-bg:#FFFFFF;--sl-soft:#F4F6F8;--sl-ink:#15202B;--sl-ink-2:#3B4754;--sl-muted:#5E6A77;--sl-line:#DAE0E6;
   --sl-v1:#1D7670;--sl-v1-soft:#DDEFEC;--sl-v2:#4050C0;--sl-v2-soft:#E4E7F8;
   --sl-rule:#B3372E;--sl-model:#7443B0;--sl-good:#2B7548;--sl-un:#BFC8D1;
+  --sl-s1:#2a78d6;--sl-s2:#eb6834;
   color-scheme:light;flex:none;box-sizing:border-box;width:1280px;height:720px;aspect-ratio:16 / 9;
   overflow:hidden;margin:0 auto;padding:48px;background:var(--sl-bg);color:var(--sl-ink);
   font-family:var(--sans);font-size:20px;line-height:1.25;
@@ -279,7 +281,6 @@ svg.donut .r7,.dlegend .r7{fill:var(--r7)}
 .slide p,.slide ol,.slide ul,.slide h4,.slide h5{margin:0}
 .slide ol,.slide ul{list-style:none;padding:0}
 .sl-1{grid-template-rows:auto auto minmax(0,1fr) auto}
-.sl-2{grid-template-rows:auto minmax(0,1fr) auto}
 .sl-head,.sl-foot{grid-column:1 / -1;min-width:0}
 .sl-head{display:flex;flex-direction:column;gap:8px}
 .sl-title{font-size:40px;font-weight:600;line-height:1.15;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -296,7 +297,7 @@ svg.donut .r7,.dlegend .r7{fill:var(--r7)}
 .sl-big b{font-size:48px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .sl-big span{color:var(--sl-ink-2)}
 .sl-facts{min-width:0;color:var(--sl-ink-2);font-variant-numeric:tabular-nums}
-.sl-lines li,.sl-app-n,.sl-rt,.sl-step,.sl-an,.sl-af,.sl-ov span,.sl-time p:not(.sl-noest){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl-app,.sl-an,.sl-af,.sl-fire-line,.sl-when{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 svg.sl-bar{width:100%;height:12px;display:block}
 .sl-track{fill:var(--sl-line)}
 .sl-q-rule{fill:var(--sl-rule)} .sl-q-model{fill:var(--sl-model)} .sl-q-review{fill:var(--sl-model);opacity:.5} .sl-q-good{fill:var(--sl-good)} .sl-q-un{fill:var(--sl-un)}
@@ -307,34 +308,48 @@ svg.sl-bar{width:100%;height:12px;display:block}
 .sl-block{min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px}
 .sl-label{font-size:16px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--sl-muted);padding-bottom:4px;border-bottom:2px solid var(--sl-line)}
 .sl-none,.sl-pad,.sl-na{color:var(--sl-muted)}
-.sl-kf{grid-column:span 7} .sl-big1{grid-column:span 5}
-.sl-lines{display:flex;flex-direction:column;gap:10px}
+.sl-kf,.sl-big1{grid-column:span 6} .sl-big1{gap:8px}
+.sl-lines{display:flex;flex-direction:column;gap:8px}
+.sl-lines li{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-height:2.5em}
 .sl-lines span{color:var(--sl-ink-2)}
+.sl-def{font-size:18px;color:var(--sl-muted)}
 .sl-lead b{font-variant-numeric:tabular-nums}
-.sl-app{display:flex;align-items:center;font-weight:600}
-.sl-msg{color:var(--sl-ink-2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
-.sl-col{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:16px}
-.sl-left{grid-column:span 7} .sl-right{grid-column:span 5}
-.sl-rule-list,.sl-app-list{display:flex;flex-direction:column;gap:8px}
-.sl-rule-list li{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:baseline;column-gap:2px}
-.sl-rid{font-weight:700;color:var(--sl-rule);margin-right:10px}
-.sl-rt{font-weight:600;padding-right:16px}
-.sl-n{color:var(--sl-ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
-.sl-step,.sl-af{grid-column:1 / -1;font-size:18px;color:var(--sl-ink-2)}
+.sl-msg{color:var(--sl-ink-2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+/* slide 2: two charts across the top, then three blocks */
+.sl-2{display:flex;flex-direction:column;gap:14px}
+.sl-2 > *{flex:none}
+.sl-2 .sl-foot{margin-top:auto;align-self:stretch}
+.sl-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}
+.sl-chartbox{gap:6px}
+.sl-chart-h{font-size:20px;font-weight:600;display:flex;align-items:center}
+.sl-chart-legend{display:flex;gap:24px;font-size:18px;color:var(--sl-ink)}
+svg.sl-key{display:inline-block;width:28px;height:8px;margin-right:8px;vertical-align:middle;overflow:visible}
+.sl-key-l{fill:none}
+svg.sl-chart{display:block;width:100%;height:170px;overflow:visible}
+.sl-grid{stroke:var(--sl-line);stroke-width:1}
+.sl-tick{font-family:var(--sans);font-size:16px;fill:var(--sl-muted);font-variant-numeric:tabular-nums}
+.sl-line{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.sl-line.sl-s1,.sl-key-l.sl-s1{stroke:var(--sl-s1);stroke-width:4}
+.sl-line.sl-s2,.sl-key-l.sl-s2{stroke:var(--sl-s2);stroke-width:2;stroke-dasharray:6 4;stroke-linecap:butt}
+.sl-pt{stroke:none} .sl-pt.sl-s1{fill:var(--sl-s1)} .sl-pt.sl-s2{fill:var(--sl-s2)}
+.sl-pt.sl-hollow{fill:var(--sl-bg)} .sl-pt.sl-hollow.sl-s1{stroke:var(--sl-s1);stroke-width:2.5} .sl-pt.sl-hollow.sl-s2{stroke:var(--sl-s2);stroke-width:2}
+.sl-end{font-family:var(--sans);font-size:18px;font-weight:600;fill:var(--sl-ink)}
+.sl-chart-empty{height:199px;margin:0;display:flex;align-items:center;justify-content:center;color:var(--sl-muted);background:var(--sl-soft);border-radius:8px}
+.sl-fire-line{font-size:18px;color:var(--sl-ink-2)}
+.sl-partial{font-size:14px;color:var(--sl-muted);margin-top:-4px}
+.sl-bottom{display:grid;grid-template-columns:minmax(0,10fr) minmax(0,9fr) minmax(0,9fr);column-gap:32px;flex:1 1 auto;min-height:0;overflow:hidden}
+.sl-nc-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.sl-nc{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:18px;color:var(--sl-ink-2)}
+.sl-nc-n b{font-size:48px;font-weight:600;line-height:1.05;color:var(--sl-ink)}
+.sl-app-list{display:flex;flex-direction:column;gap:8px}
 .sl-app-list li{display:grid;grid-template-columns:minmax(0,auto) auto 1fr;align-items:baseline}
+.sl-ae{justify-self:end;padding-left:12px;font-size:18px;color:var(--sl-ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
 .sl-an{font-weight:600;margin-right:10px}
+.sl-af{grid-column:1 / -1;font-size:18px;color:var(--sl-ink-2)}
 .sl-af b{color:var(--sl-ink);font-variant-numeric:tabular-nums}
-table.sl-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-.sl-table th,.sl-table td{padding:1px 8px;text-align:right;border-bottom:1px solid var(--sl-line)}
-.sl-table thead th{font-size:16px;font-weight:600;color:var(--sl-muted)}
-.sl-table th:first-child{text-align:left;padding-left:0}
-.sl-table tbody th{font-weight:600}
-.sl-table .sl-chip{margin-right:0}
-.sl-view-list{display:flex;flex-direction:column;gap:8px}
-.sl-view-list li{display:flex;align-items:baseline;min-width:0}
-.sl-ov{display:flex;flex-direction:column;min-width:0}
 .sl-when{font-size:24px;font-weight:600}
-.sl-noest{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.sl-noest{font-size:18px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.sl-effort{font-size:18px}
 .sl-note{font-size:15px;color:var(--sl-muted)}
 .sl-foot{align-self:end;display:flex;justify-content:space-between;gap:24px;font-size:14px;color:var(--sl-muted);border-top:1px solid var(--sl-line);padding-top:10px;white-space:nowrap;overflow:hidden}
 .sl-foot span:first-child{overflow:hidden;text-overflow:ellipsis}

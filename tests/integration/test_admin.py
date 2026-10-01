@@ -334,7 +334,13 @@ def test_the_admin_summary_ends_with_two_presentation_slides(client: TestClient)
     page = client.get(f"/teams/{TEAM}/summary?run_id={RUN0}", headers=ALICE).text
     slides = page[page.index(">Presentation</h3>") : page.index('id="days"')]
     assert slides.count('<section class="slide ') == 2
-    assert "stands</h4>" in slides and "What to fix</h4>" in slides
+    assert "stands</h4>" in slides and "The week, day by day</h4>" in slides
+    assert "Biggest single alert" in slides and "What to fix" not in slides
+    assert "Top rules" not in slides and "<polyline" not in slides
+    # Both fixtures store non-zero day buckets for v1 and v2: two charts, no empty box.
+    assert slides.count('<svg class="sl-chart"') == 2
+    assert "No v1 alerts this week" not in slides
+    assert "No v2 alerts this week" not in slides
     assert RUN0 not in slides, "the slides carry no run id on either surface"
 
 
