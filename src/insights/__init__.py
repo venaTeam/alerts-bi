@@ -8,6 +8,7 @@ portal may import this package; it imports nothing the portal is forbidden to re
 from src.insights.model import (
     AlertRow,
     AppRow,
+    DailyPoint,
     Estimate,
     FireRow,
     KeyFinding,
@@ -21,6 +22,7 @@ from src.insights.model import (
 __all__ = [
     "AlertRow",
     "AppRow",
+    "DailyPoint",
     "Estimate",
     "FireRow",
     "KeyFinding",

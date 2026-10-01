@@ -67,6 +67,7 @@ def daily(day: int, **overrides: Any) -> dict[str, Any]:
         "alerts": 10,
         "distinct_alerts": 3,
         "flagged_by_rule": 2,
+        "flagged_by_rule_distinct": 1,
         "suppressed": 1,
         "suppression_unmeasured": 0,
         "unseen": None,
@@ -182,6 +183,24 @@ def test_the_snapshot_supplies_operators_panels_and_the_effort_override() -> Non
     assert empty.panels == () and empty.v1_rule_effort_days is None
     assert read_snapshot("not json").panels == ()
     assert read_snapshot('{"planning":{"v1_rule_effort_days":"lots"}}').v1_rule_effort_days is None
+
+
+def test_inputs_carry_the_day_buckets_ordered_by_schema_then_day() -> None:
+    rows = [
+        daily(21, alert_schema="v2", distinct_alerts=5, flagged_by_rule_distinct=2),
+        daily(21),
+        daily(20, covered_hours=6.5),
+        daily(20, alert_schema="v2"),
+    ]
+    inputs = summary_inputs(run(), rows, [], (), published=False, history=())
+    assert [(p.alert_schema, p.day.day) for p in inputs.daily] == [
+        ("v1", 20),
+        ("v1", 21),
+        ("v2", 20),
+        ("v2", 21),
+    ]
+    assert inputs.daily[0].covered_hours == 6.5
+    assert (inputs.daily[3].distinct_alerts, inputs.daily[3].rule_flagged_distinct) == (5, 2)
 
 
 def test_inputs_are_admin_inputs_with_both_schemas_and_no_history_when_unpublished() -> None:

@@ -10,14 +10,22 @@ published weeks, never what it moved to.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
 from src.db.connection import Database
-from src.insights import AlertRow, RuleTotal, SchemaTotals, SummaryInputs, WeekRules
+from src.insights import (
+    AlertRow,
+    DailyPoint,
+    RuleTotal,
+    SchemaTotals,
+    SummaryInputs,
+    WeekRules,
+)
 from src.insights.estimate import v1_rule_key
 
-__all__ = ["load_portal_summary"]
+__all__ = ["daily_points", "load_portal_summary"]
 
 _SCHEMAS = ("v1", "v2")
 #: The selected week plus the up to 3 earlier weeks of the estimate's lookback (spec 7.1).
@@ -40,6 +48,21 @@ def _optional_float(value: Any) -> float | None:
 
 def _ids(value: Any) -> tuple[str, ...]:
     return tuple(part for part in str(value or "").split(",") if part)
+
+
+def daily_points(rows: Sequence[Mapping[str, Any]]) -> tuple[DailyPoint, ...]:
+    """Day buckets as the slides' charts read them, ordered by schema then day."""
+    points = [
+        DailyPoint(
+            alert_schema=str(row["alert_schema"]),
+            day=row["snapshot_date"],
+            covered_hours=float(row["covered_hours"]),
+            distinct_alerts=_int(row["distinct_alerts"]),
+            rule_flagged_distinct=_int(row["flagged_by_rule_distinct"]),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(points, key=lambda p: (p.alert_schema, p.day)))
 
 
 def _schema_totals(rows: list[dict[str, Any]]) -> dict[str, SchemaTotals]:
@@ -205,6 +228,16 @@ def load_portal_summary(db: Database, team_id: str, run_id: str) -> SummaryInput
         """,
         {"run_id": run_id},
     )
+    daily = db.query(
+        """
+        SELECT alert_schema, snapshot_date, covered_hours, distinct_alerts,
+               flagged_by_rule_distinct
+        FROM portal_daily_metrics
+        WHERE run_id = :run_id
+        ORDER BY alert_schema ASC, snapshot_date ASC
+        """,
+        {"run_id": run_id},
+    )
     alerts = db.query(
         """
         SELECT alert_schema, application, key_field, message, severity, provider,
@@ -241,4 +274,5 @@ def load_portal_summary(db: Database, team_id: str, run_id: str) -> SummaryInput
         published=True,
         history=_history(db, team_id, review["window_end"]),
         v1_rule_effort_days=_optional_float(review["v1_rule_effort_days"]),
+        daily=daily_points(daily),
     )
