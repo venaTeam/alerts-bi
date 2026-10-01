@@ -90,6 +90,20 @@ class WeekRules:
 
 
 @dataclass(frozen=True, slots=True)
+class DailyPoint:
+    """One schema's UTC day bucket of the run (``daily_metrics``), for the slides' charts."""
+
+    alert_schema: str
+    day: date
+    """``snapshot_date``."""
+    covered_hours: float
+    """Below 24 for the partial first and last day of a week that does not start at midnight."""
+    distinct_alerts: int
+    rule_flagged_distinct: int
+    """``flagged_by_rule_distinct``: identities with a core rule finding on that day."""
+
+
+@dataclass(frozen=True, slots=True)
 class SummaryInputs:
     surface: Surface
     team_id: str
@@ -109,6 +123,8 @@ class SummaryInputs:
     Empty when the selected run is not published."""
     v1_rule_effort_days: float | None
     """The team's registry override, or None for the default."""
+    daily: tuple[DailyPoint, ...] = ()
+    """The run's day buckets, ordered by schema then day. Empty when not loaded."""
 
 
 @dataclass(frozen=True, slots=True)

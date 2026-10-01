@@ -24,6 +24,7 @@ from src.db.connection import connect
 from src.db.migrate import reset_test_database
 from src.db.reader import grant_reader, read_only_problems
 from src.db.repositories import PersistencePayload, RunIsPublished, persist_run
+from src.insights import DailyPoint
 from src.portal.app import build_portal
 from src.portal.charts import TIMES
 from src.portal.explain import EN_DASH
@@ -397,6 +398,49 @@ def test_the_reader_sees_only_published_weeks(reader: SqlConfig) -> None:
     assert alerts == visible
 
 
+def test_the_daily_view_holds_published_weeks_only_with_the_stored_values(
+    reader: SqlConfig,
+) -> None:
+    columns = (
+        "alert_schema, snapshot_date, covered_hours, distinct_alerts, flagged_by_rule_distinct"
+    )
+    with connect(CONFIG.sql, DB) as owner:
+        applied = owner.query_one(
+            "SELECT version FROM schema_migrations WHERE version = '007_portal_daily'", {}
+        )
+        stored = owner.query(
+            f"SELECT {columns} FROM daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert applied is not None, "migration 007 applied"
+    with connect(reader, DB) as db:
+        visible = {
+            str(row["run_id"])
+            for row in db.query("SELECT DISTINCT run_id FROM portal_daily_metrics", {})
+            if str(row["run_id"]).startswith(("wk", "overlap", "unpub"))
+        }
+        viewed = db.query(
+            f"SELECT {columns} FROM portal_daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert visible == {_run_id("wk1"), _run_id("wk2"), _run_id("wk3")}
+    assert stored and viewed == stored
+    loaded = load_portal_summary_daily(reader, _run_id("wk3"))
+    assert [(p.alert_schema, p.day) for p in loaded] == [
+        (str(row["alert_schema"]), row["snapshot_date"]) for row in stored
+    ]
+    assert [p.rule_flagged_distinct for p in loaded] == [
+        int(row["flagged_by_rule_distinct"]) for row in stored
+    ]
+
+
+def load_portal_summary_daily(reader: SqlConfig, run_id: str) -> tuple[DailyPoint, ...]:
+    with connect(reader, DB) as db:
+        return load_portal_summary(db, TEAM, run_id).daily
+
+
 def test_the_episode_facts_reach_the_store_and_the_alerts_view(reader: SqlConfig) -> None:
     query = (
         "SELECT max_episode_firing_rows, open_since FROM {table} "
@@ -727,6 +771,15 @@ def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: Tes
     summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
     unseen = summary[summary.index("Not on any of your dashboards") : summary.index("Migration")]
     assert unseen.count("No dashboard supplied") == 2, "no panel for either schema"
+
+
+def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> None:
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    slides = summary[summary.index(">Presentation</h3>") :]
+    assert slides.count('<section class="slide ') == 2
+    assert "stands</h4>" in slides and "What to fix</h4>" in slides
+    assert "week ending 30 Aug 2026 · Alerts BI" in slides
+    assert _run_id("wk3") not in slides and "href=" not in slides
 
 
 def test_the_work_list_filters_by_state_and_rule(portal: TestClient) -> None:

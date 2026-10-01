@@ -39,6 +39,7 @@ from src.portal.explain import (
     format_week,
 )
 from src.portal.pages import h
+from src.portal.summary_queries import daily_points
 from src.portal.summary_view import render_summary_sections
 from src.suppression.fields import classify_field
 from src.suppression.lexer import SqlParseError, Token, tokenize
@@ -328,6 +329,7 @@ def summary_inputs(
         published=published,
         history=history if published else (),
         v1_rule_effort_days=read_snapshot(run.get("registry_entry_snapshot")).v1_rule_effort_days,
+        daily=daily_points(daily),
     )
 
 

@@ -257,6 +257,88 @@ svg.donut .r3,.dlegend .r3{fill:var(--r3)} svg.donut .r4,.dlegend .r4{fill:var(-
 svg.donut .r5,.dlegend .r5{fill:var(--r5)} svg.donut .r6,.dlegend .r6{fill:var(--r6)}
 svg.donut .r7,.dlegend .r7{fill:var(--r7)}
 /* ---- end of the Bars / Donut toggle ---- */
+/* ---- Presentation slides (src/portal/slides.py) ----
+   Two frames of exactly 1280x720 CSS px to screenshot and paste as slides. Always a light
+   palette, also in dark mode, for projection: the colours are scoped to .slide and never read
+   the page's dark tokens. The strip is page-wide so a frame fits on a wide screen, and
+   scrolls sideways on a narrow one. Text that is too long is cut, never spilled. */
+.slides{display:flex;flex-direction:column;gap:10px;min-width:0}
+.sl-intro h3{font-size:17px;font-weight:600}
+.sl-intro p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.sl-scroll{width:calc(100vw - 48px);margin-left:calc(50% - 50vw + 24px);overflow-x:auto;padding:2px 2px 12px;display:flex;flex-direction:column;gap:28px}
+.slide{
+  --sl-bg:#FFFFFF;--sl-soft:#F4F6F8;--sl-ink:#15202B;--sl-ink-2:#3B4754;--sl-muted:#5E6A77;--sl-line:#DAE0E6;
+  --sl-v1:#1D7670;--sl-v1-soft:#DDEFEC;--sl-v2:#4050C0;--sl-v2-soft:#E4E7F8;
+  --sl-rule:#B3372E;--sl-model:#7443B0;--sl-good:#2B7548;--sl-un:#BFC8D1;
+  color-scheme:light;flex:none;box-sizing:border-box;width:1280px;height:720px;aspect-ratio:16 / 9;
+  overflow:hidden;margin:0 auto;padding:48px;background:var(--sl-bg);color:var(--sl-ink);
+  font-family:var(--sans);font-size:20px;line-height:1.25;
+  display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:32px;row-gap:20px;
+  box-shadow:0 0 0 1px var(--line-strong)
+}
+.slide p,.slide ol,.slide ul,.slide h4,.slide h5{margin:0}
+.slide ol,.slide ul{list-style:none;padding:0}
+.sl-1{grid-template-rows:auto auto minmax(0,1fr) auto}
+.sl-2{grid-template-rows:auto minmax(0,1fr) auto}
+.sl-head,.sl-foot{grid-column:1 / -1;min-width:0}
+.sl-head{display:flex;flex-direction:column;gap:8px}
+.sl-title{font-size:40px;font-weight:600;line-height:1.15;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl-sub{display:flex;gap:28px;white-space:nowrap;overflow:hidden;color:var(--sl-ink-2)}
+.sl-phase{font-weight:600;color:var(--sl-ink)}
+.sl-schemas,.sl-row{display:contents}
+.sl-schema{grid-column:span 6;min-width:0;background:var(--sl-soft);border-top:4px solid var(--sl-line);border-radius:0 0 10px 10px;padding:18px 24px 20px;display:flex;flex-direction:column;gap:14px}
+.sl-schema.v1{border-top-color:var(--sl-v1)} .sl-schema.v2{border-top-color:var(--sl-v2)}
+.sl-schema-h{font-size:20px;font-weight:600;display:flex;align-items:center}
+.sl-chip{flex:none;display:inline-block;font-size:15px;font-weight:600;line-height:1.4;border-radius:5px;padding:1px 8px;margin-right:10px;white-space:nowrap;background:var(--sl-soft);color:var(--sl-ink-2)}
+.sl-chip.v1{background:var(--sl-v1-soft);color:var(--sl-v1)} .sl-chip.v2{background:var(--sl-v2-soft);color:var(--sl-v2)}
+.sl-kpi{display:flex;align-items:flex-end;gap:32px;min-width:0}
+.sl-big{flex:none;display:flex;align-items:baseline;gap:10px}
+.sl-big b{font-size:48px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.sl-big span{color:var(--sl-ink-2)}
+.sl-facts{min-width:0;color:var(--sl-ink-2);font-variant-numeric:tabular-nums}
+.sl-lines li,.sl-app-n,.sl-rt,.sl-step,.sl-an,.sl-af,.sl-ov span,.sl-time p:not(.sl-noest){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+svg.sl-bar{width:100%;height:12px;display:block}
+.sl-track{fill:var(--sl-line)}
+.sl-q-rule{fill:var(--sl-rule)} .sl-q-model{fill:var(--sl-model)} .sl-q-review{fill:var(--sl-model);opacity:.5} .sl-q-good{fill:var(--sl-good)} .sl-q-un{fill:var(--sl-un)}
+.sl-legend{display:flex;flex-wrap:wrap;gap:4px 20px;font-size:16px;color:var(--sl-ink-2)}
+.sl-legend b{color:var(--sl-ink);font-variant-numeric:tabular-nums}
+.sl-sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px}
+.sl-sw.sl-q-rule{background:var(--sl-rule)} .sl-sw.sl-q-model{background:var(--sl-model)} .sl-sw.sl-q-review{background:var(--sl-model)} .sl-sw.sl-q-good{background:var(--sl-good)} .sl-sw.sl-q-un{background:var(--sl-un)}
+.sl-block{min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px}
+.sl-label{font-size:16px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--sl-muted);padding-bottom:4px;border-bottom:2px solid var(--sl-line)}
+.sl-none,.sl-pad,.sl-na{color:var(--sl-muted)}
+.sl-kf{grid-column:span 7} .sl-big1{grid-column:span 5}
+.sl-lines{display:flex;flex-direction:column;gap:10px}
+.sl-lines span{color:var(--sl-ink-2)}
+.sl-lead b{font-variant-numeric:tabular-nums}
+.sl-app{display:flex;align-items:center;font-weight:600}
+.sl-msg{color:var(--sl-ink-2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.sl-col{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:16px}
+.sl-left{grid-column:span 7} .sl-right{grid-column:span 5}
+.sl-rule-list,.sl-app-list{display:flex;flex-direction:column;gap:8px}
+.sl-rule-list li{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:baseline;column-gap:2px}
+.sl-rid{font-weight:700;color:var(--sl-rule);margin-right:10px}
+.sl-rt{font-weight:600;padding-right:16px}
+.sl-n{color:var(--sl-ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.sl-step,.sl-af{grid-column:1 / -1;font-size:18px;color:var(--sl-ink-2)}
+.sl-app-list li{display:grid;grid-template-columns:minmax(0,auto) auto 1fr;align-items:baseline}
+.sl-an{font-weight:600;margin-right:10px}
+.sl-af b{color:var(--sl-ink);font-variant-numeric:tabular-nums}
+table.sl-table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+.sl-table th,.sl-table td{padding:1px 8px;text-align:right;border-bottom:1px solid var(--sl-line)}
+.sl-table thead th{font-size:16px;font-weight:600;color:var(--sl-muted)}
+.sl-table th:first-child{text-align:left;padding-left:0}
+.sl-table tbody th{font-weight:600}
+.sl-table .sl-chip{margin-right:0}
+.sl-view-list{display:flex;flex-direction:column;gap:8px}
+.sl-view-list li{display:flex;align-items:baseline;min-width:0}
+.sl-ov{display:flex;flex-direction:column;min-width:0}
+.sl-when{font-size:24px;font-weight:600}
+.sl-noest{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.sl-note{font-size:15px;color:var(--sl-muted)}
+.sl-foot{align-self:end;display:flex;justify-content:space-between;gap:24px;font-size:14px;color:var(--sl-muted);border-top:1px solid var(--sl-line);padding-top:10px;white-space:nowrap;overflow:hidden}
+.sl-foot span:first-child{overflow:hidden;text-overflow:ellipsis}
+.sl-page{flex:none}
 """.strip()
 
 #: Content-addressed, so a changed stylesheet is never served from a stale cache.

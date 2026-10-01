@@ -31,6 +31,7 @@ from src.portal.explain import (
     rule_explanation,
 )
 from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h, safe_link
+from src.portal.slides import render_slides
 from src.rules.catalogs import (
     R6_API_MIN_SPAN,
     R6_API_RATE_WINDOW,
@@ -927,5 +928,6 @@ def render_summary_sections(
         f"{_by_rule(summary, rule_link)}"
         f'<div class="two">{_hidden(summary, rule_link)}{_unseen(summary)}</div>'
         f"{_progress(summary)}"
+        f"{render_slides(summary)}"
         "</div>"
     )
