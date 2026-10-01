@@ -13,7 +13,7 @@ def summarize(inputs: SummaryInputs) -> TeamSummary:
         inputs=inputs,
         key_findings=key_findings(inputs),
         by_application=by_application(inputs.alerts),
-        fire=fire_rows(inputs.alerts),
+        fire=fire_rows(inputs.alerts, inputs.window_end),
         biggest=biggest(inputs.alerts),
         estimate=estimate(inputs),
     )

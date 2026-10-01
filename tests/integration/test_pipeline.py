@@ -170,7 +170,7 @@ def test_running_without_a_model_marks_eligible_identities_unassessed_with_a_rea
     run: RunFn, db: Database
 ) -> None:
     _, summary = run(
-        "fraud-detection",
+        "payments-core",  # fraud-detection's alerts are all R6-flagged, so none reach the model
         llm_client=None,
         llm_disabled_reason="LLM assessment was disabled for this run",
     )

@@ -14,12 +14,15 @@ together.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from datetime import date, timedelta
+from hashlib import sha256
 
 from src.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
-from src.portal.charts import TIMES, Segment, level_bar, ratio_bar, stacked_bar
+from src.insights.aggregate import primary_rule_counts
+from src.portal.charts import TIMES, Segment, level_bar, stacked_bar
 from src.portal.explain import (
     QUALITY_STATE_LABELS,
     format_instant,
@@ -27,16 +30,15 @@ from src.portal.explain import (
     principle_title,
     rule_explanation,
 )
-from src.portal.pages import PHASE_STEPS, REPEATS, SCHEMA_NAMES, h, safe_link
+from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h, safe_link
 from src.portal.slides import render_slides
 from src.rules.catalogs import (
     R6_API_MIN_SPAN,
+    R6_API_RATE_WINDOW,
     R6_API_SPAM_PER_24H,
     R6_FLAP_CYCLES,
     R6_FLAP_WINDOW,
-    R6_SPAM_RATIO,
-    R6_STUCK_MIN_SPAN,
-    R6_STUCK_RATIO,
+    R6_STUCK_OPEN,
     V2_READINESS_RULE_IDS,
 )
 
@@ -67,8 +69,6 @@ _STATES = (
     ("unassessed", "q-un"),
 )
 
-_PATTERN_CSS = {"stuck": "f-ready", "spamming": "f-rule", "flapping": "f-model"}
-
 
 # ------------------------------------------------------------------ small helpers
 
@@ -92,27 +92,25 @@ def _hours(span: timedelta) -> str:
     return _dec(span.total_seconds() / 3600)
 
 
-#: The three R6 patterns, in the priority the rule applies them (design section 7.14). The
+#: The three R6 patterns in the legend's display order (the rule itself applies flapping,
+#: then spamming, then stuck; design section 7.14). The
 #: copy is built from the catalogue constants R6 itself uses, so the two cannot drift.
 FIRE_THRESHOLDS = (
     (
-        "flapping",
-        "Flapping",
-        f"{R6_FLAP_CYCLES} or more fire-and-clear cycles inside any {_hours(R6_FLAP_WINDOW)} "
-        "hours, on any provider.",
+        "stuck",
+        "Stuck",
+        f"still firing, no clear for \u2265{_hours(R6_STUCK_OPEN)} h before the week ends",
     ),
     (
         "spamming",
         "Spamming",
-        f"a Grafana alert firing at {_dec(R6_SPAM_RATIO)}{TIMES} its repeat interval or more; "
-        f"an API alert with {_dec(R6_API_SPAM_PER_24H)} or more events per 24 hours, over at "
-        f"least {_hours(R6_API_MIN_SPAN)} hours.",
+        f"an API alert at \u2265{_dec(R6_API_SPAM_PER_24H)} events per "
+        f"{_hours(R6_API_RATE_WINDOW)} h over \u2265{_hours(R6_API_MIN_SPAN)} h",
     ),
     (
-        "stuck",
-        "Stuck",
-        f"a Grafana alert firing at {_dec(R6_STUCK_RATIO)}{TIMES} its repeat interval or more "
-        f"for at least {_hours(R6_STUCK_MIN_SPAN)} hours, never cleared.",
+        "flapping",
+        "Flapping",
+        f"\u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in {_hours(R6_FLAP_WINDOW)} h",
     ),
 )
 
@@ -179,10 +177,7 @@ def _span(hours: float) -> str:
 def _glance(summary: TeamSummary, schema: str) -> str:
     totals = summary.inputs.schemas[schema]
     admin = summary.inputs.surface == "admin"
-    heading = (
-        f'<h3><span class="chip {schema}">{schema}</span>{SCHEMA_NAMES[schema]} '
-        f"<small>{REPEATS[schema]}</small></h3>"
-    )
+    heading = f'<h3><span class="chip {schema}">{schema}</span>{SCHEMA_NAMES[schema]}</h3>'
     if totals.events == 0 and totals.distinct_alerts == 0:
         return (
             f'<article class="card schema {schema}">{heading}'
@@ -274,6 +269,106 @@ def _bars(
     return f'<ul class="bars">{"".join(items)}</ul>'
 
 
+#: Donut geometry: a 120-unit square, outer and inner radius of the ring.
+_DONUT_C, _DONUT_R, _DONUT_HOLE = 60.0, 56.0, 38.0
+
+
+def _at(radius: float, angle: float) -> str:
+    return f"{_DONUT_C + radius * math.cos(angle):.3f} {_DONUT_C + radius * math.sin(angle):.3f}"
+
+
+def _ring_path() -> str:
+    """A full ring as two closed circles; ``evenodd`` leaves the hole empty."""
+    top, bottom = -math.pi / 2, math.pi / 2
+    r, hole = _DONUT_R, _DONUT_HOLE
+    return (
+        f"M {_at(r, top)} A {r} {r} 0 1 1 {_at(r, bottom)} A {r} {r} 0 1 1 {_at(r, top)} Z "
+        f"M {_at(hole, top)} A {hole} {hole} 0 1 0 {_at(hole, bottom)} "
+        f"A {hole} {hole} 0 1 0 {_at(hole, top)} Z"
+    )
+
+
+def _arc_path(start: float, end: float) -> str:
+    """One ring segment from ``start`` to ``end`` radians, clockwise from the top."""
+    large = 1 if end - start > math.pi else 0
+    r, hole = _DONUT_R, _DONUT_HOLE
+    return (
+        f"M {_at(r, start)} A {r} {r} 0 {large} 1 {_at(r, end)} "
+        f"L {_at(hole, end)} A {hole} {hole} 0 {large} 0 {_at(hole, start)} Z"
+    )
+
+
+def _share(n: int, total: int) -> str:
+    """A whole percent, rounded half up exactly (never banker's rounding); a nonzero slice
+    too small to reach 1% reads ``<1%`` rather than 0, and only the whole reads 100%: a
+    partial slice is clamped to 99%. Shares need not sum to 100."""
+    percent = (200 * n + total) // (2 * total)
+    if n and percent == 0:
+        return "<1%"
+    if n < total:
+        percent = min(percent, 99)
+    return f"{percent}%"
+
+
+def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:
+    """One schema's rule-flagged alerts by primary rule. Never combined with the other."""
+    counts = primary_rule_counts(summary.inputs.alerts, schema)
+    total = sum(n for _, n in counts)
+    if not total:
+        return (
+            f'<div class="donut-one">{_empty(f"No rule-flagged {schema} alerts this week.")}</div>'
+        )
+    slices, angle = [], -math.pi / 2
+    for rule_id, n in counts:
+        css = f"slice {rule_id.lower()}"
+        label = f"<title>{h(rule_id)}: {_plural(n, 'alert')}</title>"
+        if n == total:
+            slices.append(
+                f'<path class="{css}" fill-rule="evenodd" d="{_ring_path()}">{label}</path>'
+            )
+            break
+        end = angle + 2 * math.pi * n / total
+        slices.append(f'<path class="{css}" d="{_arc_path(angle, end)}">{label}</path>')
+        angle = end
+    name = SCHEMA_NAMES[schema]
+    noun = "rule-flagged alert" if total == 1 else "rule-flagged alerts"
+    svg = (
+        f'<svg class="donut" viewBox="0 0 120 120" role="img" '
+        f'aria-label="{h(name)}: {total:,} {noun}">{"".join(slices)}'
+        f'<text class="dl-schema" x="60" y="45" text-anchor="middle">{h(name)}</text>'
+        f'<text class="dl-n" x="60" y="66" text-anchor="middle">{total:,}</text>'
+        # Two short lines, so the caption stays inside the hole.
+        f'<text class="dl-u" x="60" y="77" text-anchor="middle">rule-flagged</text>'
+        f'<text class="dl-u" x="60" y="86" text-anchor="middle">'
+        f"{'alert' if total == 1 else 'alerts'}</text></svg>"
+    )
+    legend = "".join(
+        f'<li class="dk"><svg viewBox="0 0 9 9" aria-hidden="true"><rect class="{rule_id.lower()}" '
+        f'width="9" height="9" rx="2"/></svg><a href="{rule_link(rule_id)}">{h(rule_id)}</a> '
+        f'{h(_rule_title(rule_id))} <b class="num">{n:,}</b> '
+        f'<span class="sub">{_share(n, total)}</span></li>'
+        for rule_id, n in counts
+    )
+    return (
+        f'<div class="donut-one"><div class="eyebrow">{_chip(schema)} {h(name)}</div>'
+        f'<div class="donut-body">{svg}<ul class="dlegend">{legend}</ul></div></div>'
+    )
+
+
+def _view_toggle(summary: TeamSummary) -> tuple[str, str]:
+    """Radio ids for the Bars / Donut toggle: stable for one team's week, distinct per week,
+    so two summaries on one page never share a group."""
+    inputs = summary.inputs
+    key = f"{inputs.team_id}|{inputs.window_end.isoformat()}|{inputs.surface}"
+    group = "why-" + sha256(key.encode()).hexdigest()[:10]
+    return group, (
+        f'<input type="radio" class="vt-bars" name="{group}" id="{group}-bars" checked>'
+        f'<label for="{group}-bars">Bars</label>'
+        f'<input type="radio" class="vt-donut" name="{group}" id="{group}-donut">'
+        f'<label for="{group}-donut">Donut</label>'
+    )
+
+
 def _why(summary: TeamSummary, rule_link: RuleLink) -> str:
     admin = summary.inputs.surface == "admin"
     rules = sorted(summary.inputs.rules, key=lambda r: (_rule_order(r.rule_id), r.schema))
@@ -309,14 +404,30 @@ def _why(summary: TeamSummary, rule_link: RuleLink) -> str:
             model.items(), key=lambda item: (_rule_order(item[0][0]), item[0][1])
         )
     ]
-    body = (
-        '<div class="groups">'
-        f'<div><div class="eyebrow">Quality</div>{_bars(rule_rows(False), css="f-rule", admin=admin)}</div>'
+    readiness_and_model = (
         f'<div><div class="eyebrow">Phase-2 readiness</div>'
         f"{_bars(rule_rows(True), css='f-ready', admin=admin)}</div>"
         f'<div><div class="eyebrow">Model findings (advisory)</div>'
         f"{_bars(model_rows, css='f-model', admin=admin)}</div>"
+    )
+    bars_view = (
+        '<div class="groups">'
+        f'<div><div class="eyebrow">Quality</div>{_bars(rule_rows(False), css="f-rule", admin=admin)}</div>'
+        f"{readiness_and_model}"
         "</div>"
+    )
+    donut_view = (
+        f'<div class="donuts">{"".join(_donut(summary, s, rule_link) for s in SCHEMAS)}</div>'
+        '<p class="sub">Each alert is counted once, under its first rule in catalogue order. '
+        "The bars view shows every rule an alert matches. Model findings and v2 readiness "
+        "gaps are not part of the donut.</p>"
+        f'<div class="groups">{readiness_and_model}</div>'
+    )
+    _, toggle = _view_toggle(summary)
+    body = (
+        f'<div class="vtoggle">{toggle}'
+        f'<div class="view-bars">{bars_view}</div>'
+        f'<div class="view-donut">{donut_view}</div></div>'
     )
     return _card(
         "why",
@@ -420,27 +531,20 @@ def _by_application(summary: TeamSummary, rule_link: RuleLink) -> str:
 # ------------------------------------------------------------------ 7: how often alerts fire
 
 
-def _fire_rate(row: FireRow) -> str:
-    if row.ratio is None:
-        return (
-            f'<span class="sub">{_dec(row.events_per_24h)} events per 24 h · '
-            "no repeat interval</span>"
-        )
-    css = _PATTERN_CSS.get(row.pattern or "", f"f-{row.alert.schema}")
-    bar = ratio_bar(row.ratio, css=css, label=f"{row.ratio:.1f} times the repeat interval")
-    return f'<span class="rate">{bar}<b>{row.ratio:.1f}{TIMES}</b></span>'
+def _open_for(row: FireRow) -> str:
+    return '<span class="sub">\u2014</span>' if row.open_hours is None else _span(row.open_hours)
 
 
 def _fire(summary: TeamSummary) -> str:
     legend = "".join(
-        f'<li><span class="pill {key}">{label}</span> {h(text)}</li>'
+        f'<li><span class="pill {key}">{label}</span>: {h(text)}</li>'
         for key, label, text in FIRE_THRESHOLDS
     )
     legend_html = (
         f'<ul class="thresholds">{legend}</ul>'
-        '<p class="sub">Fire rate is events against the events expected at the schema\'s repeat '
-        f"interval: 1{TIMES} is a still-firing alert re-sent on schedule. Active time runs from the "
-        "first to the last event, plus one repeat interval.</p>"
+        '<p class="sub">Grafana records an event on every evaluation, so a Grafana alert\'s '
+        "event count shows how often it is evaluated, not how often it notifies. Active time "
+        "runs from the first to the last event.</p>"
     )
     if not summary.fire:
         return _card(
@@ -448,12 +552,8 @@ def _fire(summary: TeamSummary) -> str:
         )
 
     def block(schema: str) -> str:
-        # Ranked within the schema: v2 repeats 144 times more slowly than v1, so a shared
-        # ranking by events would push every v2 alert out of sight.
         top = [row for row in summary.fire if row.alert.schema == schema][:TOP_FIRING_PER_SCHEMA]
-        heading = (
-            f'<div class="eyebrow">{_chip(schema)} {SCHEMA_NAMES[schema]} · {REPEATS[schema]}</div>'
-        )
+        heading = f'<div class="eyebrow">{_chip(schema)} {SCHEMA_NAMES[schema]}</div>'
         if not top:
             return heading + _empty(f"No {schema} alerts this week.")
         rows = []
@@ -461,18 +561,30 @@ def _fire(summary: TeamSummary) -> str:
             pattern = (
                 f'<span class="pill {h(row.pattern)}">{h(row.pattern)}</span>'
                 if row.pattern
-                else '<span class="sub">—</span>'
+                else '<span class="sub">\u2014</span>'
             )
+            if row.pattern == "spamming" and row.events_per_24h is not None:
+                pattern += (
+                    f' <span class="sub">{h(_dec(row.events_per_24h))} events per '
+                    f"{h(_hours(R6_API_RATE_WINDOW))} h over {h(_dec(row.span_hours))} h</span>"
+                )
             rows.append(
                 f'<tr><td class="alert">{_alert_line(row.alert)}</td>'
                 f'<td class="num">{row.alert.row_count:,}</td>'
                 f'<td class="num">{_span(row.span_hours)}</td>'
-                f"<td>{_fire_rate(row)}</td>"
                 f'<td class="num">{row.alert.max_clear_cycles_24h:,}</td>'
+                f'<td class="num">{_open_for(row)}</td>'
                 f"<td>{pattern}</td></tr>"
             )
         return heading + _table(
-            ("Alert", "Events", "Active for", "Fire rate", "Clear cycles in 24 h", "Pattern"),
+            (
+                "Alert",
+                "Events",
+                "Active",
+                "Clear cycles (most in 24 h)",
+                "Open for",
+                "Pattern",
+            ),
             rows,
             "fire",
         )
@@ -480,8 +592,7 @@ def _fire(summary: TeamSummary) -> str:
     return _card(
         "fire",
         "How often alerts fire",
-        f"Each schema's {TOP_FIRING_PER_SCHEMA} alerts with the most events this week, against "
-        "that schema's repeat interval.",
+        f"Each schema's {TOP_FIRING_PER_SCHEMA} alerts with the most events this week.",
         "".join(block(schema) for schema in SCHEMAS) + legend_html,
     )
 

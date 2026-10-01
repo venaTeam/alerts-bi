@@ -160,7 +160,9 @@ def execute_run(
     rows_by_schema = {schema: read[schema].rows for schema in SCHEMAS}
 
     # 3-4. Evaluate every raw row, then aggregate to identity.
-    evaluation = {schema: evaluate_rows(rows_by_schema[schema]) for schema in SCHEMAS}
+    evaluation = {
+        schema: evaluate_rows(rows_by_schema[schema], window.window_end) for schema in SCHEMAS
+    }
 
     # 5. Suppression, which produces core rule 5 and can withhold identities from the LLM.
     suppression = {
@@ -570,6 +572,8 @@ def _build_finding_row(
         "clear_count": identity.clear_count,
         "max_clear_cycles_24h": identity.max_clear_cycles_24h,
         "fire_pattern": identity.fire_pattern,
+        "max_episode_firing_rows": identity.max_episode_firing_rows,
+        "open_since": None if identity.open_since is None else _naive(identity.open_since),
         # NULL with no panel; otherwise true when any row of the identity is unseen.
         "unseen": (
             None

@@ -285,8 +285,9 @@ def _render_volume(rollup: Mapping[str, Any]) -> str:
 
     return f"""<h2>Volume</h2>
 <p class="sub">Volume is displayed, not scored. No threshold declares an alert rate bad.
-Row counts are never compared across schemas: one alert moving from v1 to v2 divides its
-row count by 144 because of the repeat interval alone.</p>
+Row counts are never compared across schemas.</p>
+<p class="sub">A row count reflects how often rows are written. Grafana writes one on every
+evaluation, so alerts is evaluation load, not notifications.</p>
 {block("v1 (Appchi)", rollup["v1"])}
 {block("v2 (Appchi V2)", rollup["v2"])}"""
 
@@ -527,8 +528,8 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
 <ul class="limits">
   <li>This is a single week. There is no trend, delta, baseline or improvement percentage,
       and no cross-team leaderboard.</li>
-  <li>v1 and v2 row counts are never added together. v1 re-fires every 5 minutes and v2
-      every 12 hours, so raw volume is not comparable across schemas.</li>
+  <li>v1 and v2 row counts are never added together. A row count reflects how often
+      rows are written, so raw volume is not comparable across schemas.</li>
   <li>v1 and v2 <code>distinct_alerts</code> are not like-for-like: the v1 key is
       application + object + node_name, while the v2 key hashes roughly a dozen fields.</li>
   <li>Every distinct figure is a per-day rate. A seven-day total would be seven times a
@@ -539,7 +540,7 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
   <li>Enriching a v2 alert mints a new <code>key_field</code>, so a team that just added
       <code>impact</code> or <code>runbook_url</code> can look briefly worse. The artefact
       clears within a week.</li>
-  <li>R6 flags one alert's firing pattern against its repeat interval; it never scores a
+  <li>R6 flags one alert's firing episodes (stuck, spamming or flapping); it never scores a
       team's total volume.</li>
   <li>Phase and readiness describe only alerts that fired in this window; silent rules and
       the external alert inventory are invisible to this tool.</li>

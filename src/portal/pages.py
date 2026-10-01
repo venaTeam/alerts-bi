@@ -54,7 +54,6 @@ __all__ = [
 ]
 
 SCHEMA_NAMES = {"v1": "Appchi", "v2": "Appchi V2"}
-REPEATS = {"v1": "repeats every 5 minutes", "v2": "repeats every 12 hours"}
 PHASE_STEPS = (
     ("phase_0", "Phase 0 · Clean up"),
     ("phase_1", "Phase 1 · New rules"),
@@ -505,7 +504,7 @@ def team_page(
         "</section>"
         '<section id="summary"><div class="section-h"><h2>Summary</h2><p>What the alerts '
         "did this week, why they were flagged and what is left to do. v1 and v2 are counted "
-        "separately: they repeat at different intervals and identify alerts differently."
+        "separately: they write rows at different rates, so their event counts are not comparable, and they identify alerts differently."
         "</p></div>"
         f"{summary}"
         "</section>"

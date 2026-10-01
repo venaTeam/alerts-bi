@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime
 
-from src.domain.cadence import REPEAT_INTERVAL
 from src.insights.model import AlertRow, AppRow, FireRow
+from src.rules.catalogs import CORE_RULE_IDS, R6_API_MIN_SPAN, R6_API_RATE_WINDOW
 
-_DAY = timedelta(hours=24)
+_DAY = R6_API_RATE_WINDOW
+_MIN_SPAN = R6_API_MIN_SPAN
 
 
 def _rule_number(rule_id: str) -> tuple[int, str]:
@@ -49,18 +50,21 @@ def by_application(alerts: tuple[AlertRow, ...]) -> tuple[AppRow, ...]:
     return tuple(rows)
 
 
-def fire_rows(alerts: tuple[AlertRow, ...]) -> tuple[FireRow, ...]:
+def fire_rows(alerts: tuple[AlertRow, ...], window_end: datetime) -> tuple[FireRow, ...]:
     rows: list[FireRow] = []
     for alert in alerts:
-        interval = REPEAT_INTERVAL[alert.schema]
-        span = alert.last_seen - alert.first_seen + interval
-        ratio = alert.row_count / (span / interval) if alert.provider == "grafana" else None
+        span = alert.last_seen - alert.first_seen
         rows.append(
             FireRow(
                 alert=alert,
                 span_hours=span.total_seconds() / 3600,
-                ratio=ratio,
-                events_per_24h=alert.row_count * (_DAY / span),
+                max_episode_firing_rows=alert.max_episode_firing_rows,
+                open_hours=(
+                    None
+                    if alert.open_since is None
+                    else (window_end - alert.open_since).total_seconds() / 3600
+                ),
+                events_per_24h=(alert.row_count * (_DAY / span) if span >= _MIN_SPAN else None),
                 pattern=alert.fire_pattern,
             )
         )
@@ -79,3 +83,20 @@ def biggest(alerts: tuple[AlertRow, ...]) -> AlertRow | None:
     if not alerts:
         return None
     return min(alerts, key=lambda a: (-a.row_count, a.schema, a.key_field))
+
+
+def primary_rule_counts(alerts: tuple[AlertRow, ...], schema: str) -> tuple[tuple[str, int], ...]:
+    """One schema's rule-flagged alerts partitioned by their primary rule.
+
+    The primary rule is an alert's first core rule in catalogue order, so each alert counts
+    once and the counts sum to the schema's rule-flagged alerts. ``(rule_id, alerts)`` pairs
+    in catalogue order, zeros omitted. One schema only: v1 and v2 are never combined.
+    """
+    counts = dict.fromkeys(CORE_RULE_IDS, 0)
+    for alert in alerts:
+        if alert.schema != schema or alert.quality_state != "rule_flagged":
+            continue
+        primary = next((rid for rid in CORE_RULE_IDS if rid in alert.core_rule_ids), None)
+        if primary is not None:
+            counts[primary] += 1
+    return tuple((rid, n) for rid, n in counts.items() if n)

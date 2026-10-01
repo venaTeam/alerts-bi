@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from src.insights.aggregate import biggest, by_application, fire_rows
+from src.insights.aggregate import biggest, by_application, fire_rows, primary_rule_counts
 from src.insights.estimate import estimate, v1_rule_key
 from src.insights.findings import key_findings
 from src.insights.model import (
@@ -17,6 +17,7 @@ from src.insights.model import (
     WeekRules,
 )
 from src.insights.summary import summarize
+from src.rules.catalogs import CORE_RULE_IDS
 
 T0 = datetime(2026, 9, 7, tzinfo=UTC)
 FORBIDDEN = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
@@ -246,24 +247,30 @@ def test_by_application_counts_and_order() -> None:
     assert b.rules == ("R1", "R3")
 
 
-def test_fire_rows_single_row_has_one_interval_span() -> None:
-    (row,) = fire_rows((alert(row_count=1),))
-    assert row.span_hours == 5 / 60
-    assert row.ratio == 1.0
-    assert row.events_per_24h == 288.0
+def test_fire_rows_single_row_has_zero_span_and_no_events_rate() -> None:
+    (row,) = fire_rows((alert(row_count=1),), T0)
+    assert row.span_hours == 0.0
+    assert row.events_per_24h is None
+    assert row.open_hours is None
+    assert row.max_episode_firing_rows == 0
 
 
-def test_fire_rows_api_alert_has_no_ratio_and_orders_by_events() -> None:
-    api = alert(
-        provider="api", key_field="x", row_count=48, last_seen=T0 + timedelta(hours=23, minutes=55)
+def test_fire_rows_open_hours_run_to_the_week_end_and_orders_by_events() -> None:
+    api = alert(provider="api", key_field="x", row_count=48, last_seen=T0 + timedelta(hours=24))
+    small = alert(
+        key_field="y",
+        row_count=2,
+        max_episode_firing_rows=2,
+        open_since=T0 - timedelta(hours=30),
     )
-    small = alert(key_field="y", row_count=2)
-    rows = fire_rows((small, api))
+    rows = fire_rows((small, api), T0 + timedelta(hours=10))
     assert [r.alert.key_field for r in rows] == ["x", "y"]
-    assert rows[0].ratio is None
     assert rows[0].events_per_24h == 48.0
+    assert rows[0].span_hours == 24.0
     assert rows[0].pattern is None
-    flagged = fire_rows((alert(fire_pattern="stuck"),))
+    assert rows[1].open_hours == 40.0
+    assert rows[1].max_episode_firing_rows == 2
+    flagged = fire_rows((alert(fire_pattern="stuck"),), T0)
     assert flagged[0].pattern == "stuck"
 
 
@@ -443,7 +450,7 @@ def test_summarize_assembles_everything() -> None:
     assert summary.inputs is source
     assert summary.key_findings == key_findings(source)
     assert summary.by_application == by_application(source.alerts)
-    assert summary.fire == fire_rows(source.alerts)
+    assert summary.fire == fire_rows(source.alerts, source.window_end)
     assert summary.biggest == biggest(source.alerts)
     assert summary.estimate == estimate(source)
 
@@ -464,3 +471,44 @@ def test_concentration_exactly_at_80_percent() -> None:
     src = inputs(alerts=alerts, schemas={"v1": totals("v1", events=100), "v2": totals("v2")})
     f = next(x for x in key_findings(src) if x.kind == "concentration")
     assert f.title == "2 of 4 v1 alerts make 80% of the events"
+
+
+# ------------------------------------------------------------------ primary rule (donut)
+
+
+def _flagged(key: str, *rules: str, schema: str = "v1") -> AlertRow:
+    return alert(key_field=key, schema=schema, quality_state="rule_flagged", core_rule_ids=rules)
+
+
+def test_primary_rule_partitions_by_the_first_rule_in_catalogue_order() -> None:
+    alerts = (
+        _flagged("a", "R4", "R1"),  # stored order does not matter: R1 comes first
+        _flagged("b", "R6"),
+        _flagged("c", "R1"),
+        _flagged("d", "R7", "R5"),
+    )
+    assert primary_rule_counts(alerts, "v1") == (("R1", 2), ("R5", 1), ("R6", 1))
+
+
+def test_primary_rule_counts_a_multi_rule_alert_once() -> None:
+    counts = primary_rule_counts((_flagged("a", "R1", "R2", "R3", "R4"),), "v1")
+    assert counts == (("R1", 1),)
+    assert sum(n for _, n in counts) == 1
+
+
+def test_primary_rule_excludes_everything_not_rule_flagged_and_other_schemas() -> None:
+    alerts = (
+        _flagged("a", "R2"),
+        alert(key_field="b", quality_state="llm_flagged", llm_principle_id="P1"),
+        alert(key_field="c", quality_state="assessed_good", readiness_rule_ids=("R8",)),
+        _flagged("d", "R3", schema="v2"),
+    )
+    assert primary_rule_counts(alerts, "v1") == (("R2", 1),)
+    assert primary_rule_counts(alerts, "v2") == (("R3", 1),)
+
+
+def test_primary_rule_omits_zeros_and_follows_the_catalogue() -> None:
+    assert primary_rule_counts((), "v1") == ()
+    every = tuple(_flagged(rid, rid) for rid in reversed(CORE_RULE_IDS))
+    assert [rid for rid, _ in primary_rule_counts(every, "v1")] == list(CORE_RULE_IDS)
+    assert CORE_RULE_IDS == ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
