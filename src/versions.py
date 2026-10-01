@@ -4,7 +4,9 @@ A movement in a team's numbers must always be attributable, so each of these is 
 deliberately and never edited in place:
 
 - ``RULESET_VERSION`` covers the R1-R10 deterministic rules AND the P1-P11 LLM principle
-  catalogue. Adding a phrase to an R1/R2/R3/R10 catalogue is a ruleset change.
+  catalogue. Adding a phrase to an R1/R2/R3/R10 catalogue is a ruleset change, and so is a
+  change to an R6 threshold. R6 became a core rule in 1.1.0; the prompt's R6 line is
+  deliberately unchanged (team summary spec 5.3).
 - ``PROMPT_VERSION`` covers the classification instructions, the two guides carried in the
   cached prefix, and the R/P catalogue as presented to the model.
 - ``PARSER_VERSION`` covers the panel-SQL parser; cached panel parses are keyed by
@@ -17,7 +19,10 @@ The language port preserved these versions. Later prompt improvements receive th
 version; the rule and principle catalogues remain unchanged.
 """
 
-RULESET_VERSION = "1.0.0"
+# 1.1.0 (2026-10-01): R6 (stuck, spamming, flapping) became a core rule. The prompt's R6 line
+# is deliberately unchanged (team summary spec 5.3): every R6 alert is withheld from the
+# model, so PROMPT_VERSION stays put and no verdict is re-classified.
+RULESET_VERSION = "1.1.0"
 # 1.2.0 (2026-09-24): evidence guidance, explicit applicability and untrusted alert text.
 PROMPT_VERSION = "1.2.0"
 PARSER_VERSION = "1.0.0"

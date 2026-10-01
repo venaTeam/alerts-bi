@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from src.domain.normalize import AlertRecord, select_representative
 from src.rules.catalogs import CORE_RULE_IDS, V2_READINESS_RULE_IDS
 from src.rules.core import Finding, evaluate_core_rules
+from src.rules.firing import firing_facts
 from src.rules.readiness import evaluate_readiness_rules
 
 __all__ = [
@@ -118,6 +119,22 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
     for identity, group in grouped.items():
         representative = select_representative([item.row for item in group])
 
+        # R6 judges the identity's whole firing pattern, so a match belongs to every row
+        # of the identity and the per-bucket allocation then applies unchanged.
+        facts = firing_facts(representative.schema, [item.row for item in group])
+        if facts.pattern is not None:
+            evidence = {
+                "pattern": facts.pattern,
+                "rows": len(group),
+                "span_hours": round(facts.span.total_seconds() / 3600, 2),
+                "ratio": None if facts.ratio is None else round(facts.ratio, 3),
+                "events_per_24h": round(facts.events_per_24h, 2),
+                "clear_count": facts.clear_count,
+                "max_clear_cycles_24h": facts.max_clear_cycles_24h,
+            }
+            for item in group:
+                item.core_findings.append(Finding(rule_id="R6", set="core", evidence=evidence))
+
         core_rule_ids = {finding.rule_id for item in group for finding in item.core_findings}
 
         # Readiness is a property of the identity's CURRENT state, so it is read off the
@@ -139,6 +156,9 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
             has_core_finding=has_core_finding,
             llm_eligible=not has_core_finding,
             present_dates={item.row.snapshot_date for item in group},
+            clear_count=facts.clear_count,
+            max_clear_cycles_24h=facts.max_clear_cycles_24h,
+            fire_pattern=facts.pattern,
         )
 
     return Evaluation(rows=evaluated, identities=identities)
