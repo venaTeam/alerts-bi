@@ -372,7 +372,10 @@ def test_unseen_omitted_when_none_and_present_otherwise() -> None:
     none = replace(base, schemas={"v1": totals("v1"), "v2": totals("v2")})
     assert all(f.kind != "unseen" for f in key_findings(none))
     f = next(x for x in key_findings(base) if x.kind == "unseen")
-    assert f.body == "2 alerts (4 events) are outside every panel's narrowing."
+    assert (
+        f.body
+        == "1 v1 alerts (3 events) and 1 v2 alerts (1 events) are outside every panel's narrowing."
+    )
     assert f.fix == "Widen a panel to include them, or confirm they are meant to stay out of view."
 
 
@@ -416,3 +419,21 @@ def test_summarize_assembles_everything() -> None:
     assert summary.fire == fire_rows(source.alerts)
     assert summary.biggest == biggest(source.alerts)
     assert summary.estimate == estimate(source)
+
+
+def test_unseen_lists_one_schema_only() -> None:
+    one = inputs(
+        schemas={
+            "v1": totals("v1", unseen=5, unseen_alerts=2),
+            "v2": totals("v2", unseen=0, unseen_alerts=0),
+        }
+    )
+    (f,) = key_findings(one)
+    assert f.body == "2 v1 alerts (5 events) are outside every panel's narrowing."
+
+
+def test_concentration_exactly_at_80_percent() -> None:
+    alerts = tuple(alert(key_field=str(i), row_count=c) for i, c in enumerate((40, 40, 10, 10)))
+    src = inputs(alerts=alerts, schemas={"v1": totals("v1", events=100), "v2": totals("v2")})
+    f = next(x for x in key_findings(src) if x.kind == "concentration")
+    assert f.title == "2 of 4 v1 alerts make 80% of the events"
