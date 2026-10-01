@@ -54,7 +54,7 @@ def _store(run_id: str, end: datetime) -> None:
 
 #: A third, never-published week of the same team with a mixed work list, and a run of
 #: another team, for the Summary page.
-RUN0, OTHER = "0" * 64, "9" * 64
+RUN0, OTHER, FAILED = "0" * 64, "9" * 64, "f" * 64
 W0 = W1 - WEEK
 
 
@@ -91,7 +91,7 @@ def _store_summary_runs() -> None:
             alert(
                 "k-r10",
                 message="Disk full on R10 host",
-                core_rule_ids="R3",
+                core_rule_ids="R10",
                 quality_state="rule_flagged",
                 llm_principle_id=None,
                 llm_confidence=None,
@@ -111,9 +111,22 @@ def _store_summary_runs() -> None:
         daily_metrics=[sample_daily(run_id=OTHER, team_id="payments-api")],
         findings=[sample_finding(run_id=OTHER)],
     )
+    # The newest run of the team, but it did not complete: never a Summary.
+    failed = PersistencePayload(
+        run=sample_run(
+            run_id=FAILED,
+            run_at=W2 + WEEK,
+            window_start=W2,
+            window_end=W2 + WEEK,
+            status="failed",
+            completed_at=None,
+            error_summary="Elasticsearch unreachable",
+        ),
+    )
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, payload)
         persist_run(db, other)
+        persist_run(db, failed)
 
 
 @pytest.fixture(scope="module")
@@ -328,6 +341,12 @@ def test_an_unknown_run_or_another_teams_run_is_not_found(client: TestClient) ->
     assert client.get(f"/teams/{TEAM}/summary?run_id=nope", headers=ALICE).status_code == 404
     assert client.get(f"/teams/{TEAM}/summary?run_id={OTHER}", headers=ALICE).status_code == 404
     assert client.get("/teams/no-such-team/summary", headers=ALICE).status_code == 404
+
+
+def test_a_run_that_did_not_complete_is_not_found(client: TestClient) -> None:
+    assert client.get(f"/teams/{TEAM}/summary?run_id={FAILED}", headers=ALICE).status_code == 404
+    latest = client.get(f"/teams/{TEAM}/summary", headers=ALICE).text
+    assert f'value="{FAILED}"' not in latest, "the picker offers completed runs only"
 
 
 def test_the_work_list_filters_by_state_schema_and_rule(client: TestClient) -> None:

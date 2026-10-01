@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Final, Literal
 from urllib.parse import quote, urlencode
@@ -28,7 +28,7 @@ from src.db.connection import Database
 from src.db.repositories import get_daily_metrics, get_rule_counts, get_run_panels
 from src.domain.metrics import WINDOW_DAYS
 from src.insights import AlertRow, RuleTotal, SchemaTotals, SummaryInputs, WeekRules
-from src.insights.estimate import v1_rule_key
+from src.insights.estimate import v1_rule_key_of
 from src.insights.summary import summarize
 from src.portal.charts import ChartPoint, line_chart
 from src.portal.explain import (
@@ -295,7 +295,7 @@ def read_snapshot(text: Any) -> SnapshotEntry:
         v2_operator=None if v2 is None else str(v2),
         panels=panels,
         v1_rule_effort_days=(
-            float(effort)
+            round(float(effort), 2)
             if isinstance(effort, int | float) and not isinstance(effort, bool)
             else None
         ),
@@ -350,19 +350,26 @@ def worklist_where(run_id: str, filters: WorklistFilter) -> tuple[str, dict[str,
     return " AND ".join(clauses), params
 
 
+def last_page(total: int) -> int:
+    return max(1, -(-total // PAGE_SIZE))
+
+
 def _worklist(
     db: Database, run_id: str, filters: WorklistFilter
-) -> tuple[tuple[AlertRow, ...], int]:
+) -> tuple[tuple[AlertRow, ...], int, WorklistFilter]:
+    """One page of the work list, its total, and the filters with the page clamped to the
+    last one, so a page past the end shows the last page rather than nothing."""
     where, params = worklist_where(run_id, filters)
     row = db.query_one(f"SELECT COUNT(*) AS n FROM alert_findings WHERE {where}", params)
     total = int(row["n"]) if row else 0
+    filters = replace(filters, page=min(max(filters.page, 1), last_page(total)))
     rows = db.query(
         f"SELECT {_ALERT_COLUMNS} FROM alert_findings WHERE {where} "
         f"ORDER BY {SORTS.get(filters.sort, SORTS['events'])} "
         "OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY",
-        {**params, "offset": (max(filters.page, 1) - 1) * PAGE_SIZE, "size": PAGE_SIZE},
+        {**params, "offset": (filters.page - 1) * PAGE_SIZE, "size": PAGE_SIZE},
     )
-    return tuple(alert_row(r) for r in rows), total
+    return tuple(alert_row(r) for r in rows), total, filters
 
 
 def _publication(db: Database, run_id: str) -> Publication:
@@ -380,37 +387,6 @@ def _publication(db: Database, run_id: str) -> Publication:
         )
     return Publication(
         "withdrawn", row["withdrawn_by"], row["withdrawn_at"], row["withdrawn_reason"]
-    )
-
-
-def _rule_key(application: str, alert_rule_url: str | None) -> str:
-    """:func:`v1_rule_key` for a stored (application, alert_rule_url) pair, so the unit of
-    work has exactly one definition for both the selected week and its history."""
-    epoch = datetime(1970, 1, 1)
-    return v1_rule_key(
-        AlertRow(
-            schema="v1",
-            application=application,
-            key_field="",
-            message=None,
-            severity=None,
-            provider=None,
-            alert_rule_url=alert_rule_url,
-            component=None,
-            node_name=None,
-            row_count=0,
-            first_seen=epoch,
-            last_seen=epoch,
-            quality_state="",
-            core_rule_ids=(),
-            readiness_rule_ids=(),
-            llm_principle_id=None,
-            llm_confidence=None,
-            clear_count=0,
-            max_clear_cycles_24h=0,
-            fire_pattern=None,
-            unseen=None,
-        )
     )
 
 
@@ -433,7 +409,9 @@ def _published_history(db: Database, team_id: str, until: datetime) -> tuple[Wee
     )
     rules: dict[str, set[str]] = defaultdict(set)
     for pair in pairs:
-        rules[str(pair["run_id"])].add(_rule_key(str(pair["application"]), pair["alert_rule_url"]))
+        rules[str(pair["run_id"])].add(
+            v1_rule_key_of(str(pair["application"]), pair["alert_rule_url"])
+        )
     return tuple(
         WeekRules(
             week_end=week["window_end"],
@@ -486,7 +464,7 @@ def load_admin_summary(
     publication = _publication(db, selected)
     published = publication.state == "published"
     history = _published_history(db, team_id, run["window_end"]) if published else ()
-    worklist, total = _worklist(db, selected, filters)
+    worklist, total, filters = _worklist(db, selected, filters)
     schedule = db.query_one(
         "SELECT TOP 1 invoked_at, window_end, outcome, detail FROM weekly_review_log "
         "WHERE team_id = :team_id ORDER BY log_id DESC",
@@ -744,11 +722,15 @@ def _schedule_html(schedule: Mapping[str, Any] | None) -> str:
 def _picker(summary: AdminSummary) -> str:
     team_id = summary.inputs.team_id
     selected = str(summary.run["run_id"])
+    runs = list(summary.runs)
+    if all(str(run["run_id"]) != selected for run in runs):
+        # Older than the runs listed: offer it anyway, so the picker shows what is open.
+        runs.append(summary.run)
     options = "".join(
         f'<option value="{h(run["run_id"])}"{" selected" if str(run["run_id"]) == selected else ""}>'
         f"Week of {h(format_week(run['window_start'], run['window_end']))} · "
         f"{h(str(run['run_id'])[:12])}</option>"
-        for run in summary.runs
+        for run in runs
     )
     return (
         f'<form class="picker" method="get" action="/teams/{h(quote(team_id, safe=""))}/summary">'
@@ -788,7 +770,12 @@ def _worklist_html(summary: AdminSummary) -> str:
     run_id = str(summary.run["run_id"])
     team_id = inputs.team_id
     findings = f"/runs/{quote(run_id, safe='')}/findings"
-    rules = sorted({rule.rule_id for rule in inputs.rules}, key=_rule_order)
+    # The active rule is always offered, even when this run has no row for it, so the
+    # select never shows "Any rule" while a rule filter is applied.
+    rules = sorted(
+        {rule.rule_id for rule in inputs.rules} | ({filters.rule} if filters.rule else set()),
+        key=_rule_order,
+    )
     form = (
         f'<form class="inline filters" method="get" action="/teams/{h(quote(team_id, safe=""))}/summary">'
         f'<input type="hidden" name="run_id" value="{h(run_id)}">'
@@ -824,9 +811,10 @@ def _worklist_html(summary: AdminSummary) -> str:
         "</tr>"
         for alert in summary.worklist
     )
-    pages_count = max(1, -(-summary.total // PAGE_SIZE))
-    first = (filters.page - 1) * PAGE_SIZE + 1 if summary.total else 0
-    last = min(filters.page * PAGE_SIZE, summary.total)
+    pages_count = last_page(summary.total)
+    page = min(max(filters.page, 1), pages_count)
+    first = (page - 1) * PAGE_SIZE + 1 if summary.total else 0
+    last = min(page * PAGE_SIZE, summary.total)
 
     def page_link(target: int, text: str, enabled: bool) -> str:
         if not enabled:
@@ -852,8 +840,8 @@ def _worklist_html(summary: AdminSummary) -> str:
         f"<tbody>{rows or '<tr><td colspan=6>Nothing matches this filter.</td></tr>'}</tbody>"
         "</table></div>"
         f'<div class="pager"><span>Showing {first}&ndash;{last} of {summary.total:,}</span>'
-        f'<span class="links">{page_link(filters.page - 1, "Previous", filters.page > 1)}'
-        f"{page_link(filters.page + 1, 'Next', filters.page < pages_count)}</span></div>"
+        f'<span class="links">{page_link(page - 1, "Previous", page > 1)}'
+        f"{page_link(page + 1, 'Next', page < pages_count)}</span></div>"
         "</section>"
     )
 

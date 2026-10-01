@@ -14,12 +14,17 @@ _MIN_RETIRED = 2
 _WEEK = timedelta(days=7)
 
 
-def v1_rule_key(alert: AlertRow) -> str:
+def v1_rule_key_of(application: str, alert_rule_url: str | None) -> str:
     """The unit of migration work: ``url:<alert_rule_url>`` or ``app:<application>``."""
-    url = (alert.alert_rule_url or "").strip()
+    url = (alert_rule_url or "").strip()
     if url:
         return f"url:{url}"
-    return f"app:{alert.application}"
+    return f"app:{application}"
+
+
+def v1_rule_key(alert: AlertRow) -> str:
+    """:func:`v1_rule_key_of` for one work-list row."""
+    return v1_rule_key_of(alert.application, alert.alert_rule_url)
 
 
 def _earlier_weeks(history: tuple[WeekRules, ...]) -> list[WeekRules]:
