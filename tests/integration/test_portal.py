@@ -777,7 +777,9 @@ def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> No
     summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
     slides = summary[summary.index(">Presentation</h3>") :]
     assert slides.count('<section class="slide ') == 2
-    assert "stands</h4>" in slides and "What to fix</h4>" in slides
+    assert "stands</h4>" in slides and "The week, day by day</h4>" in slides
+    assert "Biggest single alert" in slides and "What to fix" not in slides
+    assert "Top rules" not in slides and "<polyline" not in slides
     assert "week ending 30 Aug 2026 · Alerts BI" in slides
     assert _run_id("wk3") not in slides and "href=" not in slides
 
