@@ -29,9 +29,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from src.config import PortalSettings
 from src.config.portal import IpNetwork
 from src.db.connection import Database, connect
+from src.insights.summary import summarize
 from src.logging_setup import log, redact_error
 from src.portal import pages, queries
 from src.portal.assets import STYLESHEET, STYLESHEET_PATH
+from src.portal.summary_queries import load_portal_summary
+from src.portal.summary_view import render_summary_sections
 from src.versions import APP_VERSION
 
 __all__ = ["READ_METHODS", "SECURITY_HEADERS", "build_portal", "client_allowed"]
@@ -53,6 +56,10 @@ SECURITY_HEADERS = {
 # Query parameters, declared at module level so FastAPI can resolve the annotations.
 Show = Annotated[str, Query(pattern="^(attention|all)$")]
 SchemaFilter = Annotated[str, Query(pattern="^(all|v1|v2)$")]
+StateFilter = Annotated[
+    str, Query(pattern="^(all|rule_flagged|llm_flagged|needs_review|assessed_good|unassessed)$")
+]
+RuleFilter = Annotated[str, Query(pattern="^(R(10|[1-9]))?$")]
 Page = Annotated[int, Query(ge=1, le=100_000)]
 
 
@@ -163,27 +170,28 @@ def build_portal(settings: PortalSettings) -> FastAPI:
         show: str,
         schema: str,
         page: int,
+        state: str,
+        rule: str,
     ) -> HTMLResponse:
         attention_only = show != "all"
         schema_filter = schema if schema in ("v1", "v2") else None
+        state_filter = state if state in queries.QUALITY_STATES else None
+        rule_filter = rule or None
         listing = queries.worklist(
             db,
             selected.run_id,
             attention_only=attention_only,
             schema=schema_filter,
+            state=state_filter,
+            rule=rule_filter,
             page=page,
             page_size=settings.page_size,
         )
-        in_scope = [
-            totals
-            for name, totals in selected.totals.items()
-            if schema_filter is None or name == schema_filter
-        ]
-        counts = {
-            "attention": sum(t.needs_attention for t in in_scope),
-            "all": sum(t.distinct_alerts for t in in_scope),
-        }
+        counts = queries.worklist_counts(
+            db, selected.run_id, schema=schema_filter, state=state_filter, rule=rule_filter
+        )
         decided = queries.latest_decisions(db, selected.run_id, listing.rows)
+        summary = summarize(load_portal_summary(db, selected.team_id, selected.run_id))
         return HTMLResponse(
             pages.team_page(
                 reviews,
@@ -193,16 +201,26 @@ def build_portal(settings: PortalSettings) -> FastAPI:
                 show="all" if not attention_only else "attention",
                 schema=schema_filter or "all",
                 counts=counts,
+                summary=render_summary_sections(
+                    summary, rule_link=pages.rule_link_for(selected.team_id, selected.week)
+                ),
+                state=state_filter or "all",
+                rule=rule_filter or "",
             )
         )
 
     @app.get("/teams/{team_id}", response_class=HTMLResponse)
     def team_latest(
-        team_id: str, show: Show = "attention", schema: SchemaFilter = "all", page: Page = 1
+        team_id: str,
+        show: Show = "attention",
+        schema: SchemaFilter = "all",
+        page: Page = 1,
+        state: StateFilter = "all",
+        rule: RuleFilter = "",
     ) -> HTMLResponse:
         with database() as db:
             reviews = _reviews(db, team_id)
-            return _team_response(db, reviews, reviews[-1], show, schema, page)
+            return _team_response(db, reviews, reviews[-1], show, schema, page, state, rule)
 
     @app.get("/teams/{team_id}/weeks")
     def pick_week(team_id: str, week: Annotated[str, Query(max_length=10)]) -> Response:
@@ -222,10 +240,14 @@ def build_portal(settings: PortalSettings) -> FastAPI:
         show: Show = "attention",
         schema: SchemaFilter = "all",
         page: Page = 1,
+        state: StateFilter = "all",
+        rule: RuleFilter = "",
     ) -> HTMLResponse:
         with database() as db:
             reviews = _reviews(db, team_id)
-            return _team_response(db, reviews, _week(reviews, week), show, schema, page)
+            return _team_response(
+                db, reviews, _week(reviews, week), show, schema, page, state, rule
+            )
 
     @app.get("/teams/{team_id}/weeks/{week}/alert", response_class=HTMLResponse)
     def alert(

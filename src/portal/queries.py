@@ -10,6 +10,7 @@ Nothing here writes, and nothing reaches Elasticsearch or the model.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal
@@ -27,6 +28,7 @@ __all__ = [
     "list_teams",
     "team_reviews",
     "worklist",
+    "worklist_counts",
 ]
 
 Schema = Literal["v1", "v2"]
@@ -267,6 +269,56 @@ class WorklistPage:
         return max(1, -(-self.total // self.page_size))
 
 
+#: The quality states a reader can filter the work list by (design section 5.1).
+QUALITY_STATES: tuple[str, ...] = (
+    "rule_flagged",
+    "llm_flagged",
+    "needs_review",
+    "assessed_good",
+    "unassessed",
+)
+#: A rule filter names exactly one catalogue rule, R1 to R10.
+RULE_FILTER = re.compile(r"^R(10|[1-9])$")
+
+
+def _filters(
+    run_id: str, *, schema: str | None, state: str | None, rule: str | None
+) -> tuple[list[str], dict[str, Any]]:
+    """The WHERE terms shared by a work-list page and its counts. Values are bound, never
+    spliced: ``state`` and ``rule`` are also checked against their closed sets here."""
+    where = ["run_id = :run_id"]
+    params: dict[str, Any] = {"run_id": run_id}
+    if schema in SCHEMAS:
+        where.append("alert_schema = :schema")
+        params["schema"] = schema
+    if state in QUALITY_STATES:
+        where.append("quality_state = :state")
+        params["state"] = state
+    if rule is not None and RULE_FILTER.match(rule):
+        where.append(
+            "(',' + core_rule_ids + ',' + readiness_rule_ids + ',') LIKE '%,' + :rule + ',%'"
+        )
+        params["rule"] = rule
+    return where, params
+
+
+def worklist_counts(
+    db: Database, run_id: str, *, schema: str | None, state: str | None, rule: str | None
+) -> dict[str, int]:
+    """How many alerts need attention, and how many there are, under the other filters."""
+    where, params = _filters(run_id, schema=schema, state=state, rule=rule)
+    row = db.query_one(
+        "SELECT COUNT(*) AS total, "
+        "COALESCE(SUM(CASE WHEN attention_rank < 4 THEN 1 ELSE 0 END), 0) AS attention "
+        f"FROM portal_alerts WHERE {' AND '.join(where)}",
+        params,
+    )
+    return {
+        "attention": int(row["attention"]) if row else 0,
+        "all": int(row["total"]) if row else 0,
+    }
+
+
 def worklist(
     db: Database,
     run_id: str,
@@ -275,19 +327,18 @@ def worklist(
     schema: str | None,
     page: int,
     page_size: int,
+    state: str | None = None,
+    rule: str | None = None,
 ) -> WorklistPage:
     """One page of a published week's alerts, paginated in SQL.
 
     Order: rule findings, advisory model findings, decisions needed, readiness-only gaps,
     then everything else; within a group by event count, then identity, so paging is stable.
+    ``state`` narrows to one quality state and ``rule`` to alerts carrying one rule id.
     """
-    where = ["run_id = :run_id"]
-    params: dict[str, Any] = {"run_id": run_id}
+    where, params = _filters(run_id, schema=schema, state=state, rule=rule)
     if attention_only:
         where.append("attention_rank < 4")
-    if schema in SCHEMAS:
-        where.append("alert_schema = :schema")
-        params["schema"] = schema
     clause = " AND ".join(where)
 
     count = db.query_one(f"SELECT COUNT(*) AS total FROM portal_alerts WHERE {clause}", params)
