@@ -88,6 +88,8 @@ def _findings(run_id: str) -> list[dict[str, Any]]:
             provider="grafana",
             alert_rule_url=None,
             row_count=592,
+            max_episode_firing_rows=3,
+            open_since=W3 - timedelta(days=3),
             core_rule_ids="R1,R4",
             quality_state="rule_flagged",
             llm_principle_id=None,
@@ -395,6 +397,29 @@ def test_the_reader_sees_only_published_weeks(reader: SqlConfig) -> None:
     assert alerts == visible
 
 
+def test_the_episode_facts_reach_the_store_and_the_alerts_view(reader: SqlConfig) -> None:
+    query = (
+        "SELECT max_episode_firing_rows, open_since FROM {table} "
+        "WHERE run_id = :r AND application = :a"
+    )
+    with connect(CONFIG.sql, DB) as owner:
+        stored = owner.query(
+            query.format(table="alert_findings"), {"r": _run_id("wk1"), "a": "notif-dispatcher"}
+        )
+        untouched = owner.query(
+            query.format(table="alert_findings"), {"r": _run_id("wk1"), "a": "checkout-svc"}
+        )
+    assert stored[0]["max_episode_firing_rows"] == 3
+    assert stored[0]["open_since"] == W3 - timedelta(days=3), "stored as naive UTC"
+    assert (untouched[0]["max_episode_firing_rows"], untouched[0]["open_since"]) == (0, None)
+    with connect(reader, DB) as db:
+        viewed = db.query(
+            query.format(table="portal_alerts"), {"r": _run_id("wk1"), "a": "notif-dispatcher"}
+        )
+    assert viewed[0]["max_episode_firing_rows"] == 3
+    assert viewed[0]["open_since"] == W3 - timedelta(days=3)
+
+
 def test_the_views_do_not_expose_the_complete_source_document(reader: SqlConfig) -> None:
     with connect(reader, DB) as db:
         columns = {
@@ -683,6 +708,19 @@ def test_the_summary_totals_are_the_stored_weekly_totals(
     assert shown == rules
     assert 'href="/teams/portal-team/weeks/2026-08-30?rule=R1#worklist"' in summary
     assert "per day" not in summary and _run_id("wk3") not in summary
+
+
+def test_why_flagged_offers_bars_and_a_donut_per_schema(portal: TestClient) -> None:
+    page = portal.get(f"/teams/{TEAM}").text
+    why = page[page.index("Why alerts were flagged") : page.index("Key findings")]
+    assert why.count('type="radio"') == 2 and ">Bars</label>" in why and ">Donut</label>" in why
+    assert 'class="view-bars"' in why and 'class="view-donut"' in why
+    donut = why[why.index('class="view-donut"') :]
+    # Both v1 rule-flagged alerts carry R1 first (one also R4): one full R1 ring.
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert donut.count('<path class="slice r1"') == 1 and 'fill-rule="evenodd"' in donut
+    assert "No rule-flagged v2 alerts this week." in donut
+    assert "<polyline" not in why
 
 
 def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: TestClient) -> None:

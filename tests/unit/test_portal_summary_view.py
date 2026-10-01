@@ -25,8 +25,9 @@ from src.insights import (
     TeamSummary,
     WeekRules,
 )
-from src.portal.summary_view import format_projected_week, render_summary_sections
-from src.rules.catalogs import R6_FLAP_CYCLES, R6_SPAM_EPISODE_ROWS, R6_STUCK_OPEN
+from src.portal.explain import rule_explanation
+from src.portal.summary_view import _share, format_projected_week, render_summary_sections
+from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_OPEN
 
 END = datetime(2026, 9, 28)
 START = END - timedelta(hours=168)
@@ -339,16 +340,14 @@ def test_no_dashboard_is_never_shown_as_zero() -> None:
     assert unseen.count("No dashboard supplied") == 2
 
 
-def test_the_fire_table_shows_episode_columns_and_the_thresholds() -> None:
+def test_the_fire_table_shows_episode_columns() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    for header in ("Episodes (clear cycles)", "Most rows in one episode", "Open for", "Pattern"):
+    for header in ("Clear cycles (most in 24 h)", "Open for", "Pattern"):
         assert header in fire, header
+    assert "Most rows in one episode" not in fire
     assert "<svg" not in fire
     assert "repeat" not in fire.lower()
-    assert "stuck" in fire
-    for words in (f"{R6_SPAM_EPISODE_ROWS} or more firing rows", "24 or more", "72 hours"):
-        assert words in fire, words
 
 
 def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
@@ -366,8 +365,14 @@ def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
 def test_the_threshold_legend_reads_the_catalogue() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    assert f"{R6_FLAP_CYCLES} or more fire\u2192clear cycles" in fire
-    assert f"\u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} hours" in fire
+    text = re.sub(r"<[^>]+>", "", fire)
+    assert (
+        f"Stuck: still firing, no clear for \u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h "
+        "before the week ends"
+    ) in text
+    assert "Spamming: an API alert at \u226524 events per 24 h over \u22656 h" in text
+    assert f"Flapping: \u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in 24 h" in text
+    assert text.index("Stuck:") < text.index("Spamming:") < text.index("Flapping:")
 
 
 def test_rule_and_model_findings_stay_in_separate_columns() -> None:
@@ -523,3 +528,136 @@ def test_per_day_rates_and_unmeasured_counts_are_for_operators_only() -> None:
     assert "per day" not in portal
     assert "unmeasured" not in portal
     assert "distinct alerts this week" in portal
+
+
+# ------------------------------------------------------------------ why flagged: donut view
+
+
+def _why(html: str) -> str:
+    return html[html.index("Why alerts were flagged") : html.index("Key findings")]
+
+
+def _donut_view(html: str) -> str:
+    why = _why(html)
+    return why[why.index('class="view-donut"') :]
+
+
+def _attr(tag: str, name: str) -> str:
+    found = re.search(rf'{name}="([^"]+)"', tag)
+    assert found is not None, (name, tag)
+    return found.group(1)
+
+
+def test_the_why_widget_offers_a_bars_and_donut_toggle_with_bars_checked() -> None:
+    why = _why(render())
+    radios = re.findall(r"<input [^>]*>", why)
+    assert len(radios) == 2
+    assert all('type="radio"' in radio for radio in radios)
+    assert len({_attr(radio, "name") for radio in radios}) == 1, "one group per widget"
+    bars, donut = radios
+    assert " checked" in bars and " checked" not in donut
+    for radio in radios:
+        assert f'<label for="{_attr(radio, "id")}">' in why
+    assert ">Bars</label>" in why and ">Donut</label>" in why
+    assert why.index('class="view-bars"') < why.index('class="view-donut"')
+
+
+def test_the_bars_view_is_unchanged() -> None:
+    why = _why(render())
+    bars = why[why.index('class="view-bars"') : why.index('class="view-donut"')]
+    assert '<div class="eyebrow">Quality</div>' in bars
+    assert '<ul class="bars">' in bars and '<svg class="hbar"' in bars
+    assert '<a href="/wl?rule=R1">R1</a> Generic message' in bars
+
+
+def test_one_donut_per_schema_with_rule_flagged_alerts_and_a_message_otherwise() -> None:
+    donut = _donut_view(render())
+    assert donut.count('<svg class="donut"') == 1, "v1 only: v2 has no rule-flagged alert"
+    assert "No rule-flagged v2 alerts this week." in donut
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert donut.index("Appchi") < donut.index("No rule-flagged v2 alerts")
+    # The model and readiness lists stay visible under the donut view.
+    assert "Model findings (advisory)" in donut and "Phase-2 readiness" in donut
+    assert "Each alert is counted once, under its first rule in catalogue order." in donut
+
+
+def test_the_legend_counts_each_alert_under_its_first_rule_with_its_share() -> None:
+    donut = _donut_view(render())
+    legend = re.findall(
+        r'<li class="dk">.*?>(R\d+)</a> (.*?) <b class="num">(\d+)</b> '
+        r'<span class="sub">(\d+)%</span>',
+        donut,
+    )
+    # The R1 + R5 alert counts once, under R1; the stuck alert is R6.
+    r6_title = rule_explanation("R6", None).title
+    assert legend == [("R1", "Generic message", "1", "50"), ("R6", r6_title, "1", "50")]
+    assert donut.count('class="slice r1"') == 1 and donut.count('class="slice r6"') == 1
+
+
+def test_a_single_rule_draws_a_closed_ring() -> None:
+    only = (alert(), alert(key_field="k2", message="Second stuck alert"))
+    donut = _donut_view(render(build_summary(alerts=only)))
+    (path,) = re.findall(r'<path class="slice r6"[^>]*>', donut)
+    assert 'fill-rule="evenodd"' in path
+    d = _attr(path, "d")
+    assert d.count("Z") == 2, "outer and inner circles, each closed"
+    assert "nan" not in d.lower()
+    assert '<span class="sub">100%</span>' in donut
+
+
+def test_the_donut_never_combines_schemas() -> None:
+    both = (alert(), alert(schema="v2", key_field="v2a", core_rule_ids=("R3",)))
+    donut = _donut_view(render(build_summary(alerts=both)))
+    assert donut.count('<svg class="donut"') == 2
+    assert 'aria-label="Appchi: 1 rule-flagged alert"' in donut
+    assert 'aria-label="Appchi V2: 1 rule-flagged alert"' in donut
+    assert "2 rule-flagged alerts" not in donut
+
+
+@pytest.mark.parametrize("surface", ["portal", "admin"])
+def test_the_toggle_adds_no_script_inline_style_or_forbidden_copy(surface: str) -> None:
+    why = _why(render(build_summary(surface=surface)))
+    assert "<script" not in why.lower() and " style=" not in why
+    if surface == "portal":
+        for word in FORBIDDEN:
+            assert word not in why, word
+
+
+def test_the_toggle_names_are_stable_and_distinct_per_week() -> None:
+    first = render()
+    assert first == render(), "deterministic markup"
+    later = build_summary()
+    later = dataclasses.replace(
+        later, inputs=dataclasses.replace(later.inputs, window_end=END + timedelta(days=7))
+    )
+    name = _attr(re.findall(r"<input [^>]*>", _why(first))[0], "name")
+    assert name not in render(later)
+
+
+@pytest.mark.parametrize(
+    ("n", "total", "shown"),
+    [
+        (1, 8, "13%"),  # 12.5 rounds half up; banker's rounding would say 12
+        (1, 200, "1%"),  # exactly 0.5 rounds up
+        (5, 8, "63%"),  # 62.5
+        (1, 201, "<1%"),  # nonzero but under half a percent: never shown as 0
+        (2, 2, "100%"),
+        (5, 5, "100%"),
+        (199, 200, "99%"),  # 99.5 would round to 100, but a partial slice is never the whole
+    ],
+)
+def test_legend_shares_round_half_up_and_never_show_zero(n: int, total: int, shown: str) -> None:
+    assert _share(n, total) == shown
+
+
+def test_the_admin_surface_renders_the_toggle_and_both_views() -> None:
+    why = _why(render(build_summary(surface="admin")))
+    radios = re.findall(r"<input [^>]*>", why)
+    assert len(radios) == 2 and " checked" in radios[0]
+    assert ">Bars</label>" in why and ">Donut</label>" in why
+    assert 'class="view-bars"' in why and 'class="view-donut"' in why
+    donut = why[why.index('class="view-donut"') :]
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert "No rule-flagged v2 alerts this week." in donut
+    portal_name = _attr(re.findall(r"<input [^>]*>", _why(render()))[0], "name")
+    assert _attr(radios[0], "name") != portal_name, "distinct per surface"

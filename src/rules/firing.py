@@ -1,14 +1,20 @@
 """R6: one alert's firing episodes (design 7.14).
 
-Grafana's repeat interval is disabled on both schemas, so a still-firing alert sends once
-when it fires and once when it clears. R6 therefore judges *episodes*, never a cadence.
+Grafana writes one Elasticsearch row on every evaluation and its repeat interval is
+disabled, so a still-firing Grafana alert keeps producing rows. A Grafana row count therefore
+reflects evaluation frequency, and R6 never judges row counts for Grafana alerts. Episodes,
+meaning clear transitions, carry the meaning.
 
 An *episode* is a maximal run of consecutive firing (non-clear) rows, ordered by
-``(timestamp, doc_hash)``; a clear row closes it. The firing rows after the last clear form
-the *open episode*.
+``(timestamp, is_clear, doc_hash)``; a clear row closes it, and a clear sharing an instant
+with a firing row sorts after it. The firing rows after the last clear form the *open
+episode*.
 
-Known limitation: an alert that started firing before the window and never sent again has
-no rows in the window, so it is invisible to that week.
+An alert firing all week has rows throughout, so its open episode starts at its first
+in-window row. Stuck therefore measures "open for at least 72h within the window": an alert
+that started before the window is still caught, provided it was open for 72h of the window.
+
+Spamming applies to non-Grafana (API) alerts only; stuck to Grafana alerts only.
 """
 
 from __future__ import annotations
@@ -20,16 +26,14 @@ from datetime import datetime, timedelta
 from src.domain.normalize import AlertRecord
 from src.rules.catalogs import (
     R6_API_MIN_SPAN,
+    R6_API_RATE_WINDOW,
     R6_API_SPAM_PER_24H,
     R6_FLAP_CYCLES,
     R6_FLAP_WINDOW,
-    R6_SPAM_EPISODE_ROWS,
     R6_STUCK_OPEN,
 )
 
 __all__ = ["FiringFacts", "firing_facts", "is_clear"]
-
-_DAY = timedelta(hours=24)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +65,10 @@ def firing_facts(
     ``provider`` is the representative row's provider; ``window_end`` is the run's exclusive
     window end. Thresholds use exact ``timedelta`` arithmetic.
     """
-    ordered = sorted(rows, key=lambda r: (r.timestamp, r.doc_hash))
+    # Rows at the same instant order firing before clear, then by document hash: a clear
+    # sharing an instant with a firing row closes the episode. That is the conservative
+    # reading, because it never invents "stuck".
+    ordered = sorted(rows, key=lambda r: (r.timestamp, is_clear(r), r.doc_hash))
     clears = [is_clear(r) for r in ordered]
     cycle_times = [
         ordered[i].timestamp for i in range(1, len(ordered)) if clears[i] and not clears[i - 1]
@@ -90,14 +97,16 @@ def firing_facts(
     n = len(ordered)
     span = ordered[-1].timestamp - ordered[0].timestamp
     grafana = provider == "grafana"
-    events_per_24h = n / (span / _DAY) if span >= R6_API_MIN_SPAN else None
+    events_per_24h = n / (span / R6_API_RATE_WINDOW) if span >= R6_API_MIN_SPAN else None
     clear_count = sum(clears)
 
     pattern: str | None = None
     if max_cycles >= R6_FLAP_CYCLES:
         pattern = "flapping"
-    elif (grafana and max_episode >= R6_SPAM_EPISODE_ROWS) or (
-        not grafana and span >= R6_API_MIN_SPAN and n * _DAY >= R6_API_SPAM_PER_24H * span
+    elif (
+        not grafana
+        and span >= R6_API_MIN_SPAN
+        and n * R6_API_RATE_WINDOW >= R6_API_SPAM_PER_24H * span
     ):
         pattern = "spamming"
     elif grafana and open_since is not None and window_end - open_since >= R6_STUCK_OPEN:

@@ -20,10 +20,10 @@ __all__ = [
     "R1_GENERIC_MESSAGES",
     "R2_HEARTBEAT_MESSAGES",
     "R6_API_MIN_SPAN",
+    "R6_API_RATE_WINDOW",
     "R6_API_SPAM_PER_24H",
     "R6_FLAP_CYCLES",
     "R6_FLAP_WINDOW",
-    "R6_SPAM_EPISODE_ROWS",
     "R6_STUCK_OPEN",
     "R10_TECHNICAL_CAUSE_IMPACTS",
     "V2_READINESS_RULE_IDS",
@@ -69,17 +69,17 @@ R10_TECHNICAL_CAUSE_IMPACTS: Final = frozenset(
 
 #: R6 thresholds (design 7.14). Catalogue constants under ``RULESET_VERSION``, never
 #: environment settings: changing one changes what a past number meant. R6 judges firing
-#: EPISODES, not a repeat interval: Grafana repeat is disabled on both schemas, so a firing
-#: alert sends once when it fires and once when it clears.
+#: EPISODES, not row counts: Grafana writes a row on every evaluation and its repeat interval
+#: is disabled, so a Grafana row count reflects evaluation frequency, not notifications.
 #: Flapping: fire -> clear cycles inside any rolling window of this length (design 7.14).
 R6_FLAP_WINDOW: Final = timedelta(hours=24)
 #: Flapping: at least this many cycles inside the window, on any provider.
 R6_FLAP_CYCLES: Final = 3
-#: Spamming (Grafana): at least this many firing rows in one episode. One notification is
-#: expected and one duplicate is tolerated (replicas); three means it is re-sent.
-R6_SPAM_EPISODE_ROWS: Final = 3
-#: Spamming (non-Grafana): rows per 24 h of span at or above this rate ...
+#: Spamming (API alerts only; Grafana writes a row per evaluation, so its row count says
+#: nothing about re-sending): rows per rate window of span at or above this count ...
 R6_API_SPAM_PER_24H: Final = 24
+#: ... where the rate window is this long (its own constant, apart from the flap window).
+R6_API_RATE_WINDOW: Final = timedelta(hours=24)
 #: ... and only when the span is at least this long.
 R6_API_MIN_SPAN: Final = timedelta(hours=6)
 #: Stuck (Grafana): the open episode has lasted at least this long at the window's end.

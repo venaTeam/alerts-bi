@@ -504,7 +504,7 @@ def team_page(
         "</section>"
         '<section id="summary"><div class="section-h"><h2>Summary</h2><p>What the alerts '
         "did this week, why they were flagged and what is left to do. v1 and v2 are counted "
-        "separately: they repeat at different intervals and identify alerts differently."
+        "separately: they write rows at different rates, so their event counts are not comparable, and they identify alerts differently."
         "</p></div>"
         f"{summary}"
         "</section>"

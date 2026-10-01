@@ -172,9 +172,9 @@ def test_worklist_writes_the_r6_facts_and_renders_booleans_as_true_false() -> No
 
 def test_worklist_writes_the_episode_facts() -> None:
     row = alert_worklist_csv(
-        [sample_finding(max_episode_firing_rows=4, open_since="2026-08-21 03:00:00")]
+        [sample_finding(max_episode_firing_rows=4, open_since=datetime(2026, 8, 21, 3, 0, 0))]
     ).split("\r\n")[1]
-    assert row.endswith(",4,2026-08-21 03:00:00")
+    assert row.endswith(",4,2026-08-21T03:00:00.000Z")
 
 
 def test_the_rollup_sums_unseen_and_keeps_none_when_no_bucket_has_a_panel() -> None:

@@ -144,6 +144,7 @@ def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluati
                     if facts.open_since is None
                     else round((window_end - facts.open_since).total_seconds() / 3600, 2)
                 ),
+                "span_hours": round(facts.span.total_seconds() / 3600, 2),
                 "events_per_24h": (
                     None if facts.events_per_24h is None else round(facts.events_per_24h, 2)
                 ),

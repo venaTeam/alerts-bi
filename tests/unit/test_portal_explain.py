@@ -118,3 +118,35 @@ def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
 
 def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:
     assert "stuck" not in principle_next_step("R6").lower()
+
+
+def test_api_spamming_shows_the_rate_that_justifies_it() -> None:
+    evidence = {
+        "pattern": "spamming",
+        "rows": 30,
+        "span_hours": 10.0,
+        "events_per_24h": 72.0,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 30,
+        "open_hours": None,
+    }
+    explained = rule_explanation("R6", evidence)
+    assert "72 events per 24 h over 10 h" in explained.why
+    assert "72 events per 24 h over 10 h" in explained.observed
+    assert "per day" not in (explained.why + explained.observed)
+
+
+def test_only_spamming_shows_a_rate() -> None:
+    base = {
+        "rows": 30,
+        "span_hours": 10.0,
+        "events_per_24h": 72.0,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 30,
+        "open_hours": 80.0,
+    }
+    for pattern in ("stuck", "flapping"):
+        explained = rule_explanation("R6", {**base, "pattern": pattern})
+        assert "events per 24 h" not in explained.why + explained.observed
