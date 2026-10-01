@@ -14,11 +14,14 @@ together.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from datetime import date, timedelta
+from hashlib import sha256
 
 from src.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
+from src.insights.aggregate import primary_rule_counts
 from src.portal.charts import TIMES, Segment, level_bar, ratio_bar, stacked_bar
 from src.portal.explain import (
     QUALITY_STATE_LABELS,
@@ -273,6 +276,106 @@ def _bars(
     return f'<ul class="bars">{"".join(items)}</ul>'
 
 
+#: Donut geometry: a 120-unit square, outer and inner radius of the ring.
+_DONUT_C, _DONUT_R, _DONUT_HOLE = 60.0, 56.0, 38.0
+
+
+def _at(radius: float, angle: float) -> str:
+    return f"{_DONUT_C + radius * math.cos(angle):.3f} {_DONUT_C + radius * math.sin(angle):.3f}"
+
+
+def _ring_path() -> str:
+    """A full ring as two closed circles; ``evenodd`` leaves the hole empty."""
+    top, bottom = -math.pi / 2, math.pi / 2
+    r, hole = _DONUT_R, _DONUT_HOLE
+    return (
+        f"M {_at(r, top)} A {r} {r} 0 1 1 {_at(r, bottom)} A {r} {r} 0 1 1 {_at(r, top)} Z "
+        f"M {_at(hole, top)} A {hole} {hole} 0 1 0 {_at(hole, bottom)} "
+        f"A {hole} {hole} 0 1 0 {_at(hole, top)} Z"
+    )
+
+
+def _arc_path(start: float, end: float) -> str:
+    """One ring segment from ``start`` to ``end`` radians, clockwise from the top."""
+    large = 1 if end - start > math.pi else 0
+    r, hole = _DONUT_R, _DONUT_HOLE
+    return (
+        f"M {_at(r, start)} A {r} {r} 0 {large} 1 {_at(r, end)} "
+        f"L {_at(hole, end)} A {hole} {hole} 0 {large} 0 {_at(hole, start)} Z"
+    )
+
+
+def _share(n: int, total: int) -> str:
+    """A whole percent, rounded half up exactly (never banker's rounding); a nonzero slice
+    too small to reach 1% reads ``<1%`` rather than 0, and only the whole reads 100%: a
+    partial slice is clamped to 99%. Shares need not sum to 100."""
+    percent = (200 * n + total) // (2 * total)
+    if n and percent == 0:
+        return "<1%"
+    if n < total:
+        percent = min(percent, 99)
+    return f"{percent}%"
+
+
+def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:
+    """One schema's rule-flagged alerts by primary rule. Never combined with the other."""
+    counts = primary_rule_counts(summary.inputs.alerts, schema)
+    total = sum(n for _, n in counts)
+    if not total:
+        return (
+            f'<div class="donut-one">{_empty(f"No rule-flagged {schema} alerts this week.")}</div>'
+        )
+    slices, angle = [], -math.pi / 2
+    for rule_id, n in counts:
+        css = f"slice {rule_id.lower()}"
+        label = f"<title>{h(rule_id)}: {_plural(n, 'alert')}</title>"
+        if n == total:
+            slices.append(
+                f'<path class="{css}" fill-rule="evenodd" d="{_ring_path()}">{label}</path>'
+            )
+            break
+        end = angle + 2 * math.pi * n / total
+        slices.append(f'<path class="{css}" d="{_arc_path(angle, end)}">{label}</path>')
+        angle = end
+    name = SCHEMA_NAMES[schema]
+    noun = "rule-flagged alert" if total == 1 else "rule-flagged alerts"
+    svg = (
+        f'<svg class="donut" viewBox="0 0 120 120" role="img" '
+        f'aria-label="{h(name)}: {total:,} {noun}">{"".join(slices)}'
+        f'<text class="dl-schema" x="60" y="45" text-anchor="middle">{h(name)}</text>'
+        f'<text class="dl-n" x="60" y="66" text-anchor="middle">{total:,}</text>'
+        # Two short lines, so the caption stays inside the hole.
+        f'<text class="dl-u" x="60" y="77" text-anchor="middle">rule-flagged</text>'
+        f'<text class="dl-u" x="60" y="86" text-anchor="middle">'
+        f"{'alert' if total == 1 else 'alerts'}</text></svg>"
+    )
+    legend = "".join(
+        f'<li class="dk"><svg viewBox="0 0 9 9" aria-hidden="true"><rect class="{rule_id.lower()}" '
+        f'width="9" height="9" rx="2"/></svg><a href="{rule_link(rule_id)}">{h(rule_id)}</a> '
+        f'{h(_rule_title(rule_id))} <b class="num">{n:,}</b> '
+        f'<span class="sub">{_share(n, total)}</span></li>'
+        for rule_id, n in counts
+    )
+    return (
+        f'<div class="donut-one"><div class="eyebrow">{_chip(schema)} {h(name)}</div>'
+        f'<div class="donut-body">{svg}<ul class="dlegend">{legend}</ul></div></div>'
+    )
+
+
+def _view_toggle(summary: TeamSummary) -> tuple[str, str]:
+    """Radio ids for the Bars / Donut toggle: stable for one team's week, distinct per week,
+    so two summaries on one page never share a group."""
+    inputs = summary.inputs
+    key = f"{inputs.team_id}|{inputs.window_end.isoformat()}|{inputs.surface}"
+    group = "why-" + sha256(key.encode()).hexdigest()[:10]
+    return group, (
+        f'<input type="radio" class="vt-bars" name="{group}" id="{group}-bars" checked>'
+        f'<label for="{group}-bars">Bars</label>'
+        f'<input type="radio" class="vt-donut" name="{group}" id="{group}-donut">'
+        f'<label for="{group}-donut">Donut</label>'
+    )
+
+
 def _why(summary: TeamSummary, rule_link: RuleLink) -> str:
     admin = summary.inputs.surface == "admin"
     rules = sorted(summary.inputs.rules, key=lambda r: (_rule_order(r.rule_id), r.schema))
@@ -308,14 +411,30 @@ def _why(summary: TeamSummary, rule_link: RuleLink) -> str:
             model.items(), key=lambda item: (_rule_order(item[0][0]), item[0][1])
         )
     ]
-    body = (
-        '<div class="groups">'
-        f'<div><div class="eyebrow">Quality</div>{_bars(rule_rows(False), css="f-rule", admin=admin)}</div>'
+    readiness_and_model = (
         f'<div><div class="eyebrow">Phase-2 readiness</div>'
         f"{_bars(rule_rows(True), css='f-ready', admin=admin)}</div>"
         f'<div><div class="eyebrow">Model findings (advisory)</div>'
         f"{_bars(model_rows, css='f-model', admin=admin)}</div>"
+    )
+    bars_view = (
+        '<div class="groups">'
+        f'<div><div class="eyebrow">Quality</div>{_bars(rule_rows(False), css="f-rule", admin=admin)}</div>'
+        f"{readiness_and_model}"
         "</div>"
+    )
+    donut_view = (
+        f'<div class="donuts">{"".join(_donut(summary, s, rule_link) for s in SCHEMAS)}</div>'
+        '<p class="sub">Each alert is counted once, under its first rule in catalogue order. '
+        "The bars view shows every rule an alert matches. Model findings and v2 readiness "
+        "gaps are not part of the donut.</p>"
+        f'<div class="groups">{readiness_and_model}</div>'
+    )
+    _, toggle = _view_toggle(summary)
+    body = (
+        f'<div class="vtoggle">{toggle}'
+        f'<div class="view-bars">{bars_view}</div>'
+        f'<div class="view-donut">{donut_view}</div></div>'
     )
     return _card(
         "why",
