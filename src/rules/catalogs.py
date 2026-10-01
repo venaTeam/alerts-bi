@@ -7,6 +7,7 @@ punctuation. Adding a phrase changes what a past number meant, so any addition r
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Final, NamedTuple
 
 __all__ = [
@@ -18,6 +19,13 @@ __all__ = [
     "PRINCIPLE_IDS",
     "R1_GENERIC_MESSAGES",
     "R2_HEARTBEAT_MESSAGES",
+    "R6_API_MIN_SPAN",
+    "R6_API_SPAM_PER_24H",
+    "R6_FLAP_CYCLES",
+    "R6_FLAP_WINDOW",
+    "R6_SPAM_RATIO",
+    "R6_STUCK_MIN_SPAN",
+    "R6_STUCK_RATIO",
     "R10_TECHNICAL_CAUSE_IMPACTS",
     "V2_READINESS_RULE_IDS",
     "Principle",
@@ -60,13 +68,32 @@ R10_TECHNICAL_CAUSE_IMPACTS: Final = frozenset(
     {"high cpu", "high cpu usage", "cpu usage is high", "cpu is high"}
 )
 
+#: R6 thresholds (team summary spec section 5.2). Catalogue constants under
+#: ``RULESET_VERSION``, never environment settings: changing one changes what a past number
+#: meant.
+#: Flapping: fire -> clear cycles inside any rolling window of this length (spec 5.1).
+R6_FLAP_WINDOW: Final = timedelta(hours=24)
+#: Flapping: at least this many cycles inside the window, on any provider.
+R6_FLAP_CYCLES: Final = 3
+#: Spamming (Grafana): rows / expected rows at or above this ratio.
+R6_SPAM_RATIO: Final = 2.0
+#: Spamming (API): events per 24 h of active span at or above this rate ...
+R6_API_SPAM_PER_24H: Final = 24.0
+#: ... and only when the active span is at least this long.
+R6_API_MIN_SPAN: Final = timedelta(hours=6)
+#: Stuck (Grafana, never cleared): fire-rate ratio at or above this ...
+R6_STUCK_RATIO: Final = 0.9
+#: ... over an active span of at least this long.
+R6_STUCK_MIN_SPAN: Final = timedelta(hours=72)
+
 #: Rule set membership (design section 3.6): core rules read v1 and v2 side by side.
-CORE_RULE_IDS: Final = ("R1", "R2", "R3", "R4", "R5", "R7")
+CORE_RULE_IDS: Final = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
 
 #: V2 readiness gaps. Never enter ``flagged``, never block LLM assessment.
 V2_READINESS_RULE_IDS: Final = ("R8", "R9", "R10")
 
-#: R6 (spam volume) is post-MVP and is deliberately absent from both lists.
+#: R6 (stuck, spamming, flapping) became a core rule in ruleset 1.1.0 (team summary spec
+#: section 5). It is evaluated per identity by ``src.rules.firing``, not per row.
 ALL_RULE_IDS: Final = CORE_RULE_IDS + V2_READINESS_RULE_IDS
 
 
