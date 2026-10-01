@@ -1,6 +1,6 @@
 # What a run produces
 
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-01
 
 A run writes exactly four files and no others: `scorecard.html`, `daily_metrics.csv`,
 `rule_counts.csv`, `alert_worklist.csv`. This document says what is in each of them, column
@@ -78,7 +78,7 @@ Sections, in render order:
 | **Volume** | How much is this team sending? v1 and v2 separately, rows and distinct-per-day, alerts per hour |
 | **Data-quality diagnostics** | Are the identity counts trustworthy? `node_name_ratio` and `key_inflation_ratio` with their operands |
 | **Quality** | How much of it is bad? The five states, plus phase-2 gaps |
-| **Dashboard visibility** | What does the team hide from itself? Suppressed rows, unmeasured suppression leaves, and the supplied panels |
+| **Dashboard visibility** | What does the team hide from itself? Suppressed rows, unmeasured suppression leaves, **unseen** rows (owned rows no supplied panel shows), and the supplied panels |
 | **Rule and principle breakdown** | Which rules and principles fired, and how often |
 | **Daily breakdown** | The per-day table — one row per schema per UTC date, the same figures as `daily_metrics.csv` |
 | **Work list** | The actual list of things to fix, one row per identity |
@@ -102,7 +102,7 @@ simply nothing to measure.
 
 ---
 
-## 4. `daily_metrics.csv` — 26 columns
+## 4. `daily_metrics.csv` — 28 columns
 
 One row per `(schema, UTC date)`. A 168-hour window that does not start at midnight touches
 **eight** dates, so a full run has 8 v1 rows and 8 v2 rows, with the first and last partial.
@@ -131,6 +131,8 @@ One row per `(schema, UTC date)`. A 168-hour window that does not start at midni
 | `phase2_gaps` | v2 identities carrying an R8–R10 readiness gap |
 | `suppressed` | Rows hidden by the team's own panels. **A subset of `flagged_by_rule`, never an addition to it** |
 | `suppression_unmeasured` | Suppression leaves detected but not safely evaluable. Allocated to the schema's **first** bucket and zero elsewhere, so summing the column gives the run total exactly once |
+| `unseen` | Rows the team owns that **every supplied panel for that schema hides** through identity narrowing (a positive mismatch on `operator`, `application`, `node_name` or `object` / `component`), so nobody on the team sees them. It is a visibility measure, never a rule, and never counts toward `flagged_by_rule`. **Empty means no panel was supplied for that schema — not zero.** Disjoint from `suppressed`: a row is one or the other, never both |
+| `unseen_unmeasured` | Identity leaves that could not be evaluated safely (nested in `OR`, or an unresolved `query` variable); such a panel is treated as showing the row. Allocated to the schema's **first** bucket like `suppression_unmeasured`, so summing gives the run total once. Empty when no panel was supplied |
 
 **Both operands are stored beside every ratio** so a reader can check the arithmetic instead
 of trusting it, and so a ratio can be recomputed across days as
@@ -145,7 +147,7 @@ One row per `(schema, date, rule)` that matched at least once.
 | Column | Meaning |
 |---|---|
 | `run_id`, `team_id`, `schema`, `snapshot_date` | Scope |
-| `rule_id` | `R1`–`R5`, `R7`–`R10`. R6 is post-MVP and never appears |
+| `rule_id` | `R1`–`R10`. R6 flags one alert's firing pattern (flapping, spamming or stuck, see section 6) and appears on the dates where a row matched |
 | `ruleset_version` | The rule definitions in force. A movement in counts is always attributable to data or to a version, never ambiguously both |
 | `match_count` | **Rows** the rule matched |
 | `distinct_count` | Distinct identities it matched |
@@ -156,7 +158,7 @@ count with at least one finding is `flagged_by_rule` in `daily_metrics.csv`.
 
 ---
 
-## 6. `alert_worklist.csv` — 21 columns
+## 6. `alert_worklist.csv` — 25 columns
 
 One row per identity. This is the deliverable a team acts on.
 
@@ -176,8 +178,14 @@ One row per identity. This is the deliverable a team acts on.
 | `severity` | The level's **name**, converted from the stored number by schema — see section 8 |
 | `component` | `object` in v1, `component` in v2 |
 | `node_name`, `environment`, `provider`, `alert_rule_url`, `message` | From the identity's representative row |
+| `clear_count` | Rows in the window that clear the alert: v1 severity `clear`, v2 `status = resolved`. `0` when none |
+| `max_clear_cycles_24h` | The most fire-then-clear cycles inside any rolling 24 hours; a cycle is a clear row immediately preceded by a non-clear row. `0` when none |
+| `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
+| `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 
-Every field after `row_count` comes from the **representative row**: the identity's most
+`clear_count`, `max_clear_cycles_24h`, `fire_pattern` and `unseen` are the last four columns, after `message`. The first three are the stored facts behind R6 and are computed over every row of the identity in the window, not the representative row alone.
+
+Every field from `component` to `message` comes from the **representative row**: the identity's most
 recent row in the window. An alert enriched on Tuesday is judged as it stands on Friday.
 
 **CSV safety.** Cells beginning `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet
@@ -323,6 +331,7 @@ section 7.4.
 * **No combined v1 + v2 volume conclusion.** The two schemas' row counts are not
   like-for-like, and neither are their distinct counts: v1's key is
   `application + object + node_name`, v2's is a hash of roughly a dozen fields.
-* **`unseen`** — alerts a team owns that its own dashboard does not show — is a real on-call
-  hazard and is not measured yet.
-* **No spam-volume rule (R6).** Post-MVP; the fixtures already carry data for it.
+* **R6 never scores volume.** It flags one alert's firing pattern against its repeat
+  interval; it never scores a team's total volume.
+* **`unseen` is a count, not a verdict.** It is empty, not zero, for a schema with no supplied
+  panel, because zero would claim the team's dashboard was checked.

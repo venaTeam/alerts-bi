@@ -110,6 +110,12 @@ def rollup_schema(daily: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "key_inflation_denominator",
         )
     }
+    # ``unseen`` is NULL, not zero, where no panel was supplied: it stays None unless at
+    # least one bucket carries a measured count.
+    unseen_values = [row.get("unseen") for row in daily]
+    measured = [v for v in unseen_values if v is not None]
+    totals["unseen"] = sum(_num(v) for v in measured) if measured else None  # type: ignore[assignment]
+    totals["unseen_unmeasured"] = sum(_num(row.get("unseen_unmeasured")) for row in daily)
     node_den = totals["node_name_denominator"]
     key_den = totals["key_inflation_denominator"]
     return {
@@ -348,6 +354,13 @@ because that would count what nobody looked at as fine.</p>
 def _render_visibility(rollup: Mapping[str, Any], panels: Sequence[Mapping[str, Any]]) -> str:
     suppressed = rollup["v1"]["suppressed"] + rollup["v2"]["suppressed"]
     unmeasured = rollup["v1"]["suppression_unmeasured"] + rollup["v2"]["suppression_unmeasured"]
+    unseen_values = [rollup[s]["unseen"] for s in ("v1", "v2") if rollup[s]["unseen"] is not None]
+    unseen_unmeasured = rollup["v1"]["unseen_unmeasured"] + rollup["v2"]["unseen_unmeasured"]
+    unseen_card = (
+        _int(sum(unseen_values))
+        if unseen_values
+        else '<span class="empty">&mdash; no panel supplied</span>'
+    )
     if panels:
         panel_rows = "".join(
             f"<tr><td>{escape_html(p['panel_id'])}</td><td>{escape_html(p['alert_schema'])}</td>"
@@ -371,6 +384,8 @@ rather than passing for zero.</p>
 <div class="cards">
   {_card("Suppressed (rows)", _int(suppressed))}
   {_card("Suppression unmeasured (leaves)", _int(unmeasured))}
+  {_card("Unseen (rows no panel shows)", unseen_card, "owned rows hidden by every supplied panel")}
+  {_card("Unseen unmeasured (leaves)", _int(unseen_unmeasured))}
 </div>
 <h3>Supplied panels</h3>
 <div class="table-wrap"><table>
@@ -521,6 +536,8 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
   <li>Enriching a v2 alert mints a new <code>key_field</code>, so a team that just added
       <code>impact</code> or <code>runbook_url</code> can look briefly worse. The artefact
       clears within a week.</li>
+  <li>R6 flags one alert's firing pattern against its repeat interval; it never scores a
+      team's total volume.</li>
   <li>Phase and readiness describe only alerts that fired in this window; silent rules and
       the external alert inventory are invisible to this tool.</li>
   {not_assessed}
