@@ -140,7 +140,7 @@ The cached prompt prefix contains the approved alerting guides, the R/P catalogu
 
 The response is a closed object carrying the echoed batch ID and one verdict per alert ID. Each verdict contains an assessment, one primary principle, a confidence enum, and a required justification of at most 1,000 characters. The batch ID and alert-ID set must exactly match the request; duplicate IDs, invalid enum combinations, empty justifications, and additional fields reject the entire batch. Verdict order does not matter because IDs provide the binding.
 
-Prompt 1.2.0 adds evidence and applicability guidance without changing the guides, catalogue
+Prompt 1.3.0 carries 1.2.0's evidence and applicability guidance plus the R6 catalogue line for ruleset 1.1.0, without changing the guides, catalogue
 wording or verdict fields. Validation also rejects v2-only citations on v1, P7 outside v2
 critical, R7 on v2 and R4 outside Grafana. Refusal, incomplete and empty SDK responses are
 recorded failures; available model/token metadata is retained, with missing usage unknown.
@@ -213,4 +213,4 @@ A completed run is not yet visible to anyone outside the standardization team. A
 
 ## After the MVP
 
-The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, a cross-team leaderboard, and the spam/noise rule R6.
+The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, and a cross-team leaderboard. R6 is already built as a core rule (ruleset 1.1.0, judged by firing episodes; design section 7.14).

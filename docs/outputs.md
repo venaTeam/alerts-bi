@@ -297,12 +297,12 @@ described here because its numbers are the ones most easily misread against the 
 
 | View | One row per | Holds |
 |---|---|---|
-| `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness |
-| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention |
-| `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, and `attention_rank` |
+| `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness, `basis_changed` (true when the previous published week of the team ran under a different basis, so the retirement estimate stops looking back; migration 008 compares the team's own registry entry, its operators and panels, instead of the whole-file registry version) and `v1_rule_effort_days` (the team's optional `planning.v1_rule_effort_days` override) |
+| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention, `unseen` (events, `NULL` when no panel was supplied), `unseen_alerts` and `r6_alerts` |
+| `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, `attention_rank`, and the R6 and `unseen` columns: `clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows` (a diagnostic only) and `open_since` |
 | `portal_decisions` | human decision made on a published week | finding id, `pending` / `confirmed` / `dismissed`, note, time, operator |
 | `portal_rule_totals` | published week, schema and rule | weekly matched events and alerts per rule, for the team summary |
-| `portal_daily_metrics` | published week, schema and UTC day bucket | covered hours, distinct alerts and rule-flagged distinct alerts, for the summary slides' day-by-day charts |
+| `portal_daily_metrics` | published week, schema and UTC day bucket | covered hours, distinct alerts and rule-flagged distinct alerts, for the summary slides' day-by-day charts, a within-week view of one published week labelled "by UTC day" (columns `alert_schema`, `snapshot_date`, `covered_hours`, `distinct_alerts`, `flagged_by_rule_distinct`) |
 
 **The portal's distinct count is a weekly total, and the scorecard's is a daily rate.**
 Portal: distinct `application + key_field` identities in the whole 168-hour window, which is
@@ -321,7 +321,7 @@ verdict stay exactly as the run stored them; the decision is a separate, append-
 keyed on the exact identity and finding id.
 
 What the views never expose: the complete source document (`representative_doc`), model
-request payloads, batch audit rows, the registry snapshot, or any week that is not
+request payloads, batch audit rows, the registry snapshot (the only value derived from it is the one planning override, `v1_rule_effort_days`, plus the `basis_changed` flag), or any week that is not
 currently published.
 
 ---

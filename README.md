@@ -255,6 +255,16 @@ ADMIN_SECRET=local-development-secret-0123456789 uv run alerts-bi admin --dev-us
 Then open `http://127.0.0.1:8200`. `--dev-user` acts as that name for every request; never
 use it anywhere shared.
 
+### Summary pages
+
+`GET /teams/{team_id}/summary` is the team summary for any completed run, internals included
+(design section 7.14): volume and rule-flagged tiles per schema, model coverage, phase, why
+alerts were flagged, key findings, noisy alerts by application, how often alerts fire, the
+biggest single source, the per-rule table, hidden and `unseen` alerts, migration progress,
+the estimated time to retire v1, and a filterable work list. v1 and v2 are never summed.
+The reader portal shows the same building blocks as a Summary section on the team week page
+for published weeks only, under the portal's rules (weekly totals, no run id or version).
+
 ---
 
 ## The review portal
@@ -276,11 +286,23 @@ Four things are kept apart:
 ### Setting it up locally
 
 The portal uses the same `SQL_HOST`, `SQL_PORT`, `SQL_USER`, `SQL_PASSWORD` and
-`SQL_DATABASE` as the pipeline. It queries the four `portal_*` views. Apply the migrations
-if the database-owning team has not already done so:
+`SQL_DATABASE` as the pipeline. It queries the `portal_*` views (`portal_reviews`,
+`portal_schema_totals`, `portal_alerts`, `portal_decisions`, `portal_rule_totals` and
+`portal_daily_metrics`). Apply the migrations, through `008`, if the database-owning team
+has not already done so. An existing installation upgrading to the team summary needs
+`005_team_summary` (summary columns and views), `006_r6_episodes` (R6 episode facts),
+`007_portal_daily` (the day-by-day view) and `008` (`basis_changed` compares the team's own
+registry entry, not the whole-file registry version):
 
 ```bash
 uv run alerts-bi db migrate
+```
+
+`005_team_summary` uses `STRING_SPLIT`, so the database's compatibility level must be 130
+(SQL Server 2016) or higher. Check it before applying:
+
+```sql
+SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME();
 ```
 
 Run a team, then publish that run as its weekly review:
@@ -333,6 +355,9 @@ refuses, and the week has to be withdrawn first.
   v2 separately the **distinct alerts in the week** and the **alert events in the week**.
   These are weekly totals, not the scorecard's per-day rate, and v1 and v2 are never added
   together.
+- A **Summary section** and its presentation slides for the selected week, with a day-by-day
+  chart of distinct and rule-flagged distinct alerts for that one week, labelled "by UTC
+  day" (a within-week view, never a comparison across weeks).
 - **History charts**: one point per published week, one chart per schema and measure. No
   deltas, percentages or "fixed" labels.
 - A **work list**, paginated, leading with each alert's latest message and a plain-language
@@ -390,9 +415,10 @@ first number to care and the second to act.
 **Every distinct figure is published as a per-day rate**, never as a window total, because
 a 7-day total is 7× a 1-day total for arithmetic reasons alone.
 
-**v1 and v2 row counts are never added together.** v1 re-fires a still-active alert every
-5 minutes and v2 every 12 hours, so moving one alert between schemas divides its row count
-by 144 without anyone improving anything.
+**v1 and v2 row counts are never added together.** Grafana writes a row on every
+evaluation of a firing rule, and the evaluation cadence differs between the two schemas, so
+the same alert yields a very different row count in each. Moving one alert between schemas
+therefore changes its row count without anyone improving anything.
 
 `good` is `assessed_good`. It is never `alerts - flagged`, because that would count
 everything nobody examined as fine. `unassessed` is reported next to it and should be zero.
@@ -493,7 +519,7 @@ validation is separate and opt-in.
 uv run alerts-bi verify-acceptance
 ```
 
-Runs the four acceptance teams and compares the persisted SQL rows and the rendered CSV
+Runs the six acceptance teams and compares the persisted SQL rows and the rendered CSV
 exports against `test/fixtures/expected-results.json`.
 
 That manifest is **hand-authored** from the fixture definitions in
@@ -511,13 +537,16 @@ means here.
 
 ### Evaluating the LLM review upgrade
 
-Prompt `1.2.0` adds scope-aware evidence guidance and checks for inapplicable citations. It is
+Prompt `1.2.0` added scope-aware evidence guidance and checks for inapplicable citations. It is
 a candidate for live quality evaluation; passing protocol tests does not establish better
-judgment. The [upgrade plan](docs/llm_review_upgrade_plan.md) records release gates and
+judgment. The current prompt is `1.3.0` (ruleset `1.1.0`), which carries the same guidance
+plus the R6 catalogue line. The [upgrade plan](docs/llm_review_upgrade_plan.md) records release gates and
 [design section 7.13](docs/alerts_bi_design.md#713-llm-review-quality-evaluation-and-durable-audit)
 specifies audit/recovery behavior.
 
-Apply migration `004_llm_review_audit` through the normal `alerts-bi db migrate` command
+Apply migration `004_llm_review_audit` (and the later `005_team_summary`, `006_r6_episodes`,
+`007_portal_daily` and `008`, which changes `portal_reviews.basis_changed` to compare the
+team's own registry entry) through the normal `alerts-bi db migrate` command
 before running the upgraded live pipeline (the deployment init container runs setup).
 It stores requests before calls, preserves successful responses across interrupted runs,
 and records uncertain interrupted attempts against the three-attempt budget. A later explicit
@@ -590,9 +619,10 @@ RESET=1 uv run python scripts/generate_mock_alerts.py
 STATS_ONLY=1 uv run python scripts/generate_mock_alerts.py
 ```
 
-Seven teams carry realistic data across the migration phases. Four `acceptance-*` teams
-carry fixtures pinned to exact timestamps and exact expected outcomes; they exist so the
-acceptance manifest can be computed by hand.
+Seven teams carry realistic data across the migration phases. Six `acceptance-*` teams
+(`acceptance-core`, `-batching`, `-suppression`, `-blast-radius`, `-fire-patterns` and
+`-unseen`) carry fixtures pinned to exact timestamps and exact expected outcomes; they exist
+so the acceptance manifest can be computed by hand.
 
 `scripts/es_scale_probe.py` is read-only and sizes the problem:
 
@@ -676,7 +706,8 @@ flow document fixes.
 ## Not in the MVP
 
 Deliberately, and recorded in design section 7.4: any comparison between runs in the
-scorecard or exports, a cross-team leaderboard, R6 spam detection, historical backfill, the
+scorecard or exports (the one scoped exception is the estimated time to retire v1 on the team
+summary, design section 7.14), a cross-team leaderboard, historical backfill, the
 company-wide unattributed-alert audit, panel discovery or live Grafana variable retrieval,
 and a BI-side migration-invariant alert identity.
 

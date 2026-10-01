@@ -14,7 +14,7 @@ Implement a runnable tool that:
 6. Persists reproducible run data in SQL Server.
 7. Produces one HTML team scorecard plus CSV exports.
 
-The MVP does not include scheduled execution, historical backfill, an interactive frontend, cross-team ranking, a company-wide unattributed-alert audit, R6 spam detection, or automatic enforcement of LLM findings.
+The MVP does not include scheduled execution, historical backfill, an interactive frontend, cross-team ranking, a company-wide unattributed-alert audit, or automatic enforcement of LLM findings.
 
 ## 2. Recommended implementation shape
 
@@ -123,7 +123,7 @@ Cache the result by SQL-text hash and parser version. A parse or safety failure 
 
 ### 2.7 LLM assessment module
 
-Implemented upgrade (2026-09-24; design 7.13): prompt 1.2.0 adds evidence and applicability
+Implemented upgrade (2026-09-24; design 7.13; prompt 1.3.0 since 2026-10-01): prompt 1.2.0 added evidence and applicability
 guidance, while context-aware response validation rejects inapplicable citations batch-wide.
 The existing SDK adapter captures model/usage/finish metadata with no hidden retries.
 `src.db.llm_audit.SqlLlmJournal` persists requests and attempt starts before calls, replays
@@ -315,4 +315,6 @@ Implement deterministic historical backfill second. Process the oldest period fi
 
 **Automatic weekly reviews delivered 2026-09-24** (design section 7.11): a `weekly_review.enabled` registry flag, `src.weekly` (pure week planning plus a locked, idempotent runner with a health gate), migration `003_weekly_schedule` for the outcome log, and `alerts-bi weekly`, `weekly-status` and `registry check`. The OpenShift CronJob is documented, not proven.
 
-After backfill, separately plan the company-wide unattributed-alert audit, cross-team leaderboard, R6 spam analysis, and the remaining Kubernetes deployment work.
+After backfill, separately plan the company-wide unattributed-alert audit, cross-team leaderboard, and the remaining Kubernetes deployment work.
+
+**R6 delivered 2026-10-01** (design section 7.14): a core rule from `ruleset_version` 1.1.0, judged by firing episodes (flapping, spamming for API alerts, stuck for Grafana), shipped with prompt 1.3.0. It never scores a team's total volume. The team summary, `unseen` and migrations `005`-`007` are described in the same section; migration `008` changes `portal_reviews.basis_changed` to compare the team's own registry entry.

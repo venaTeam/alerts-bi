@@ -59,7 +59,7 @@ The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, f
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 
-- The mock generator gained explicit index mappings, a guarded `RESET=1` clean reload, exact per-row timestamp control, and four appended `acceptance-*` teams covering the dense batching, over-200 group, R7 boundary, suppression-safety and blast-radius cases. It still generates post-MVP R6 and multi-month data, which is intended: the fixtures stay ready for R6 without re-seeding.
+- The mock generator gained explicit index mappings, a guarded `RESET=1` clean reload, exact per-row timestamp control, and six appended `acceptance-*` teams: four covering the dense batching, over-200 group, R7 boundary, suppression-safety and blast-radius cases, plus `acceptance-fire-patterns` (one identity per R6 boundary) and `acceptance-unseen` (the visibility measure). R6 is a core rule from ruleset 1.1.0 and the generator's multi-month data is still intended: the fixtures stay ready for history work without re-seeding.
 - The scale probe now reports `node_name_ratio` and `key_inflation_ratio` with their operands, scoped to one selected team, and states plainly that its figures are approximate.
 - `team_alert_status.md` was rewritten against the settled phase and rule definitions.
 
@@ -156,7 +156,7 @@ Useful scripts:
 - `scripts/es_scale_probe.py` is read-only and reports the two approved diagnostics with their operands, scoped to one selected team.
 - `scripts/create_kibana_panels.py` creates the scale-probe dashboard and is rerunnable.
 
-The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the four hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
+The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the six hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
 
 Reset data only when the task requires a clean fixture load. Before deleting indices or recreating a database, verify that the endpoint is the explicit local mock and that the target database is the disposable `alerts_bi_test`. Never apply destructive fixture operations to production or an unknown endpoint.
 

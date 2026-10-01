@@ -605,7 +605,7 @@ The version fields on the run record exist so that a movement in a team's number
 
 ## 7. Open questions
 
-The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, history backfill, the rule-6 deferrals, a record of what was deliberately left out, the boundaries settled during implementation, the implementation language, the read-only review portal (section 7.10), and automatic weekly reviews (section 7.11).
+The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, history backfill, a record of what was deliberately left out, the boundaries settled during implementation, the implementation language, the read-only review portal (section 7.10), and automatic weekly reviews (section 7.11).
 
 ### 7.1 Rule-grouped batching validation (5.1)
 
@@ -738,6 +738,8 @@ Four states are kept distinct and never inferred from one another:
 **What a reader sees is alert data, not service internals.** The portal shows the week covered, when it was published, the review note, the alert fields, the findings with their evidence, and the decisions. It shows no run id, registry, ruleset, prompt or model version, run timing or document hash. Those stay in the scorecard and the operator CLI, where the standardization team needs them.
 
 **Volume in the portal is a weekly total.** For each schema separately it shows **alert events in the week** (every firing, repeats included, `sum(daily_metrics.alerts)`) and **distinct alerts in the week** (distinct `application` + `key_field` identities in the 168-hour window, which equals the number of work-list rows for that schema). This amends section 3.3 for the portal only; the scorecard and the CSV exports keep the per-day distinct rate. v1 and v2 are never added together and no cross-schema or migration percentage is shown.
+
+**Amended 2026-10-01 (product owner): a within-week day-by-day view.** The summary's presentation slides (section 7.14) show, for the single selected published week, the distinct alerts and the rule-flagged distinct alerts of each UTC day, per schema, read through the `portal_daily_metrics` view (migration 007) and labelled "by UTC day". This is a view inside one published week, never a comparison across weeks or a per-day rate: the headline numbers stay weekly totals, and the days of one week carry no delta, trend line or conclusion.
 
 **History is plotted, not interpreted.** Each schema has its own chart of distinct alerts and of events, one point per published week, dated by the week's end. A gap in publication breaks the line instead of joining across it. The portal states no delta, improvement percentage or "fixed" status. An alert that stops appearing may have been deleted, silenced or moved to v2, and this tool cannot tell whether monitoring coverage was kept (section 3.4).
 
@@ -889,7 +891,7 @@ The proposed gates and remaining policy decisions remain in `llm_review_upgrade_
 **One summary page per team, on both reading surfaces.** The operator admin app (section 7.12)
 gains `GET /teams/{team_id}/summary` for any completed run, internals included. The reader
 portal (section 7.10) gains a Summary section on the team week page for published weeks,
-under every portal rule: weekly totals, no per-day rate, no run id or version, no script.
+under every portal rule: weekly totals, no per-day rate, no run id or version, no script. Its presentation slides add one within-week view, the day-by-day distinct and rule-flagged distinct alerts of the one selected published week, labelled "by UTC day" (section 7.10, amended 2026-10-01).
 Both are rendered from the same pure building blocks (`src/insights`). The summary shows,
 for one run: volume and rule-flagged tiles per schema, model coverage, phase, why alerts
 were flagged by rule, templated key findings, noisy alerts by application, how often alerts
@@ -966,4 +968,4 @@ gain the new columns, `basis_changed` and the planning override, and a new
 `portal_rule_totals` view gives weekly per-rule totals without exposing `ruleset_version`.
 `daily_metrics.csv` and `alert_worklist.csv` gain the new columns and the scorecard's
 dashboard-visibility section shows `unseen` (`outputs.md`). Migration `006_r6_episodes` adds
-`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`. Migration `007_portal_daily` adds the `portal_daily_metrics` view (published weeks only: per schema and UTC day bucket, covered hours, distinct alerts and rule-flagged distinct alerts) for the summary slides' day-by-day charts.
+`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`. Migration `007_portal_daily` adds the `portal_daily_metrics` view (published weeks only: per schema and UTC day bucket, covered hours, distinct alerts and rule-flagged distinct alerts) for the summary slides' day-by-day charts, a within-week view of one published week (section 7.10). Migration `008` changes `portal_reviews.basis_changed` to compare the team's own registry entry (its operators and panels) instead of the whole-file registry version, so an edit to another team's entry no longer marks this team's basis as changed.
