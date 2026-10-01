@@ -85,12 +85,24 @@ def _r6_pattern(evidence: Evidence) -> str:
     return pattern if pattern in _R6_COPY else "neutral"
 
 
+def _r6_rate(evidence: Evidence) -> str:
+    """The API rate that justifies spamming, e.g. ``30 events per 24 h over 40 h``."""
+    events = evidence.get("events_per_24h")
+    if not isinstance(events, int | float) or evidence.get("span_hours") is None:
+        return ""
+    span = evidence.get("span_hours")
+    shown = f"{span:g}" if isinstance(span, int | float) else _text(span)
+    return f"{events:g} events per 24 h over {shown} h"
+
+
 def _r6_why(evidence: Evidence) -> str:
     pattern = _r6_pattern(evidence)
     if evidence.get("rows") is None:
         return _R6_COPY[pattern][2]
     open_hours = evidence.get("open_hours")
     open_part = "" if open_hours is None else f" It had been open for {_text(open_hours)} hours."
+    rate = _r6_rate(evidence)
+    open_part += f" {rate[0].upper()}{rate[1:]}." if rate else ""
     return (
         f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))}, "
         f"{_text(evidence.get('max_episode_firing_rows'))} in the longest firing episode, "
@@ -106,6 +118,7 @@ def _r6_observed(evidence: Evidence) -> str:
         f"{_r6_pattern(evidence)} \u00b7 {_text(evidence.get('rows'))} events \u00b7 "
         f"{_text(evidence.get('max_episode_firing_rows'))} in one episode"
         + (f" \u00b7 open {_text(open_hours)} h" if open_hours is not None else "")
+        + (f" \u00b7 {_r6_rate(evidence)}" if _r6_rate(evidence) else "")
     )
 
 

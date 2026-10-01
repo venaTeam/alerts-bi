@@ -29,10 +29,11 @@ from src.portal.explain import (
 )
 from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h, safe_link
 from src.rules.catalogs import (
+    R6_API_MIN_SPAN,
+    R6_API_RATE_WINDOW,
     R6_API_SPAM_PER_24H,
     R6_FLAP_CYCLES,
     R6_FLAP_WINDOW,
-    R6_SPAM_EPISODE_ROWS,
     R6_STUCK_OPEN,
     V2_READINESS_RULE_IDS,
 )
@@ -91,21 +92,20 @@ def _hours(span: timedelta) -> str:
 #: copy is built from the catalogue constants R6 itself uses, so the two cannot drift.
 FIRE_THRESHOLDS = (
     (
-        "flapping",
-        "Flapping",
-        f"{R6_FLAP_CYCLES} or more fire\u2192clear cycles in {_hours(R6_FLAP_WINDOW)} hours",
+        "stuck",
+        "Stuck",
+        f"still firing, no clear for \u2265{_hours(R6_STUCK_OPEN)} h before the week ends",
     ),
     (
         "spamming",
         "Spamming",
-        f"{R6_SPAM_EPISODE_ROWS} or more firing rows in one episode (re-sent while firing), or "
-        f"an API alert at {_dec(R6_API_SPAM_PER_24H)} or more events per {_hours(R6_FLAP_WINDOW)} "
-        "hours",
+        f"an API alert at \u2265{_dec(R6_API_SPAM_PER_24H)} events per "
+        f"{_hours(R6_API_RATE_WINDOW)} h over \u2265{_hours(R6_API_MIN_SPAN)} h",
     ),
     (
-        "stuck",
-        "Stuck",
-        f"still firing, no clear for \u2265{_hours(R6_STUCK_OPEN)} hours before the week ends",
+        "flapping",
+        "Flapping",
+        f"\u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in {_hours(R6_FLAP_WINDOW)} h",
     ),
 )
 
@@ -416,14 +416,14 @@ def _open_for(row: FireRow) -> str:
 
 def _fire(summary: TeamSummary) -> str:
     legend = "".join(
-        f'<li><span class="pill {key}">{label}</span> {h(text)}</li>'
+        f'<li><span class="pill {key}">{label}</span>: {h(text)}</li>'
         for key, label, text in FIRE_THRESHOLDS
     )
     legend_html = (
         f'<ul class="thresholds">{legend}</ul>'
-        '<p class="sub">An episode is a run of firing events with no clear between them. A '
-        "Grafana alert is expected to send once when it fires and once when it clears. Active "
-        "time runs from the first to the last event.</p>"
+        '<p class="sub">Grafana records an event on every evaluation, so a Grafana alert\'s '
+        "event count shows how often it is evaluated, not how often it notifies. Active time "
+        "runs from the first to the last event.</p>"
     )
     if not summary.fire:
         return _card(
@@ -442,12 +442,16 @@ def _fire(summary: TeamSummary) -> str:
                 if row.pattern
                 else '<span class="sub">\u2014</span>'
             )
+            if row.pattern == "spamming" and row.events_per_24h is not None:
+                pattern += (
+                    f' <span class="sub">{h(_dec(row.events_per_24h))} events per '
+                    f"{h(_hours(R6_API_RATE_WINDOW))} h over {h(_dec(row.span_hours))} h</span>"
+                )
             rows.append(
                 f'<tr><td class="alert">{_alert_line(row.alert)}</td>'
                 f'<td class="num">{row.alert.row_count:,}</td>'
                 f'<td class="num">{_span(row.span_hours)}</td>'
                 f'<td class="num">{row.alert.max_clear_cycles_24h:,}</td>'
-                f'<td class="num">{row.max_episode_firing_rows:,}</td>'
                 f'<td class="num">{_open_for(row)}</td>'
                 f"<td>{pattern}</td></tr>"
             )
@@ -456,8 +460,7 @@ def _fire(summary: TeamSummary) -> str:
                 "Alert",
                 "Events",
                 "Active",
-                "Episodes (clear cycles)",
-                "Most rows in one episode",
+                "Clear cycles (most in 24 h)",
                 "Open for",
                 "Pattern",
             ),

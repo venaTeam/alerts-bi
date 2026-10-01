@@ -83,16 +83,11 @@ def test_api_alert_firing_for_100h_is_never_stuck() -> None:
 # ---------------------------------------------------------------------- spamming
 
 
-def test_two_firing_rows_then_a_clear_is_not_spamming() -> None:
-    facts = _facts(_seq("FFC"))
-    assert facts.max_episode_firing_rows == 2
-    assert facts.pattern is None
-
-
-def test_three_firing_rows_then_a_clear_is_spamming() -> None:
+def test_grafana_firing_rows_inside_one_episode_are_never_spamming() -> None:
+    # Grafana writes a row on every evaluation, so a row count says nothing about re-sending.
     facts = _facts(_seq("FFFC"))
     assert facts.max_episode_firing_rows == 3
-    assert facts.pattern == "spamming"
+    assert facts.pattern is None
 
 
 def test_the_longest_of_several_episodes_counts() -> None:
@@ -101,11 +96,28 @@ def test_the_longest_of_several_episodes_counts() -> None:
     assert facts.pattern is None
 
 
-def test_spamming_wins_over_stuck() -> None:
-    times = [WINDOW_END - timedelta(hours=30) + timedelta(seconds=300 * i) for i in range(288)]
+def test_a_288_row_grafana_episode_open_at_least_72h_is_stuck() -> None:
+    step = timedelta(minutes=25)
+    times = [WINDOW_END - timedelta(hours=120) + i * step for i in range(288)]
     facts = _facts(_v1(times))
     assert facts.open_since == times[0]
-    assert facts.pattern == "spamming"
+    assert facts.max_episode_firing_rows == 288
+    assert facts.pattern == "stuck"
+
+
+def test_a_huge_grafana_row_count_in_an_episode_open_under_72h_is_nothing() -> None:
+    times = [WINDOW_END - timedelta(hours=30) + timedelta(seconds=300 * i) for i in range(288)]
+    facts = _facts(_v1(times))
+    assert facts.max_episode_firing_rows == 288
+    assert facts.pattern is None
+
+
+def test_three_api_rows_at_one_instant_are_not_spamming() -> None:
+    assert _facts(_v1([T0, T0, T0], **API)).pattern is None  # span 0 is under 6 h
+
+
+def test_two_replica_duplicates_at_one_instant_are_tolerated() -> None:
+    assert _facts(_v1([T0, T0, T0 + HOUR], clears={2})).pattern is None
 
 
 def test_api_alert_at_24_rows_over_exactly_24h_is_spamming() -> None:
@@ -116,6 +128,19 @@ def test_api_alert_at_24_rows_over_exactly_24h_is_spamming() -> None:
 
 def test_api_alert_with_23_rows_is_not_spamming() -> None:
     assert _facts(_v1(_even(23, timedelta(hours=24)), **API)).pattern is None
+
+
+def test_api_alert_at_exactly_six_hours_can_be_spamming() -> None:
+    facts = _facts(_v1(_even(7, timedelta(hours=6)), **API))
+    assert facts.span == timedelta(hours=6)
+    assert facts.events_per_24h == 28.0
+    assert facts.pattern == "spamming"
+
+
+def test_api_alert_at_5h59m_is_never_spamming() -> None:
+    facts = _facts(_v1(_even(30, timedelta(hours=5, minutes=59)), **API))
+    assert facts.events_per_24h is None
+    assert facts.pattern is None
 
 
 def test_api_alert_needs_six_hours_of_span() -> None:
@@ -172,12 +197,30 @@ def test_v2_flapping_reads_status_resolved() -> None:
 
 
 def test_flapping_outranks_spamming() -> None:
-    facts = _facts(_seq("FFFCFCFC", timedelta(minutes=1)))
-    assert facts.max_episode_firing_rows == 3
-    assert facts.pattern == "flapping"
+    # An API alert at ~3.6 events per hour over ~6.6 h is spamming on its own.
+    step = timedelta(minutes=4)
+    spam = _seq("F" * 100, step, **API)
+    assert _facts(spam).pattern == "spamming"
+    flapping = _seq("FCFCFC" + "F" * 94, step, **API)
+    assert _facts(flapping).pattern == "flapping"
 
 
 # ------------------------------------------------------------------------- facts
+
+
+def test_input_order_does_not_change_the_facts() -> None:
+    rows = _seq("FFCFFFC", timedelta(minutes=20)) + _v1([T0, T0])
+    assert _facts(rows) == _facts(list(reversed(rows)))
+
+
+def test_a_clear_at_the_same_instant_as_a_firing_row_closes_the_episode() -> None:
+    at = WINDOW_END - timedelta(hours=96)
+    firing = v1_row(**{"@timestamp": _iso(at), "severity": 5})
+    clear = v1_row(**{"@timestamp": _iso(at), "severity": 1})
+    for rows in ([firing, clear], [clear, firing]):
+        facts = _facts(rows)
+        assert facts.open_since is None
+        assert facts.pattern is None
 
 
 def test_all_clear_rows_have_no_episode() -> None:

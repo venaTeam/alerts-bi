@@ -36,9 +36,10 @@ story the other contradicts.
 a window total — a 7-day total is 7× a 1-day total for arithmetic reasons alone, and reading
 it as "they have seven times more alerts" is the mistake the rate prevents.
 
-**v1 and v2 row counts are never added together.** v1 re-fires a still-active alert every 5
-minutes and v2 every 12 hours, so moving one alert between schemas divides its row count by
-144 without anyone improving anything.
+**v1 and v2 row counts are never added together.** A row count reflects how often rows are written,
+which differs between the two systems, so moving one alert between schemas can change its
+row count without anyone improving anything. Grafana writes a row on every evaluation, so
+`alerts` is evaluation load, not notifications.
 
 ---
 
@@ -181,7 +182,7 @@ One row per identity. This is the deliverable a team acts on.
 | `clear_count` | Rows in the window that clear the alert: v1 severity `clear`, v2 `status = resolved`. `0` when none |
 | `max_clear_cycles_24h` | The most fire-then-clear cycles inside any rolling 24 hours; a cycle is a clear row immediately preceded by a non-clear row. `0` when none |
 | `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
-| `max_episode_firing_rows` | The most firing rows in any one episode. An episode is a run of consecutive non-clear rows; a clear row closes it. `0` when the identity has no firing rows |
+| `max_episode_firing_rows` | A stored diagnostic: the most firing rows in any one episode (it decides nothing, because a Grafana row count reflects evaluation frequency). An episode is a run of consecutive non-clear rows; a clear row closes it. `0` when the identity has no firing rows |
 | `open_since` | When the open episode began: the first firing row after the last clear, set only when the identity's **last** row is firing. Empty when it ended on a clear |
 | `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 

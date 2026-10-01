@@ -26,7 +26,7 @@ from src.insights import (
     WeekRules,
 )
 from src.portal.summary_view import format_projected_week, render_summary_sections
-from src.rules.catalogs import R6_FLAP_CYCLES, R6_SPAM_EPISODE_ROWS, R6_STUCK_OPEN
+from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_OPEN
 
 END = datetime(2026, 9, 28)
 START = END - timedelta(hours=168)
@@ -339,16 +339,14 @@ def test_no_dashboard_is_never_shown_as_zero() -> None:
     assert unseen.count("No dashboard supplied") == 2
 
 
-def test_the_fire_table_shows_episode_columns_and_the_thresholds() -> None:
+def test_the_fire_table_shows_episode_columns() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    for header in ("Episodes (clear cycles)", "Most rows in one episode", "Open for", "Pattern"):
+    for header in ("Clear cycles (most in 24 h)", "Open for", "Pattern"):
         assert header in fire, header
+    assert "Most rows in one episode" not in fire
     assert "<svg" not in fire
     assert "repeat" not in fire.lower()
-    assert "stuck" in fire
-    for words in (f"{R6_SPAM_EPISODE_ROWS} or more firing rows", "24 or more", "72 hours"):
-        assert words in fire, words
 
 
 def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
@@ -366,8 +364,14 @@ def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
 def test_the_threshold_legend_reads_the_catalogue() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    assert f"{R6_FLAP_CYCLES} or more fire\u2192clear cycles" in fire
-    assert f"\u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} hours" in fire
+    text = re.sub(r"<[^>]+>", "", fire)
+    assert (
+        f"Stuck: still firing, no clear for \u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h "
+        "before the week ends"
+    ) in text
+    assert "Spamming: an API alert at \u226524 events per 24 h over \u22656 h" in text
+    assert f"Flapping: \u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in 24 h" in text
+    assert text.index("Stuck:") < text.index("Spamming:") < text.index("Flapping:")
 
 
 def test_rule_and_model_findings_stay_in_separate_columns() -> None:

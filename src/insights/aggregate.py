@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from src.insights.model import AlertRow, AppRow, FireRow
-from src.rules.catalogs import R6_API_MIN_SPAN
+from src.rules.catalogs import R6_API_MIN_SPAN, R6_API_RATE_WINDOW
 
-_DAY = timedelta(hours=24)
+_DAY = R6_API_RATE_WINDOW
 _MIN_SPAN = R6_API_MIN_SPAN
 
 
