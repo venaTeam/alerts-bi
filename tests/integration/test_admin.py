@@ -317,7 +317,9 @@ def test_the_summary_of_a_published_week_reads_its_published_history(client: Tes
     page = client.get(f"/teams/{TEAM}/summary?run_id={published['run_id']}", headers=ALICE)
     assert page.status_code == 200 and "published</span>" in page.text
     assert "This week is not published" not in page.text
-    assert "found 0" in page.text, "one published week: no earlier week to measure a pace from"
+    assert "none was published before this week" in page.text, (
+        "one published week: no earlier week to measure a pace from"
+    )
 
 
 def test_the_admin_summary_renders_the_shared_widgets(client: TestClient) -> None:

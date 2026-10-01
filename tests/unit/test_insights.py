@@ -128,23 +128,67 @@ def test_estimate_not_published() -> None:
 def test_estimate_one_week_of_history() -> None:
     est = estimate(inputs(history=(week(0, {"a"}),)))
     assert est.no_estimate_reason == (
-        "Needs at least 2 earlier published weeks back to back; found 0."
+        "Needs at least 2 earlier published weeks back to back; none was published before "
+        "this week."
     )
     assert est.lookback_weeks == 0
+
+
+def test_estimate_one_earlier_week_of_history() -> None:
+    est = estimate(inputs(history=(week(0, {"a"}), week(1, {"a"}))))
+    assert est.no_estimate_reason == (
+        "Needs at least 2 earlier published weeks back to back; only 1 was published before "
+        "this week."
+    )
 
 
 def test_estimate_gap_stops_the_lookback() -> None:
     history = (week(0, {"a", "b"}), week(1, {"a"}), week(3, {"a"}))
     est = estimate(inputs(history=history))
     assert est.lookback_weeks == 0
-    assert est.no_estimate_reason is not None and "found 0" in est.no_estimate_reason
+    # Two published weeks exist: the reason names the gap, never "found 0".
+    assert est.no_estimate_reason == (
+        "Needs at least 2 earlier published weeks back to back; a week before was not "
+        "published, so none counted."
+    )
+
+
+def test_estimate_gap_after_one_week_counts_that_week() -> None:
+    history = (week(0, {"a", "b"}), week(2, {"a"}), week(3, {"a"}))
+    est = estimate(inputs(history=history))
+    assert est.lookback_weeks == 1
+    assert est.no_estimate_reason is not None
+    assert "was not published, so only 1 counted." in est.no_estimate_reason
 
 
 def test_estimate_basis_change_on_selected_week() -> None:
     history = (week(0, {"a", "b"}), week(1, {"a", "b"}), week(2, {"a"}, basis_changed=True))
     est = estimate(inputs(history=history))
     assert est.lookback_weeks == 0
-    assert est.no_estimate_reason is not None and "found 0" in est.no_estimate_reason
+    assert est.no_estimate_reason == (
+        "Needs at least 2 earlier published weeks measured the same way; this team's alert "
+        "sources, dashboards or the rules changed this week, so none counted."
+    )
+
+
+def test_estimate_basis_change_one_week_back_counts_one_week() -> None:
+    history = (week(0, {"a", "b"}), week(1, {"a", "b"}, basis_changed=True), week(2, {"a"}))
+    est = estimate(inputs(history=history))
+    assert est.lookback_weeks == 1
+    assert est.no_estimate_reason is not None
+    assert "changed 1 week earlier, so only 1 counted." in est.no_estimate_reason
+
+
+def test_no_estimate_reason_uses_no_word_the_portal_hides() -> None:
+    forbidden = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
+    histories = (
+        (week(0, {"a"}),),
+        (week(0, {"a"}), week(2, {"a"})),
+        (week(0, {"a"}), week(1, {"a"}, basis_changed=True)),
+    )
+    for history in histories:
+        reason = estimate(inputs(history=history)).no_estimate_reason or ""
+        assert reason and not [word for word in forbidden if word in reason.lower()]
 
 
 def test_estimate_basis_change_midway_limits_lookback() -> None:

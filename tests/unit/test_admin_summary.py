@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -16,6 +17,7 @@ from src.admin.summary import (
     basis_changes,
     day_by_day,
     highlight_panel_sql,
+    measurement_basis,
     read_snapshot,
     rule_totals,
     schema_totals,
@@ -163,16 +165,78 @@ def test_rule_totals_sum_events_and_count_alerts_carrying_the_rule() -> None:
     assert totals[1].alerts == 0
 
 
+_ENTRY: dict[str, Any] = {
+    "team_id": "checkout",
+    "display_name": "Checkout",
+    "v1_operators": ["checkout", "CHECKOUT"],
+    "v2_operator": "checkout-v2",
+    "panels": [{"panel_id": "p1", "schema": "v1", "sql": "SELECT 1 WHERE node_name != 'x'"}],
+}
+
+
+def _snapshot(**changes: Any) -> str:
+    """A stored entry as ``snapshot_team_entry`` writes it: compact, no ASCII escaping."""
+    return json.dumps({**_ENTRY, **changes}, separators=(",", ":"), ensure_ascii=False)
+
+
+def _week(snapshot: str, ruleset: str = "1.1.0") -> dict[str, Any]:
+    return {"ruleset_version": ruleset, "registry_entry_snapshot": snapshot}
+
+
 def test_basis_changes_between_consecutive_published_weeks() -> None:
     weeks = [
-        {"ruleset_version": "1.0.0", "registry_version": "a"},
-        {"ruleset_version": "1.0.0", "registry_version": "a"},
-        {"ruleset_version": "1.1.0", "registry_version": "a"},
-        {"ruleset_version": "1.1.0", "registry_version": "b"},
-        {"ruleset_version": "1.1.0", "registry_version": "b"},
+        _week(_snapshot(), "1.0.0"),
+        _week(_snapshot(), "1.0.0"),
+        _week(_snapshot(), "1.1.0"),
+        _week(_snapshot(v1_operators=["checkout"])),
+        _week(_snapshot(v1_operators=["checkout"])),
     ]
     assert basis_changes(weeks) == [False, False, True, True, False]
     assert basis_changes([]) == []
+
+
+def test_another_teams_enrolment_does_not_change_the_basis() -> None:
+    # Enrolling a team bumps registry_version for every team; it is not even read.
+    weeks = [
+        {**_week(_snapshot()), "registry_version": "2026-10-01.1"},
+        {**_week(_snapshot()), "registry_version": "2026-10-08.1"},
+    ]
+    assert basis_changes(weeks) == [False, False]
+
+
+def test_only_what_is_measured_changes_the_basis() -> None:
+    base = _week(_snapshot())
+    not_measurement = (
+        _snapshot(display_name="Checkout Team"),
+        _snapshot(planning={"v1_rule_effort_days": 2}),
+        _snapshot(weekly_review={"enabled": True}),
+    )
+    for snapshot in not_measurement:
+        assert basis_changes([base, _week(snapshot)]) == [False, False], snapshot
+    variable = {"name": "node", "type": "constant", "value": "x"}
+    measurement = (
+        _snapshot(v1_operators=["checkout"]),
+        _snapshot(v1_operators=["checkout", "Checkout"]),
+        _snapshot(v2_operator=None),
+        _snapshot(v2_operator="checkout-v2 "),
+        _snapshot(panels=[]),
+        _snapshot(panels=[{**_ENTRY["panels"][0], "sql": "SELECT 1"}]),
+        _snapshot(panels=[{**_ENTRY["panels"][0], "variables": [variable]}]),
+    )
+    for snapshot in measurement:
+        assert basis_changes([base, _week(snapshot)]) == [False, True], snapshot
+
+
+def test_the_measurement_basis_is_the_stored_text_of_three_fields() -> None:
+    assert measurement_basis(_snapshot()) == (
+        '["checkout","CHECKOUT"]',
+        '[{"panel_id":"p1","schema":"v1","sql":"SELECT 1 WHERE node_name != \'x\'"}]',
+        "checkout-v2",
+    )
+    without = {k: v for k, v in _ENTRY.items() if k != "panels"}
+    assert measurement_basis(json.dumps(without, separators=(",", ":")))[1] is None
+    assert measurement_basis("not json") == (None, None, None)
+    assert measurement_basis(None) == (None, None, None)
 
 
 def test_the_snapshot_supplies_operators_panels_and_the_effort_override() -> None:

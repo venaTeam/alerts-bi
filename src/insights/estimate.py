@@ -27,17 +27,43 @@ def v1_rule_key(alert: AlertRow) -> str:
     return v1_rule_key_of(alert.application, alert.alert_rule_url)
 
 
-def _earlier_weeks(history: tuple[WeekRules, ...]) -> list[WeekRules]:
-    """Up to three consecutive published weeks before the selected one, newest first."""
+def _earlier_weeks(history: tuple[WeekRules, ...]) -> tuple[list[WeekRules], str]:
+    """Up to three consecutive published weeks before the selected one, newest first, and
+    why the lookback stopped: ``full``, ``start`` (no earlier published week), ``gap`` (a
+    week was not published) or ``basis`` (how the team is measured changed)."""
     earlier: list[WeekRules] = []
     for i in range(len(history) - 2, -1, -1):
         if len(earlier) == _LOOKBACK_WEEKS:
-            break
+            return earlier, "full"
         later = history[i + 1]
-        if later.basis_changed or later.week_end - history[i].week_end != _WEEK:
-            break
+        if later.basis_changed:
+            return earlier, "basis"
+        if later.week_end - history[i].week_end != _WEEK:
+            return earlier, "gap"
         earlier.append(history[i])
-    return earlier
+    return earlier, "full" if len(earlier) == _LOOKBACK_WEEKS else "start"
+
+
+def _too_few_reason(found: int, stop: str) -> str:
+    """Why fewer than two earlier weeks count, naming the real cause rather than a bare count:
+    a team with ten published weeks whose lookback stopped at a gap has not "found 0"."""
+    counted = "none" if found == 0 else f"only {found}"
+    if stop == "basis":
+        when = "this week" if found == 0 else f"{found} week{'' if found == 1 else 's'} earlier"
+        return (
+            "Needs at least 2 earlier published weeks measured the same way; this team's alert "
+            f"sources, dashboards or the rules changed {when}, so {counted} counted."
+        )
+    if stop == "gap":
+        return (
+            "Needs at least 2 earlier published weeks back to back; a week before was not "
+            f"published, so {counted} counted."
+        )
+    was = "was" if found <= 1 else "were"
+    return (
+        "Needs at least 2 earlier published weeks back to back; "
+        f"{counted} {was} published before this week."
+    )
 
 
 def estimate(inputs: SummaryInputs) -> Estimate:
@@ -78,14 +104,9 @@ def estimate(inputs: SummaryInputs) -> Estimate:
         )
 
     selected = inputs.history[-1]
-    earlier = _earlier_weeks(inputs.history)
+    earlier, stop = _earlier_weeks(inputs.history)
     if len(earlier) < _MIN_EARLIER_WEEKS:
-        return build(
-            lookback=len(earlier),
-            reason=(
-                f"Needs at least 2 earlier published weeks back to back; found {len(earlier)}."
-            ),
-        )
+        return build(lookback=len(earlier), reason=_too_few_reason(len(earlier), stop))
 
     seen: set[str] = set()
     for week in earlier:

@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import DBAPIError
+from src.admin.summary import _published_history, basis_changes
 from src.config import PortalSettings, SqlConfig, load_config
 from src.db.connection import connect
 from src.db.migrate import reset_test_database
@@ -767,10 +768,11 @@ def test_why_flagged_offers_bars_and_a_donut_per_schema(portal: TestClient) -> N
     assert "<polyline" not in why
 
 
-def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: TestClient) -> None:
+def test_the_summary_says_not_measured_rather_than_zero(portal: TestClient) -> None:
     summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
     unseen = summary[summary.index("Not on any of your dashboards") : summary.index("Migration")]
-    assert unseen.count("No dashboard supplied") == 2, "no panel for either schema"
+    assert unseen.count("<b>Not measured this week</b>") == 2, "no panel for either schema"
+    assert "No dashboard supplied" not in unseen
 
 
 def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> None:
@@ -903,9 +905,116 @@ def test_the_estimate_is_drawn_from_published_weeks_only(portal: TestClient) -> 
     earlier = portal.get(f"/teams/{PACE_TEAM}/weeks/{(W1 - WEEK).date()}").text
     progress = earlier[earlier.index("Migration progress") : earlier.index("Over time")]
     assert "No estimate:" in progress
-    assert "Needs at least 2 earlier published weeks back to back; found 1." in progress
+    assert (
+        "Needs at least 2 earlier published weeks back to back; only 1 was published before "
+        "this week."
+    ) in progress
     assert "2 working days" in progress
     assert f"4 v1 alert rules {TIMES} 0.5 working days each (default)" in progress
+
+
+BASIS_TEAM = "basis-team"
+_BASIS_ENTRY: dict[str, Any] = {
+    "team_id": BASIS_TEAM,
+    "display_name": "Basis Team",
+    "v1_operators": ["basis", "BASIS"],
+    "v2_operator": "basis-v2",
+    "panels": [{"panel_id": "p1", "schema": "v1", "sql": "SELECT 1 WHERE node_name != 'x'"}],
+}
+_PANEL = _BASIS_ENTRY["panels"][0]
+#: Back-to-back published weeks: (registry_version, ruleset_version, entry changes, whether
+#: the week was measured differently from the one before it).
+_BASIS_WEEKS: tuple[tuple[str, str, dict[str, Any], bool], ...] = (
+    ("r1", "1.1.0", {}, False),
+    # Another team was enrolled: the file's version moved, this team's entry did not.
+    ("r2", "1.1.0", {}, False),
+    ("r3", "1.1.0", {"display_name": "Basis", "weekly_review": {"enabled": True}}, False),
+    ("r3", "1.1.0", {"planning": {"v1_rule_effort_days": 2}}, False),
+    ("r4", "1.1.0", {"v1_operators": ["basis"]}, True),
+    ("r5", "1.1.0", {"v1_operators": ["basis"]}, False),
+    # Operators match case-sensitively, so a case change is a change despite the collation.
+    ("r5", "1.1.0", {"v1_operators": ["Basis"]}, True),
+    ("r5", "1.1.0", {"v1_operators": ["Basis"], "panels": [{**_PANEL, "sql": "SELECT 1"}]}, True),
+    (
+        "r5",
+        "1.1.0",
+        {
+            "v1_operators": ["Basis"],
+            "panels": [
+                {
+                    **_PANEL,
+                    "sql": "SELECT 1",
+                    "variables": [{"name": "n", "type": "constant", "value": "x"}],
+                }
+            ],
+        },
+        True,
+    ),
+    ("r6", "1.1.0", {"v1_operators": ["Basis"], "v2_operator": None, "panels": []}, True),
+    ("r6", "1.1.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, True),
+    ("r6", "1.2.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, True),
+    ("r7", "1.2.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, False),
+)
+
+
+def test_the_view_and_the_operator_app_agree_on_when_measurement_changed(
+    portal: TestClient,
+) -> None:
+    """portal_reviews.basis_changed (migration 008) and the admin app's Python mirror compare
+    the same thing: the ruleset and the team's own operators and panels, never the registry
+    file's version, which every enrolment bumps."""
+    first_end = W3 - len(_BASIS_WEEKS) * WEEK
+    ends = [first_end + index * WEEK for index in range(len(_BASIS_WEEKS))]
+    with connect(CONFIG.sql, DB) as db:
+        for index, (registry, ruleset, changes, _) in enumerate(_BASIS_WEEKS):
+            name = f"basis{index}"
+            RUN[name] = name.ljust(64, "3")
+            snapshot = json.dumps(
+                {**_BASIS_ENTRY, **changes}, separators=(",", ":"), ensure_ascii=False
+            )
+            persist_run(
+                db,
+                PersistencePayload(
+                    run=sample_run(
+                        run_id=_run_id(name),
+                        team_id=BASIS_TEAM,
+                        team_display_name="Basis Team",
+                        run_at=ends[index],
+                        window_start=ends[index] - WEEK,
+                        window_end=ends[index],
+                        registry_version=registry,
+                        ruleset_version=ruleset,
+                        registry_entry_snapshot=snapshot,
+                    ),
+                    daily_metrics=_daily(_run_id(name), BASIS_TEAM, ends[index]),
+                    findings=[sample_finding(run_id=_run_id(name), key_field=f"{name}:k")],
+                ),
+            )
+            publish_run(db, _run_id(name), published_by="operator")
+
+        view = db.query(
+            "SELECT basis_changed FROM portal_reviews WHERE team_id = :t ORDER BY window_end",
+            {"t": BASIS_TEAM},
+        )
+        stored = db.query(
+            "SELECT r.ruleset_version, r.registry_entry_snapshot FROM review_publications AS p "
+            "JOIN runs AS r ON r.run_id = p.run_id WHERE p.team_id = :t "
+            "AND p.withdrawn_at IS NULL ORDER BY p.window_end",
+            {"t": BASIS_TEAM},
+        )
+        admin = _published_history(db, BASIS_TEAM, ends[-1])
+
+    expected = [changed for *_, changed in _BASIS_WEEKS]
+    assert [bool(row["basis_changed"]) for row in view] == expected
+    assert basis_changes(stored) == expected
+    assert [week.basis_changed for week in admin] == expected
+
+    # The latest week's lookback stops at the ruleset change one week earlier, and the reason
+    # says so rather than counting weeks.
+    page = portal.get(f"/teams/{BASIS_TEAM}").text
+    progress = page[page.index("Migration progress") : page.index("Over time")]
+    assert "measured the same way" in progress and "changed 1 week earlier" in progress
+    assert "registry" not in page and "ruleset" not in page
 
 
 def _alert(portal: TestClient, schema: str, application: str, key: str, week: datetime = W3) -> str:

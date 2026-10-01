@@ -25,7 +25,8 @@ from src.insights import (
     TeamSummary,
     WeekRules,
 )
-from src.portal.explain import rule_explanation
+from src.portal.explain import r6_next_step, rule_explanation
+from src.portal.pages import h
 from src.portal.summary_view import _share, format_projected_week, render_summary_sections
 from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_OPEN
 
@@ -321,11 +322,28 @@ def test_v1_and_v2_are_never_added_together() -> None:
     assert "1,030" not in html, "v1 + v2 events"
 
 
-def test_a_schema_with_no_panel_says_no_dashboard_was_supplied() -> None:
+def test_a_schema_without_the_measure_says_not_measured_this_week() -> None:
     html = render()
     unseen = html[html.index("Not on any of your dashboards") : html.index("Migration progress")]
-    assert "No dashboard supplied" in unseen
+    # NULL is no panel OR a week stored before the measure existed: claim neither.
+    assert "<b>Not measured this week</b>" in unseen
+    assert "No v2 dashboard was supplied, or the week predates this measure." in unseen
+    assert "No dashboard supplied" not in html
     assert "40" in unseen, "the v1 count is still shown"
+
+
+def test_the_hidden_card_does_not_claim_a_missing_dashboard() -> None:
+    summary = build_summary(
+        schemas={
+            "v1": schema_totals("v1", unseen=None, unseen_alerts=None, suppressed=0),
+            "v2": schema_totals("v2"),
+        }
+    )
+    html = render(summary)
+    hidden = html[html.index("Hidden by your own panels") : html.index("Not on any of")]
+    # A week stored before `unseen` existed may still have had panels: say only what is true.
+    assert hidden.count("No event matched a panel filter that could be checked") == 2
+    assert "Not measured" not in hidden and "No dashboard" not in hidden
 
 
 def test_no_dashboard_is_never_shown_as_zero() -> None:
@@ -337,7 +355,8 @@ def test_no_dashboard_is_never_shown_as_zero() -> None:
     )
     html = render(summary)
     unseen = html[html.index("Not on any of your dashboards") : html.index("Migration progress")]
-    assert unseen.count("No dashboard supplied") == 2
+    assert unseen.count("<b>Not measured this week</b>") == 2
+    assert ">0 events" not in unseen
 
 
 def test_the_fire_table_shows_episode_columns() -> None:
@@ -367,9 +386,12 @@ def test_the_threshold_legend_reads_the_catalogue() -> None:
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
     text = re.sub(r"<[^>]+>", "", fire)
     assert (
-        f"Stuck: still firing, no clear for \u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h "
-        "before the week ends"
+        "Stuck: still firing, with firing rows spanning "
+        f"\u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h and no clear"
     ) in text
+    assert "Stuck: still firing, with firing rows spanning \u226572 h and no clear" in text
+    assert "week ends" not in text, "stuck no longer measures to the end of the week"
+    assert "open for is the span of the firing events since the last clear" in text
     assert "Spamming: an API alert at \u226524 events per 24 h over \u22656 h" in text
     assert f"Flapping: \u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in 24 h" in text
     assert text.index("Stuck:") < text.index("Spamming:") < text.index("Flapping:")
@@ -445,6 +467,35 @@ def test_a_key_finding_on_a_rule_offers_its_next_step_and_its_alerts() -> None:
     assert "Widen a panel" in findings
 
 
+def test_the_r6_next_step_follows_the_dominant_firing_pattern() -> None:
+    stuck = r6_next_step("stuck")
+    html = render()
+    findings = html[html.index("Key findings") : html.index("Noisy alerts by application")]
+    table = html[html.index("Flagged by rule") : html.index("Hidden by your own panels")]
+    biggest = html[html.index("Biggest single source") : html.index("Flagged by rule")]
+    # The only R6 alert is a Grafana stuck one: never the API send-once advice.
+    for part in (findings, table, biggest):
+        assert h(stuck) in part
+        assert "once when it fires" not in part
+
+    spam: dict[str, object] = {
+        "provider": "api",
+        "alert_rule_url": None,
+        "fire_pattern": "spamming",
+        "row_count": 50,
+    }
+    alerts = (
+        *ALERTS,
+        alert(key_field="api:a", **spam),
+        alert(key_field="api:b", **spam),
+    )
+    html = render(build_summary(alerts=alerts))
+    findings = html[html.index("Key findings") : html.index("Noisy alerts by application")]
+    table = html[html.index("Flagged by rule") : html.index("Hidden by your own panels")]
+    assert h(r6_next_step("spamming")) in findings, "two spamming alerts outnumber one stuck"
+    assert h(r6_next_step("spamming")) in table
+
+
 def test_flagged_by_rule_explains_each_rule() -> None:
     html = render()
     table = html[html.index("Flagged by rule") : html.index("Hidden by your own panels")]
@@ -469,7 +520,10 @@ def test_the_projected_week_is_formatted_as_a_week() -> None:
 
 
 def test_no_estimate_states_its_reason() -> None:
-    reason = "Needs at least 2 earlier published weeks back to back; found 0."
+    reason = (
+        "Needs at least 2 earlier published weeks back to back; none was published before "
+        "this week."
+    )
     html = render(build_summary(est=estimate(projected_week_end=None, no_estimate_reason=reason)))
     assert "No estimate" in html and reason in html
     assert "week of" not in html
