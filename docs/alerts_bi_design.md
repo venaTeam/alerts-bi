@@ -19,7 +19,7 @@ Once an alert arrives, it lands in two places:
 * **SQL Server — "hot alerts".** Holds only alerts that are *currently active*. This is the operational surface: teams build Grafana panels that query this database, and that is what the on-call engineer actually looks at.
 * **Elasticsearch (ECK) — history.** Every alert event that ever arrived, with **3-month retention**.
 
-The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3.
+The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3. **Corrected 2026-10-01 (product owner):** the Grafana repeat interval is **disabled** in both v1 and v2 notification policies, so a still-firing alert is not re-sent on a timer; it should send once when it fires and once when it clears. The observed repetition (section 3.3's scale measurement) therefore comes from somewhere else, for example duplicate senders or Grafana re-sending a group, and rule 6 now treats re-sending while already firing as a finding (section 7.14). Rows against distinct alerts (section 3.3) stays the counting rule regardless of cause.
 
 ### 1.2 The standardization project
 
@@ -294,13 +294,13 @@ Derived directly from `what_is_an_incorrect_alert_EN.md`. **Alert message text i
 | 3 | Placeholder or missing required identity/ownership metadata | yes | yes | Core |
 | 4 | Grafana alert missing its alert-rule link (`provider = grafana` and no `alert_rule_url`) | yes | yes | Core |
 | 5 | Self-suppressed (matched the team's own exclusion clause) | yes | yes | Core |
-| 6 | Firing pattern: stuck, spamming or flapping against the schema's repeat interval (section 7.14) | yes | yes | Core (since ruleset 1.1.0) |
+| 6 | Firing pattern by episodes: stuck, spamming or flapping (section 7.14) | yes | yes | Core (since ruleset 1.1.0) |
 | 7 | Invalid `time_created`: later than receipt time or more than 24 hours before receipt | yes | — | Core (v1 only by construction) |
 | 8 | Missing or unusable `impact` | — | yes | V2 |
 | 9 | Missing or invalid absolute HTTP(S) `runbook_url` | — | yes | V2 |
 | 10 | `impact` exactly matches the versioned technical-cause phrase catalogue | — | yes | V2 |
 
-**Superseded 2026-10-01: rule 6 is a core rule from `ruleset_version` 1.1.0** (section 7.14). It judges one alert's firing pattern against its schema's repeat interval and never a team's total volume, which stays displayed and unscored. The original deferral reads: **Rule 6 is deferred to post-MVP** (decided 2026-08-27). The MVP does not treat a quantity of alerts as evidence that an alert is bad, consistent with section 2's decision that volume is displayed rather than scored. Volume is still reported prominently as `alerts` against `distinct_alerts`; it simply does not contribute to `flagged`. The rule stays documented here and the mock dataset still generates matching data, so it can be switched on later without re-scoring history — which is what section 6's "persist facts, not judgments" principle exists for.
+**Superseded 2026-10-01: rule 6 is a core rule from `ruleset_version` 1.1.0** (section 7.14). It judges one alert's firing episodes and never a team's total volume, which stays displayed and unscored. The original deferral reads: **Rule 6 is deferred to post-MVP** (decided 2026-08-27). The MVP does not treat a quantity of alerts as evidence that an alert is bad, consistent with section 2's decision that volume is displayed rather than scored. Volume is still reported prominently as `alerts` against `distinct_alerts`; it simply does not contribute to `flagged`. The rule stays documented here and the mock dataset still generates matching data, so it can be switched on later without re-scoring history — which is what section 6's "persist facts, not judgments" principle exists for.
 
 Rule 5 is the one to put in front of teams first: it is their own filter quoted back to them, and it is their phase-0 work list.
 
@@ -623,7 +623,7 @@ The MVP design is settled and the MVP is built. What remains is batching validat
 
 ### 7.3 Deferred with rule 6
 
-**Resolved 2026-10-01 (section 7.14):** thresholds are multiples of each schema's repeat interval for Grafana alerts, and an absolute rate for API alerts, which have no repeat interval. The original questions read: rule 6 (spam volume) is post-MVP (section 4). These move with it.
+**Resolved 2026-10-01 (section 7.14):** with the repeat interval disabled, Grafana alerts are judged by firing episodes (re-sent while firing, or open with no clear), and API alerts by an absolute rate. The original questions read: rule 6 (spam volume) is post-MVP (section 4). These move with it.
 
 1. **Threshold: what fire rate counts as spam?** It must differ **by schema as well as by provider** — the expected Grafana baseline is ~288 rows/day in v1 and ~2/day in v2 (section 3.3), so a single fixed threshold would flag every healthy v1 alert and no unhealthy v2 one. Likely expressed as a multiple of the expected repeat cadence rather than as an absolute count.
 2. **API-sent alerts: do they have any re-fire cadence, or are they one-shot?** Only affects the threshold above. Noted because the mock generator currently leaves API alerts on their authored cadence rather than inventing one.
@@ -894,23 +894,29 @@ were flagged by rule, templated key findings, noisy alerts by application, how o
 fire, the biggest single source, the per-rule table with what to change, hidden and
 `unseen` alerts, migration progress and a filterable work list. v1 and v2 are never summed.
 
-**Rule 6 is a core rule from `ruleset_version` 1.1.0.** It judges one alert's firing
-pattern against its schema's repeat interval (v1 5 minutes, v2 12 hours), evaluated over the
-identity's raw rows in the window, ordered by timestamp then document hash. Active span is
-`last - first + repeat interval`; the fire-rate ratio is rows over the rows expected at the
-repeat interval. One pattern per alert, in this priority:
+**Rule 6 is a core rule from `ruleset_version` 1.1.0, judged by firing episodes.** The
+Grafana repeat interval is disabled (section 1.1), so a healthy Grafana alert sends one row
+when it fires and one when it clears. The identity's raw rows in the window are ordered by
+timestamp then document hash. A clear is v1 severity `clear` (code 1) or v2
+`status = resolved`. An **episode** is a run of consecutive firing rows closed by a clear;
+firing rows after the last clear form the open episode. One pattern per alert, in this
+priority:
 
-* **flapping** — at least 3 fire → clear cycles inside any rolling 24 hours. A clear is v1
-  severity `clear` (code 1) or v2 `status = resolved`.
-* **spamming** — a Grafana alert at 2× its repeat interval or more; an API alert, which has no
-  repeat interval, at 24 or more events per 24 hours of a span of at least 6 hours.
-* **stuck** — a Grafana alert at 0.9× its repeat interval or more for at least 72 hours,
-  never cleared. 72 hours rather than 24 so a genuine day-long outage is not flagged.
+* **flapping** — at least 3 fire → clear cycles inside any rolling 24 hours.
+* **spamming** — a Grafana alert with 3 or more firing rows in one episode, so it was sent
+  again while already firing (one duplicate is tolerated); an API alert at 24 or more events
+  per 24 hours over a span of at least 6 hours.
+* **stuck** — a Grafana alert whose last row is firing and whose open episode began at least
+  72 hours before the week ends. 72 hours so a genuine day-long outage is not flagged. API
+  senders often never clear, so stuck is Grafana-only.
+
+An alert that started firing before the window and sent nothing inside it has no rows in
+the week and cannot be judged; that is a limit of reading events, not of the rule.
 
 Every row of a matching identity matches R6, so the row-level allocation of section 4 is
 unchanged. R6 is a core finding, so the identity is withheld from the model (section 5.1);
 a stuck or spamming alert already has a concrete fix. The facts behind it (`clear_count`,
-`max_clear_cycles_24h`) are persisted on the work-list row with the derived `fire_pattern`,
+`max_clear_cycles_24h`, `max_episode_firing_rows`, `open_since`) are persisted on the work-list row with the derived `fire_pattern`,
 so history can be re-scored if the thresholds change. Volume itself stays displayed and
 unscored (section 2).
 
