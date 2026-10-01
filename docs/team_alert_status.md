@@ -1,6 +1,6 @@
 # Mock Alert Dataset — Team Status Report
 
-**Last updated:** 2026-08-30
+**Last updated:** 2026-10-01
 **Fixture clock:** `2026-08-25T18:00:00Z`
 **Reported window:** `[2026-08-18T18:00:00Z, 2026-08-25T18:00:00Z)` — the exact 168 hours a run reports
 
@@ -36,6 +36,17 @@ RESET=1 uv run python scripts/generate_mock_alerts.py
 uv run alerts-bi run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
 ```
 
+## Refreshed 2026-10-01 — R6 and two more acceptance teams
+
+R6 is now a core rule (ruleset 1.1.0, design section 7.14), judged by firing episodes:
+flapping on any provider, spamming for API alerts only, stuck for a Grafana alert still
+firing 72 hours or more before the window ends. Several realistic teams carry long-firing
+Grafana alerts, so their **flagged rows** rose where R6 (stuck) now applies; volumes are
+unchanged, because the generator is unchanged. `acceptance-fire-patterns` and
+`acceptance-unseen` were added, and the other acceptance teams' rows moved from 08-20/08-21
+to 08-23/08-24 so that none of them is incidentally stuck. Figures below are from runs at
+the fixture clock with the deterministic fake model.
+
 ## Severity in the fixture
 
 Alerts store severity as a number: `5` / `4` / `3` / `1`, read as `error` / `major` /
@@ -61,15 +72,17 @@ team with 4,355 rows over 7 distinct identities has something stuck, while a tea
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
 | payments-core | done | 100% | 0 | 0 | 5 | 3 | 0 | 0 | 0 |
 | legacy-batch-jobs | phase_0 | — | 4,355 | 36 | 0 | 0 | 4,350 | 27 | 0 |
-| fraud-detection | phase_0 | — | 733 | 10 | 0 | 0 | 154 | 9 | 0 |
-| checkout-api | phase_1 | 50% | 875 | 10 | 10 | 6 | 296 | 7 | 0 |
-| notifications-svc | phase_1 | 33.3% | 4,074 | 38 | 28 | 16 | 3,807 | 39 | 1 |
+| fraud-detection | phase_0 | — | 733 | 10 | 0 | 0 | 588 | 9 | 0 |
+| checkout-api | phase_1 | 50% | 875 | 10 | 10 | 6 | 730 | 7 | 0 |
+| notifications-svc | phase_1 | 33.3% | 4,074 | 38 | 28 | 16 | 3,952 | 39 | 1 |
 | search-platform | done | 100% | 0 | 0 | 5 | 3 | 0 | 0 | 0 |
 | data-pipeline-etl | phase_1 | 0% | 6,655 | 44 | 61 | 35 | 6,716 | 55 | 0 |
 | acceptance-core | phase_1 | 50% | 13 | 12 | 6 | 6 | 8 | 0 | 0 |
 | acceptance-batching | done | 100% | 0 | 0 | 404 | 404 | 0 | 0 | 0 |
 | acceptance-suppression | phase_0 | — | 6 | 6 | 0 | 0 | 1 | 1 | 2 |
 | acceptance-blast-radius | phase_0 | — | 5 | 5 | 0 | 0 | 0 | 0 | 1 |
+| acceptance-fire-patterns | phase_1 | 100% | 123 | 22 | 16 | 7 | 62 | 0 | 0 |
+| acceptance-unseen | phase_1 | 100% | 7 | 7 | 2 | 2 | 2 | 2 | 0 |
 
 A dash under readiness means **no v2 identities fired in this window**, which is stored as
 `null` and never as zero: a team cannot fail a measurement that was never taken.
@@ -92,17 +105,19 @@ with no v1 identities the derived phase is `done`.
 is one thing stuck and evaluated again and again, not a team flooding the pipeline, and it is precisely why
 `alerts` and `distinct_alerts` are always published side by side.
 
-Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R7 1/1`
-(row count / distinct-identity count).
+Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R6 4323/19`,
+`R7 1/1` (row count / distinct identity-days). R6 is stuck: those alerts were still firing
+72 hours and more before the window ended.
 
 Its panel hides a heartbeat node and anything matching `%test%`, so those alerts are its
 own written admission of what to delete — the phase-0 work list.
 
 ### fraud-detection — phase_0, mid-cleanup
 
-733 rows over 10, with a much lower flagged share than legacy-batch-jobs (154 flagged rows,
-`R1 145/1` dominating). Hygiene is visibly better; one noisy generic-message rule accounts
-for most of the volume.
+733 rows over 10, with 588 flagged rows. Most of them are R6 stuck (`R6 579/4`): a few
+alerts still firing for days. Without R6 the flagged share is much lower than
+legacy-batch-jobs (`R1 145/1`, one noisy generic-message rule, is the largest message
+finding), so message hygiene is visibly better while stuck alerts remain.
 
 ### checkout-api — phase_1, dual-run
 
