@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from src.insights.aggregate import biggest, by_application, fire_rows
+from src.insights.aggregate import biggest, by_application, fire_rows, primary_rule_counts
 from src.insights.estimate import estimate, v1_rule_key
 from src.insights.findings import key_findings
 from src.insights.model import (
@@ -17,6 +17,7 @@ from src.insights.model import (
     WeekRules,
 )
 from src.insights.summary import summarize
+from src.rules.catalogs import CORE_RULE_IDS
 
 T0 = datetime(2026, 9, 7, tzinfo=UTC)
 FORBIDDEN = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
@@ -470,3 +471,44 @@ def test_concentration_exactly_at_80_percent() -> None:
     src = inputs(alerts=alerts, schemas={"v1": totals("v1", events=100), "v2": totals("v2")})
     f = next(x for x in key_findings(src) if x.kind == "concentration")
     assert f.title == "2 of 4 v1 alerts make 80% of the events"
+
+
+# ------------------------------------------------------------------ primary rule (donut)
+
+
+def _flagged(key: str, *rules: str, schema: str = "v1") -> AlertRow:
+    return alert(key_field=key, schema=schema, quality_state="rule_flagged", core_rule_ids=rules)
+
+
+def test_primary_rule_partitions_by_the_first_rule_in_catalogue_order() -> None:
+    alerts = (
+        _flagged("a", "R4", "R1"),  # stored order does not matter: R1 comes first
+        _flagged("b", "R6"),
+        _flagged("c", "R1"),
+        _flagged("d", "R7", "R5"),
+    )
+    assert primary_rule_counts(alerts, "v1") == (("R1", 2), ("R5", 1), ("R6", 1))
+
+
+def test_primary_rule_counts_a_multi_rule_alert_once() -> None:
+    counts = primary_rule_counts((_flagged("a", "R1", "R2", "R3", "R4"),), "v1")
+    assert counts == (("R1", 1),)
+    assert sum(n for _, n in counts) == 1
+
+
+def test_primary_rule_excludes_everything_not_rule_flagged_and_other_schemas() -> None:
+    alerts = (
+        _flagged("a", "R2"),
+        alert(key_field="b", quality_state="llm_flagged", llm_principle_id="P1"),
+        alert(key_field="c", quality_state="assessed_good", readiness_rule_ids=("R8",)),
+        _flagged("d", "R3", schema="v2"),
+    )
+    assert primary_rule_counts(alerts, "v1") == (("R2", 1),)
+    assert primary_rule_counts(alerts, "v2") == (("R3", 1),)
+
+
+def test_primary_rule_omits_zeros_and_follows_the_catalogue() -> None:
+    assert primary_rule_counts((), "v1") == ()
+    every = tuple(_flagged(rid, rid) for rid in reversed(CORE_RULE_IDS))
+    assert [rid for rid, _ in primary_rule_counts(every, "v1")] == list(CORE_RULE_IDS)
+    assert CORE_RULE_IDS == ("R1", "R2", "R3", "R4", "R5", "R6", "R7")

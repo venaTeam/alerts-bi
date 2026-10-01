@@ -710,6 +710,19 @@ def test_the_summary_totals_are_the_stored_weekly_totals(
     assert "per day" not in summary and _run_id("wk3") not in summary
 
 
+def test_why_flagged_offers_bars_and_a_donut_per_schema(portal: TestClient) -> None:
+    page = portal.get(f"/teams/{TEAM}").text
+    why = page[page.index("Why alerts were flagged") : page.index("Key findings")]
+    assert why.count('type="radio"') == 2 and ">Bars</label>" in why and ">Donut</label>" in why
+    assert 'class="view-bars"' in why and 'class="view-donut"' in why
+    donut = why[why.index('class="view-donut"') :]
+    # Both v1 rule-flagged alerts carry R1 first (one also R4): one full R1 ring.
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert donut.count('<path class="slice r1"') == 1 and 'fill-rule="evenodd"' in donut
+    assert "No rule-flagged v2 alerts this week." in donut
+    assert "<polyline" not in why
+
+
 def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: TestClient) -> None:
     summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
     unseen = summary[summary.index("Not on any of your dashboards") : summary.index("Migration")]

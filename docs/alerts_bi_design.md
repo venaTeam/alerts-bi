@@ -19,7 +19,7 @@ Once an alert arrives, it lands in two places:
 * **SQL Server — "hot alerts".** Holds only alerts that are *currently active*. This is the operational surface: teams build Grafana panels that query this database, and that is what the on-call engineer actually looks at.
 * **Elasticsearch (ECK) — history.** Every alert event that ever arrived, with **3-month retention**.
 
-The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3. **Corrected 2026-10-01 (product owner):** the Grafana repeat interval is **disabled** in both v1 and v2 notification policies, so a still-firing alert is not re-sent on a timer; it should send once when it fires and once when it clears. The observed repetition (section 3.3's scale measurement) therefore comes from somewhere else, for example duplicate senders or Grafana re-sending a group, and rule 6 now treats re-sending while already firing as a finding (section 7.14). Rows against distinct alerts (section 3.3) stays the counting rule regardless of cause.
+The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3. **Corrected 2026-10-01 (product owner):** the Grafana repeat interval is **disabled** in both v1 and v2 notification policies, so a still-firing alert is not re-sent on a timer; no notification is re-sent on a timer. **Clarified the same day:** Grafana writes an Elasticsearch row on **every evaluation** of a firing rule, so the observed repetition (section 3.3's scale measurement, ~100 rows per alert per day) is evaluation cadence, not notifications. A row count therefore measures how long and how often a rule was evaluated while firing; rule 6 never judges a Grafana alert by its row count (section 7.14). Rows against distinct alerts (section 3.3) stays the counting rule regardless of cause.
 
 ### 1.2 The standardization project
 
@@ -623,7 +623,7 @@ The MVP design is settled and the MVP is built. What remains is batching validat
 
 ### 7.3 Deferred with rule 6
 
-**Resolved 2026-10-01 (section 7.14):** with the repeat interval disabled, Grafana alerts are judged by firing episodes (re-sent while firing, or open with no clear), and API alerts by an absolute rate. The original questions read: rule 6 (spam volume) is post-MVP (section 4). These move with it.
+**Resolved 2026-10-01 (section 7.14):** with the repeat interval disabled and Grafana writing a row per evaluation, Grafana alerts are judged by firing episodes (flapping fire → clear cycles, or open with no clear), and API alerts by an absolute rate. The original questions read: rule 6 (spam volume) is post-MVP (section 4). These move with it.
 
 1. **Threshold: what fire rate counts as spam?** It must differ **by schema as well as by provider** — the expected Grafana baseline is ~288 rows/day in v1 and ~2/day in v2 (section 3.3), so a single fixed threshold would flag every healthy v1 alert and no unhealthy v2 one. Likely expressed as a multiple of the expected repeat cadence rather than as an absolute count.
 2. **API-sent alerts: do they have any re-fire cadence, or are they one-shot?** Only affects the threshold above. Noted because the mock generator currently leaves API alerts on their authored cadence rather than inventing one.
@@ -895,28 +895,30 @@ fire, the biggest single source, the per-rule table with what to change, hidden 
 `unseen` alerts, migration progress and a filterable work list. v1 and v2 are never summed.
 
 **Rule 6 is a core rule from `ruleset_version` 1.1.0, judged by firing episodes.** The
-Grafana repeat interval is disabled (section 1.1), so a healthy Grafana alert sends one row
-when it fires and one when it clears. The identity's raw rows in the window are ordered by
+Grafana repeat interval is disabled and Grafana writes a row on every evaluation (section
+1.1), so a Grafana alert's row count reflects evaluation cadence and is never judged; only
+its fire → clear transitions and how long it stays open carry meaning. The identity's raw rows in the window are ordered by
 timestamp then document hash. A clear is v1 severity `clear` (code 1) or v2
 `status = resolved`. An **episode** is a run of consecutive firing rows closed by a clear;
 firing rows after the last clear form the open episode. One pattern per alert, in this
 priority:
 
 * **flapping** — at least 3 fire → clear cycles inside any rolling 24 hours.
-* **spamming** — a Grafana alert with 3 or more firing rows in one episode, so it was sent
-  again while already firing (one duplicate is tolerated); an API alert at 24 or more events
-  per 24 hours over a span of at least 6 hours.
+* **spamming** — an API (non-Grafana) alert at 24 or more events per 24 hours over a span
+  of at least 6 hours. API senders emit their own rows, so their rate is a real send rate.
+  Grafana alerts are never spamming: their rows are evaluations (section 1.1).
 * **stuck** — a Grafana alert whose last row is firing and whose open episode began at least
   72 hours before the week ends. 72 hours so a genuine day-long outage is not flagged. API
   senders often never clear, so stuck is Grafana-only.
 
-An alert that started firing before the window and sent nothing inside it has no rows in
-the week and cannot be judged; that is a limit of reading events, not of the rule.
+Because a firing Grafana rule keeps writing rows on every evaluation, an alert that started
+firing before the window still has rows throughout it; its open episode starts at its first
+row in the window, so stuck reads "open for at least 72 hours of this week".
 
 Every row of a matching identity matches R6, so the row-level allocation of section 4 is
 unchanged. R6 is a core finding, so the identity is withheld from the model (section 5.1);
 a stuck or spamming alert already has a concrete fix. The facts behind it (`clear_count`,
-`max_clear_cycles_24h`, `max_episode_firing_rows`, `open_since`) are persisted on the work-list row with the derived `fire_pattern`,
+`max_clear_cycles_24h`, `max_episode_firing_rows` (a diagnostic only), `open_since`) are persisted on the work-list row with the derived `fire_pattern`,
 so history can be re-scored if the thresholds change. Volume itself stays displayed and
 unscored (section 2).
 
@@ -960,4 +962,5 @@ rebuild rather than port, so v1 can fall while monitoring is lost.
 gain the new columns, `basis_changed` and the planning override, and a new
 `portal_rule_totals` view gives weekly per-rule totals without exposing `ruleset_version`.
 `daily_metrics.csv` and `alert_worklist.csv` gain the new columns and the scorecard's
-dashboard-visibility section shows `unseen` (`outputs.md`).
+dashboard-visibility section shows `unseen` (`outputs.md`). Migration `006_r6_episodes` adds
+`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`.

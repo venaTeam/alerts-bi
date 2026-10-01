@@ -69,8 +69,8 @@ R10_TECHNICAL_CAUSE_IMPACTS: Final = frozenset(
 
 #: R6 thresholds (design 7.14). Catalogue constants under ``RULESET_VERSION``, never
 #: environment settings: changing one changes what a past number meant. R6 judges firing
-#: EPISODES, not a repeat interval: Grafana repeat is disabled on both schemas, so a firing
-#: alert sends once when it fires and once when it clears.
+#: EPISODES, not row counts: Grafana writes a row on every evaluation and its repeat interval
+#: is disabled, so a Grafana row count reflects evaluation frequency, not notifications.
 #: Flapping: fire -> clear cycles inside any rolling window of this length (design 7.14).
 R6_FLAP_WINDOW: Final = timedelta(hours=24)
 #: Flapping: at least this many cycles inside the window, on any provider.

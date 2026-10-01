@@ -216,7 +216,15 @@ def test_input_order_does_not_change_the_facts() -> None:
 def test_a_clear_at_the_same_instant_as_a_firing_row_closes_the_episode() -> None:
     at = WINDOW_END - timedelta(hours=96)
     firing = v1_row(**{"@timestamp": _iso(at), "severity": 5})
-    clear = v1_row(**{"@timestamp": _iso(at), "severity": 1})
+    # The clear must hash BELOW the firing row, so only the is_clear sort key (not the hash
+    # tie-break) can place it after the firing row.
+    clear = next(
+        row
+        for i in range(200)
+        if (row := v1_row(**{"@timestamp": _iso(at), "severity": 1, "message": f"m{i}"})).doc_hash
+        < firing.doc_hash
+    )
+    assert clear.doc_hash < firing.doc_hash
     for rows in ([firing, clear], [clear, firing]):
         facts = _facts(rows)
         assert facts.open_since is None

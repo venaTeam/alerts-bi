@@ -285,9 +285,9 @@ def _render_volume(rollup: Mapping[str, Any]) -> str:
 
     return f"""<h2>Volume</h2>
 <p class="sub">Volume is displayed, not scored. No threshold declares an alert rate bad.
-Row counts are never compared across schemas: one alert moving from v1 to v2 divides its
-row count reflects how often rows are written, not how many problems it has. Grafana
-writes a row on every evaluation, so alerts is evaluation load, not notifications.</p>
+Row counts are never compared across schemas.</p>
+<p class="sub">A row count reflects how often rows are written. Grafana writes one on every
+evaluation, so alerts is evaluation load, not notifications.</p>
 {block("v1 (Appchi)", rollup["v1"])}
 {block("v2 (Appchi V2)", rollup["v2"])}"""
 
