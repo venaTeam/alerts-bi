@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -322,10 +323,31 @@ def test_the_shared_widgets_render_on_the_admin_surface_with_rule_links_here() -
 
 
 def test_the_sort_is_kept_by_the_pager_and_offered_in_the_form() -> None:
-    html = summary_page(
-        "alice",
-        _summary(filters=WorklistFilter(sort="application", page=2)),
-        shared="",
-    )
+    two_pages = replace(_summary(filters=WorklistFilter(sort="application", page=2)), total=60)
+    html = summary_page("alice", two_pages, shared="")
     assert '<option value="application" selected>' in html
     assert "sort=application" in html and "page=1" in html
+
+
+def test_the_effort_override_is_read_at_the_portals_two_decimal_precision() -> None:
+    entry = read_snapshot('{"planning":{"v1_rule_effort_days":1.23456}}')
+    assert entry.v1_rule_effort_days == 1.23
+
+
+def test_a_page_past_the_end_shows_the_last_page() -> None:
+    html = summary_page("alice", _summary(filters=WorklistFilter(page=9)), shared="")
+    assert "Showing 1&ndash;2 of 2" in html
+    assert '<span class="button" aria-disabled="true">Previous</span>' in html
+    assert '<span class="button" aria-disabled="true">Next</span>' in html
+
+
+def test_the_picker_offers_the_open_run_even_when_it_is_older_than_those_listed() -> None:
+    summary = _summary()
+    older = replace(summary, runs=[run(run_id="3" * 64)])
+    html = summary_page("alice", older, shared="")
+    assert f'<option value="{"1" * 64}" selected>' in html and f'value="{"3" * 64}"' in html
+
+
+def test_the_rule_select_always_offers_the_active_rule() -> None:
+    html = summary_page("alice", _summary(filters=WorklistFilter(rule="R9")), shared="")
+    assert '<option value="R9" selected>R9</option>' in html

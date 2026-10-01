@@ -101,6 +101,8 @@ existing `show` / `schema` / `page`.
 - No new copy may contain the portal's forbidden substrings (`per day`, `run_id`, `registry`,
   `ruleset`, `prompt`, `model version`).
 
+> **Amended 2026-10-01:** the Grafana repeat interval is disabled in v1 and v2, so R6 is judged by firing episodes, not by a repeat interval. Design section 7.14 is authoritative; the cadence definitions below are superseded.
+
 ## 5. R6 — stuck, spamming and flapping (core rule)
 
 R6 judges **one alert's firing pattern against its schema's repeat interval**. It never
