@@ -898,7 +898,8 @@ fire, the biggest single source, the per-rule table with what to change, hidden 
 Grafana repeat interval is disabled and Grafana writes a row on every evaluation (section
 1.1), so a Grafana alert's row count reflects evaluation cadence and is never judged; only
 its fire → clear transitions and how long it stays open carry meaning. The identity's raw rows in the window are ordered by
-timestamp then document hash. A clear is v1 severity `clear` (code 1) or v2
+timestamp, then firing before clear at the same instant (so a same-instant clear closes
+the episode and never invents stuck), then document hash. A clear is v1 severity `clear` (code 1) or v2
 `status = resolved`. An **episode** is a run of consecutive firing rows closed by a clear;
 firing rows after the last clear form the open episode. One pattern per alert, in this
 priority:
