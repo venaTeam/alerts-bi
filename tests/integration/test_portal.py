@@ -24,6 +24,7 @@ from src.db.connection import connect
 from src.db.migrate import reset_test_database
 from src.db.reader import grant_reader, read_only_problems
 from src.db.repositories import PersistencePayload, RunIsPublished, persist_run
+from src.insights import DailyPoint
 from src.portal.app import build_portal
 from src.portal.charts import TIMES
 from src.portal.explain import EN_DASH
@@ -395,6 +396,49 @@ def test_the_reader_sees_only_published_weeks(reader: SqlConfig) -> None:
         }
     assert visible == {_run_id("wk1"), _run_id("wk2"), _run_id("wk3")}
     assert alerts == visible
+
+
+def test_the_daily_view_holds_published_weeks_only_with_the_stored_values(
+    reader: SqlConfig,
+) -> None:
+    columns = (
+        "alert_schema, snapshot_date, covered_hours, distinct_alerts, flagged_by_rule_distinct"
+    )
+    with connect(CONFIG.sql, DB) as owner:
+        applied = owner.query_one(
+            "SELECT version FROM schema_migrations WHERE version = '007_portal_daily'", {}
+        )
+        stored = owner.query(
+            f"SELECT {columns} FROM daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert applied is not None, "migration 007 applied"
+    with connect(reader, DB) as db:
+        visible = {
+            str(row["run_id"])
+            for row in db.query("SELECT DISTINCT run_id FROM portal_daily_metrics", {})
+            if str(row["run_id"]).startswith(("wk", "overlap", "unpub"))
+        }
+        viewed = db.query(
+            f"SELECT {columns} FROM portal_daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert visible == {_run_id("wk1"), _run_id("wk2"), _run_id("wk3")}
+    assert stored and viewed == stored
+    loaded = load_portal_summary_daily(reader, _run_id("wk3"))
+    assert [(p.alert_schema, p.day) for p in loaded] == [
+        (str(row["alert_schema"]), row["snapshot_date"]) for row in stored
+    ]
+    assert [p.rule_flagged_distinct for p in loaded] == [
+        int(row["flagged_by_rule_distinct"]) for row in stored
+    ]
+
+
+def load_portal_summary_daily(reader: SqlConfig, run_id: str) -> tuple[DailyPoint, ...]:
+    with connect(reader, DB) as db:
+        return load_portal_summary(db, TEAM, run_id).daily
 
 
 def test_the_episode_facts_reach_the_store_and_the_alerts_view(reader: SqlConfig) -> None:
