@@ -292,7 +292,7 @@ SQL and nowhere else.
 ## 10. The review portal
 
 The GET-only portal (design section 7.10) is not a run output: it renders **published**
-weeks from the store through four views using the application's `SQL_*` login. It is
+weeks from the store through six views using the application's `SQL_*` login. It is
 described here because its numbers are the ones most easily misread against the scorecard's.
 
 | View | One row per | Holds |
@@ -301,6 +301,8 @@ described here because its numbers are the ones most easily misread against the 
 | `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention |
 | `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, and `attention_rank` |
 | `portal_decisions` | human decision made on a published week | finding id, `pending` / `confirmed` / `dismissed`, note, time, operator |
+| `portal_rule_totals` | published week, schema and rule | weekly matched events and alerts per rule, for the team summary |
+| `portal_daily_metrics` | published week, schema and UTC day bucket | covered hours, distinct alerts and rule-flagged distinct alerts, for the summary slides' day-by-day charts |
 
 **The portal's distinct count is a weekly total, and the scorecard's is a daily rate.**
 Portal: distinct `application + key_field` identities in the whole 168-hour window, which is

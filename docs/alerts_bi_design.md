@@ -966,4 +966,4 @@ gain the new columns, `basis_changed` and the planning override, and a new
 `portal_rule_totals` view gives weekly per-rule totals without exposing `ruleset_version`.
 `daily_metrics.csv` and `alert_worklist.csv` gain the new columns and the scorecard's
 dashboard-visibility section shows `unseen` (`outputs.md`). Migration `006_r6_episodes` adds
-`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`.
+`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`. Migration `007_portal_daily` adds the `portal_daily_metrics` view (published weeks only: per schema and UTC day bucket, covered hours, distinct alerts and rule-flagged distinct alerts) for the summary slides' day-by-day charts.
