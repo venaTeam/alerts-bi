@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from src.admin import pages, queries
+from src.admin import pages, queries, summary
 from src.admin.auth import csrf_token, identity, same_site, valid_csrf
 from src.config.admin import AdminSettings
 from src.db.connection import Database, connect
@@ -51,6 +51,11 @@ _MAX_FORM = 64 * 1024
 
 Page = Annotated[int, Query(ge=1, le=100_000)]
 Message = Annotated[str | None, Query(max_length=500)]
+RunId = Annotated[str | None, Query(max_length=128)]
+StateFilter = Annotated[str, Query(pattern="^(" + "|".join(summary.STATES) + ")$")]
+SchemaFilter = Annotated[str, Query(pattern="^(all|v1|v2)$")]
+RuleFilter = Annotated[str, Query(pattern=summary.RULE_PATTERN)]
+SortOrder = Annotated[str, Query(pattern="^(" + "|".join(summary.SORTS) + ")$")]
 
 
 def build_admin(settings: AdminSettings) -> FastAPI:
@@ -192,6 +197,29 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 error or done,
                 bool(error),
             )
+        )
+
+    @app.get("/teams/{team_id}/summary", response_class=HTMLResponse)
+    def team_summary(
+        request: Request,
+        team_id: str,
+        run_id: RunId = None,
+        state: StateFilter = "all",
+        schema: SchemaFilter = "all",
+        rule: RuleFilter = "",
+        sort: SortOrder = "events",
+        page: Page = 1,
+    ) -> HTMLResponse:
+        filters = summary.WorklistFilter(
+            state=state, schema=schema, rule=rule, sort=sort, page=page
+        )
+        with database() as db:
+            try:
+                loaded = summary.load_admin_summary(db, team_id, run_id, filters)
+            except summary.SummaryNotFound as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+        return HTMLResponse(
+            summary.summary_page(user_of(request), loaded, shared=summary.shared_sections(loaded))
         )
 
     @app.get("/runs/{run_id}/scorecard", response_class=HTMLResponse)

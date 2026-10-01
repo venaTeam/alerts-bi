@@ -24,6 +24,8 @@ __all__ = [
     "dashboard_page",
     "error_page",
     "findings_page",
+    "layout",
+    "summary_link",
     "team_page",
 ]
 
@@ -43,6 +45,14 @@ form.inline label{font-size:12px;color:var(--ink-2);display:inline-flex;gap:4px;
 .state{font-size:12px;font-weight:600}
 .state.published{color:var(--good)} .state.held{color:var(--rule)} .state.none{color:var(--muted)}
 details.act summary{cursor:pointer;font-size:12.5px;color:var(--focus)}
+.picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.picker select{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;max-width:100%}
+.runstrip{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12.5px}
+p.links{margin:0;font-size:13px}
+ul.panels{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+pre.sql{margin:4px 0 0;padding:10px 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+mark.sup{background:var(--rule-soft);color:var(--rule);border-radius:3px;padding:0 2px}
+mark.sup.unmeasured{background:var(--ready-soft);color:var(--ready)}
 """.strip()
 
 
@@ -51,7 +61,7 @@ STYLESHEET = PORTAL_STYLESHEET + "\n" + ADMIN_CSS
 STYLESHEET_PATH = f"/assets/admin-{sha256(STYLESHEET.encode()).hexdigest()[:12]}.css"
 
 
-def _layout(title: str, user: str, body: str, flash: str | None = None, error: bool = False) -> str:
+def layout(title: str, user: str, body: str, flash: str | None = None, error: bool = False) -> str:
     banner = f'<p class="flash{" error" if error else ""}">{h(flash)}</p>' if flash else ""
     return (
         "<!doctype html>\n"
@@ -72,7 +82,7 @@ def _layout(title: str, user: str, body: str, flash: str | None = None, error: b
 
 
 def error_page(status: int, message: str, user: str = "") -> str:
-    return _layout(
+    return layout(
         str(status),
         user or "nobody",
         f'<section class="intro"><div class="eyebrow">{status}</div><h1>{h(message)}</h1>'
@@ -82,6 +92,12 @@ def error_page(status: int, message: str, user: str = "") -> str:
 
 def _team_url(team_id: str) -> str:
     return "/teams/" + quote(team_id, safe="")
+
+
+def summary_link(team_id: str, run_id: str | None = None) -> str:
+    """The Summary page of a team, for one run or (without ``run_id``) its latest."""
+    path = _team_url(team_id) + "/summary"
+    return path + ("?" + urlencode({"run_id": run_id}) if run_id else "")
 
 
 def _when(value: Any) -> str:
@@ -109,7 +125,8 @@ def dashboard_page(
         rows.append(
             "<tr>"
             f'<td><a class="team" href="{h(_team_url(team_id))}">{h(name)}</a>'
-            f'<div class="sub mono">{h(team_id)}</div></td>'
+            f'<div class="sub mono">{h(team_id)}</div>'
+            f'<div class="sub"><a href="{h(summary_link(team_id))}">Summary</a></div></td>'
             f"<td>{'weekly' if enrolled else 'manual only'}</td>"
             f"<td>{h(_when(info.get('latest')))}</td>"
             f'<td class="num">{info.get("weeks", 0)}</td>'
@@ -126,7 +143,7 @@ def dashboard_page(
         "<th>Last schedule outcome</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></section>"
     )
-    return _layout("Teams", user, body, flash, error)
+    return layout("Teams", user, body, flash, error)
 
 
 def _hidden(token: str) -> str:
@@ -177,6 +194,11 @@ def team_page(
         else:
             state = f'<span class="state held">{h(run["status"])}</span>'
             action = ""
+        summary = (
+            f'<a href="{h(summary_link(team_id, run_id))}">Summary</a>'
+            if run["status"] == "completed"
+            else ""
+        )
         unassessed = int(run["unassessed"] or 0)
         model = h(run["model_version"] or "off") + (
             f'<div class="sub">{unassessed} not assessed</div>' if unassessed else ""
@@ -187,7 +209,7 @@ def team_page(
             f'<td class="mono">{h(run_id[:16])}</td>'
             f"<td>{model}</td>"
             f"<td>{state}</td>"
-            f'<td><a href="{h(base)}/scorecard">Scorecard</a> {action}</td>'
+            f'<td><a href="{h(base)}/scorecard">Scorecard</a> {summary} {action}</td>'
             "</tr>"
         )
     log_rows = "".join(
@@ -212,7 +234,7 @@ def team_page(
         f"<tbody>{log_rows or '<tr><td colspan=4>The schedule has not run for this team.</td></tr>'}"
         "</tbody></table></div></section>"
     )
-    return _layout(name, user, body, flash, error)
+    return layout(name, user, body, flash, error)
 
 
 def findings_page(
@@ -297,4 +319,4 @@ def findings_page(
         f'<ul class="wl">{"".join(items) or "<li class=empty>No findings this week.</li>"}</ul>'
         f'<div class="pager"><span>Page {page} of {pages}</span><span class="links">{"".join(nav)}</span></div>'
     )
-    return _layout(f"Findings · {run['team_display_name']}", user, body, flash, error)
+    return layout(f"Findings · {run['team_display_name']}", user, body, flash, error)
