@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 from src.report.csv_export import (
+    DAILY_METRIC_HEADERS,
+    WORKLIST_HEADERS,
     alert_worklist_csv,
     csv_cell,
     daily_metrics_csv,
@@ -117,6 +119,84 @@ def test_the_work_list_keeps_full_values_including_a_long_justification() -> Non
 def test_a_work_list_message_containing_a_comma_stays_one_field() -> None:
     csv = alert_worklist_csv([sample_finding(message="cart failed, retries exhausted")])
     assert '"cart failed, retries exhausted"' in csv
+
+
+# ------------------------------------------------------ team-summary columns
+
+
+def test_daily_metrics_headers_end_with_the_unseen_pair_after_suppression() -> None:
+    assert DAILY_METRIC_HEADERS[-3:] == (
+        "suppression_unmeasured",
+        "unseen",
+        "unseen_unmeasured",
+    )
+    assert len(DAILY_METRIC_HEADERS) == 28
+
+
+def test_worklist_headers_end_with_the_r6_facts_and_unseen() -> None:
+    assert WORKLIST_HEADERS[-4:] == (
+        "clear_count",
+        "max_clear_cycles_24h",
+        "fire_pattern",
+        "unseen",
+    )
+    assert len(WORKLIST_HEADERS) == 25
+
+
+def test_a_null_unseen_is_an_empty_daily_cell_not_zero() -> None:
+    line = daily_metrics_csv([sample_daily(unseen=None, unseen_unmeasured=None)]).split("\r\n")[1]
+    assert line.endswith(",0,,"), line
+
+
+def test_a_stored_unseen_count_is_written() -> None:
+    line = daily_metrics_csv([sample_daily(unseen=3, unseen_unmeasured=1)]).split("\r\n")[1]
+    assert line.endswith(",0,3,1"), line
+
+
+def test_worklist_writes_the_r6_facts_and_renders_booleans_as_true_false() -> None:
+    rows = alert_worklist_csv(
+        [
+            sample_finding(
+                clear_count=2, max_clear_cycles_24h=3, fire_pattern="flapping", unseen=True
+            ),
+            sample_finding(clear_count=0, max_clear_cycles_24h=0, fire_pattern=None, unseen=None),
+            sample_finding(unseen=False),
+        ]
+    ).split("\r\n")
+    assert rows[1].endswith(",2,3,flapping,true")
+    assert rows[2].endswith(",0,0,,")
+    assert rows[3].endswith(",false")
+
+
+def test_the_rollup_sums_unseen_and_keeps_none_when_no_bucket_has_a_panel() -> None:
+    both = rollup_schema([sample_daily(unseen=2), sample_daily(unseen=1, unseen_unmeasured=4)])
+    assert both["unseen"] == 3
+    assert both["unseen_unmeasured"] == 4
+    none = rollup_schema([sample_daily(unseen=None), sample_daily(unseen=None)])
+    assert none["unseen"] is None
+    mixed = rollup_schema([sample_daily(unseen=None), sample_daily(unseen=5)])
+    assert mixed["unseen"] == 5
+
+
+def test_the_visibility_section_shows_unseen_when_a_panel_was_supplied() -> None:
+    html = scorecard(daily=[sample_daily(unseen=3, unseen_unmeasured=1)])
+    assert "Unseen (rows no panel shows)" in html
+    assert "Unseen unmeasured (leaves)" in html
+    assert "no panel supplied" not in html
+
+
+def test_the_visibility_section_says_no_panel_supplied_rather_than_zero() -> None:
+    html = scorecard(daily=[sample_daily(unseen=None)])
+    assert "Unseen (rows no panel shows)" in html
+    assert "no panel supplied" in html
+
+
+def test_the_limitations_say_r6_flags_one_alert_never_team_volume() -> None:
+    flat = " ".join(scorecard().split())
+    assert (
+        "R6 flags one alert's firing pattern against its repeat interval; it never "
+        "scores a team's total volume." in flat
+    )
 
 
 # -------------------------------------------------------------- HTML escaping
