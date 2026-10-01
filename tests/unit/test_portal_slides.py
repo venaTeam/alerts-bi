@@ -463,13 +463,31 @@ def test_not_consumed_never_turns_a_missing_dashboard_into_zero() -> None:
     assert "<b>0</b>" not in v2 and "events" not in v2 and "filtered out" not in v2
 
     no_panel = {
-        "v1": schema_totals("v1", unseen=None, unseen_alerts=None),
+        "v1": schema_totals("v1", suppressed=0, unseen=None, unseen_alerts=None),
         "v2": schema_totals("v2"),
     }
-    nc = block(frame(slides(build_summary(schemas=no_panel)), 2), "Not consumed by your dashboards")
+    unmeasured = with_rules(build_summary(schemas=no_panel), ())
+    nc = block(frame(slides(unmeasured), 2), "Not consumed by your dashboards")
     v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
     assert "<b>—</b>" in v1 and "not measured this week" in v1 and "events" not in v1
-    assert "dashboard supplied" not in slides(build_summary(schemas=no_panel))
+    assert "dashboard supplied" not in slides(unmeasured)
+
+
+def test_not_consumed_keeps_the_suppression_of_a_week_older_than_unseen() -> None:
+    """Suppression predates ``unseen``: an older week whose panels filtered alerts keeps them."""
+    older = {
+        "v1": schema_totals("v1", suppressed=120, unseen=None, unseen_alerts=None),
+        "v2": schema_totals("v2"),
+    }
+    rules = (RuleTotal("v1", "R5", 120, 4),)
+    nc = block(
+        frame(slides(with_rules(build_summary(schemas=older), rules)), 2),
+        "Not consumed by your dashboards",
+    )
+    v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
+    assert '"sl-chip v1">v1</span><b>4</b></p>' in v1
+    assert "<p>120 events</p>" in v1
+    assert '<span class="sl-na">not measured this week</span>' in v1
 
 
 def test_not_consumed_reads_the_r5_alerts_of_its_own_schema_only() -> None:
