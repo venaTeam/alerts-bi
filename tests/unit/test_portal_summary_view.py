@@ -386,10 +386,11 @@ def test_the_threshold_legend_reads_the_catalogue() -> None:
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
     text = re.sub(r"<[^>]+>", "", fire)
     assert (
-        "Stuck: still firing, with firing rows spanning "
-        f"\u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h and no clear"
+        "Stuck: kept firing with no clear for "
+        f"\u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h, from its first to its last "
+        "firing row"
     ) in text
-    assert "Stuck: still firing, with firing rows spanning \u226572 h and no clear" in text
+    assert "still firing" not in text
     assert "week ends" not in text, "stuck no longer measures to the end of the week"
     assert "open for is the span of the firing events since the last clear" in text
     assert "Spamming: an API alert at \u226524 events per 24 h over \u22656 h" in text

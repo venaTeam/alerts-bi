@@ -101,7 +101,7 @@ existing `show` / `schema` / `page`.
 - No new copy may contain the portal's forbidden substrings (`per day`, `run_id`, `registry`,
   `ruleset`, `prompt`, `model version`).
 
-> **Amended 2026-10-01:** the Grafana repeat interval is disabled in v1 and v2, so R6 is judged by firing episodes, not by a repeat interval. Design section 7.14 is authoritative; the cadence definitions below are superseded. **Clarified the same day:** Grafana writes an ES row on every evaluation, so a Grafana row count is evaluation cadence; spamming applies to API alerts only, and `max_episode_firing_rows` is a stored diagnostic.
+> **Amended 2026-10-01:** the Grafana repeat interval is disabled in v1 and v2, so R6 is judged by firing episodes, not by a repeat interval. Design section 7.14 is authoritative; the cadence definitions below are superseded. **Clarified the same day:** Grafana writes an ES row on every evaluation, so a Grafana row count is evaluation cadence; spamming applies to API alerts only, and `max_episode_firing_rows` is a stored diagnostic. **Amended again after the final review (product owner):** stuck is a Grafana alert whose last row is firing and whose open episode's firing rows span at least 72 hours, from its first to its last firing row; it is never measured to the end of the week, so an alert that went silent is not stuck. Where this section and design 7.14 differ, 7.14 wins.
 
 ## 5. R6 — stuck, spamming and flapping (core rule)
 

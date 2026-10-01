@@ -102,7 +102,8 @@ FIRE_THRESHOLDS = (
     (
         "stuck",
         "Stuck",
-        f"still firing, with firing rows spanning \u2265{_hours(R6_STUCK_OPEN)} h and no clear",
+        f"kept firing with no clear for \u2265{_hours(R6_STUCK_OPEN)} h, from its first to its "
+        "last firing row",
     ),
     (
         "spamming",

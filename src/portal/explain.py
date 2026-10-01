@@ -60,10 +60,11 @@ def _text(value: Any) -> str:
 _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
     # pattern: (title, next step, what the pattern means)
     "stuck": (
-        "Stuck: still firing with no clear for days",
+        "Stuck: kept firing with no clear for days",
         "Fix the condition or threshold so the alert clears once the problem is handled; "
         "silence or delete an alert nobody acts on.",
-        "Its last event was still firing, and its firing events had run for days without a clear.",
+        "It kept firing without a clear for at least 72 hours, from its first to its last firing "
+        "row in the week.",
     ),
     "spamming": (
         "Spamming: sent again while already firing",
