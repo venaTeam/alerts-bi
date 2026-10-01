@@ -61,6 +61,7 @@ __all__ = [
     "day_by_day",
     "highlight_panel_sql",
     "load_admin_summary",
+    "measurement_basis",
     "read_snapshot",
     "rule_totals",
     "schema_totals",
@@ -264,14 +265,52 @@ def rule_totals(
     )
 
 
+def _fragment(value: Any) -> str | None:
+    """A JSON array or object as compact text, which is what SQL Server's ``JSON_QUERY``
+    returns from a snapshot ``snapshot_team_entry`` wrote compactly; ``None`` otherwise."""
+    if isinstance(value, list | dict):
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    return None
+
+
+def _scalar(value: Any) -> str | None:
+    """A JSON scalar as ``JSON_VALUE`` returns it; ``None`` for null, absent or a container."""
+    if value is None or isinstance(value, list | dict):
+        return None
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def measurement_basis(snapshot: Any) -> tuple[str | None, str | None, str | None]:
+    """What in a team's stored registry entry changes how its alerts are measured: its v1
+    operators, its v2 operator and its panels (SQL and variables). Its display name, planning
+    override and weekly enrolment do not, and neither does any other team's entry, so
+    enrolling another team (which bumps ``registry_version``) changes nothing here.
+
+    ``portal_reviews`` (migration 008) compares exactly these three values, so a reader and
+    an operator see the same lookback. An unreadable snapshot has none of them."""
+    try:
+        raw = json.loads(snapshot) if isinstance(snapshot, str) else None
+    except ValueError:
+        raw = None
+    if not isinstance(raw, dict):
+        return (None, None, None)
+    return (
+        _fragment(raw.get("v1_operators")),
+        _fragment(raw.get("panels")),
+        _scalar(raw.get("v2_operator")),
+    )
+
+
 def basis_changes(weeks: Sequence[Mapping[str, Any]]) -> list[bool]:
-    """Whether each published week was measured under a different ruleset or registry than
-    the one before it; the first never was. ``portal_reviews.basis_changed`` says the same."""
+    """Whether each published week was measured under a different ruleset, or a different
+    :func:`measurement_basis` of the team's own registry entry, than the one before it; the
+    first never was. ``portal_reviews.basis_changed`` says the same."""
+    bases = [measurement_basis(week["registry_entry_snapshot"]) for week in weeks]
     return [
         index > 0
         and (
             week["ruleset_version"] != weeks[index - 1]["ruleset_version"]
-            or week["registry_version"] != weeks[index - 1]["registry_version"]
+            or bases[index] != bases[index - 1]
         )
         for index, week in enumerate(weeks)
     ]
@@ -398,7 +437,7 @@ def _published_history(db: Database, team_id: str, until: datetime) -> tuple[Wee
     """The team's currently published weeks up to ``until``, oldest first, with their v1
     rules. ``basis_changed`` is computed over every published week, like the portal view."""
     weeks = db.query(
-        "SELECT p.run_id, p.window_end, r.ruleset_version, r.registry_version "
+        "SELECT p.run_id, p.window_end, r.ruleset_version, r.registry_entry_snapshot "
         "FROM review_publications AS p JOIN runs AS r ON r.run_id = p.run_id "
         "WHERE p.team_id = :team_id AND p.withdrawn_at IS NULL AND r.status = 'completed' "
         "ORDER BY p.window_end ASC, p.publication_id ASC",
