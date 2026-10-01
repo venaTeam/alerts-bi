@@ -33,6 +33,7 @@ PORTAL_VIEWS: Final = (
     "portal_schema_totals",
     "portal_alerts",
     "portal_decisions",
+    "portal_rule_totals",
 )
 
 #: Every table the portal must be unable to touch, directly.

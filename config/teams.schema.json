@@ -61,6 +61,18 @@
               "description": "When true, `alerts-bi weekly` runs and publishes this team's review for every Monday-to-Monday UTC week (design section 7.11). Absent means false."
             }
           }
+        },
+        "planning": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "v1_rule_effort_days": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 60,
+              "description": "Working days to rebuild one v1 alert rule in the v2 schema, for the time-to-v2 effort figure (team summary spec section 7.2). Absent means the default in src.config.planning."
+            }
+          }
         }
       }
     },

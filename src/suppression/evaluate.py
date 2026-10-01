@@ -89,6 +89,11 @@ class SuppressionResult:
     unmeasured_leaves: int
     interpretations: list[PanelInterpretation]
     notes: list[str]
+    unseen_row_ids: set[int] | None = None
+    """``id()`` of each row no panel shows through identity narrowing, disjoint from
+    ``suppressed_row_ids``. None when the schema has no supplied panel (spec section 6)."""
+    unseen_unmeasured: int = 0
+    """Identity leaves that could not be evaluated (OR-nested or unresolved variable)."""
 
 
 def like_to_regex(pattern: str) -> re.Pattern[str]:

@@ -313,6 +313,9 @@ def execute_run(
                     "suppression_unmeasured": (
                         suppression[schema].unmeasured_leaves if index == 0 else 0
                     ),
+                    # Filled by the `unseen` evaluation (spec section 6); NULL until then.
+                    "unseen": None,
+                    "unseen_unmeasured": None,
                 }
             )
 
@@ -528,4 +531,8 @@ def _build_finding_row(
             if state == "unassessed"
             else None
         ),
+        "clear_count": identity.clear_count,
+        "max_clear_cycles_24h": identity.max_clear_cycles_24h,
+        "fire_pattern": identity.fire_pattern,
+        "unseen": None,
     }

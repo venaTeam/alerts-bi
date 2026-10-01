@@ -74,6 +74,12 @@ class EvaluatedIdentity:
     llm_eligible: bool
     present_dates: set[str]
     """UTC dates this identity appears on."""
+    clear_count: int = 0
+    """Rows that clear the alert: v1 severity ``clear``, v2 ``status = resolved`` (R6 fact)."""
+    max_clear_cycles_24h: int = 0
+    """Most fire -> clear cycles inside any rolling 24 hours (R6 fact)."""
+    fire_pattern: str | None = None
+    """``stuck``, ``spamming`` or ``flapping`` when R6 matched, else None."""
 
 
 @dataclass(slots=True)
