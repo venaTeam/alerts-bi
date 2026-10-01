@@ -330,6 +330,14 @@ def test_the_admin_summary_renders_the_shared_widgets(client: TestClient) -> Non
     assert "<script" not in page and " style=" not in page
 
 
+def test_the_admin_summary_ends_with_two_presentation_slides(client: TestClient) -> None:
+    page = client.get(f"/teams/{TEAM}/summary?run_id={RUN0}", headers=ALICE).text
+    slides = page[page.index(">Presentation</h3>") : page.index('id="days"')]
+    assert slides.count('<section class="slide ') == 2
+    assert "stands</h4>" in slides and "What to fix</h4>" in slides
+    assert RUN0 not in slides, "the slides carry no run id on either surface"
+
+
 def test_the_work_list_sorts_by_events_or_application(client: TestClient) -> None:
     base = f"/teams/{TEAM}/summary?run_id={RUN0}&schema=v1"
     by_app = client.get(base + "&sort=application", headers=ALICE).text

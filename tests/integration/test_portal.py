@@ -691,6 +691,15 @@ def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: Tes
     assert unseen.count("No dashboard supplied") == 2, "no panel for either schema"
 
 
+def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> None:
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    slides = summary[summary.index(">Presentation</h3>") :]
+    assert slides.count('<section class="slide ') == 2
+    assert "stands</h4>" in slides and "What to fix</h4>" in slides
+    assert "week ending 30 Aug 2026 · Alerts BI" in slides
+    assert _run_id("wk3") not in slides and "href=" not in slides
+
+
 def test_the_work_list_filters_by_state_and_rule(portal: TestClient) -> None:
     page = portal.get(
         f"/teams/{TEAM}", params={"show": "all", "state": "rule_flagged", "rule": "R1"}
