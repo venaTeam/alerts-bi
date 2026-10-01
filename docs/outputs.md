@@ -183,7 +183,7 @@ One row per identity. This is the deliverable a team acts on.
 | `max_clear_cycles_24h` | The most fire-then-clear cycles inside any rolling 24 hours; a cycle is a clear row immediately preceded by a non-clear row. `0` when none |
 | `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
 | `max_episode_firing_rows` | A stored diagnostic: the most firing rows in any one episode (it decides nothing, because a Grafana row count reflects evaluation frequency). An episode is a run of consecutive non-clear rows; a clear row closes it. `0` when the identity has no firing rows |
-| `open_since` | When the open episode began: the first firing row after the last clear, set only when the identity's **last** row is firing. Empty when it ended on a clear |
+| `open_since` | When the open episode began: the first firing row after the last clear, set only when the identity's **last** row is firing. Empty when it ended on a clear. `last_seen − open_since` is how long the open episode's firing rows span; `stuck` needs at least 72 hours of it on a Grafana alert, measured to the last firing row and never to the window's end |
 | `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 
 `clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows`
