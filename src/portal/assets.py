@@ -187,7 +187,7 @@ details.tech[open] summary{margin-bottom:8px}
 .bars .bv b{color:var(--ink)}
 @media (max-width:560px){.bars li{grid-template-columns:1fr}.bars .bv{text-align:left}}
 svg.hbar{width:100%;height:8px;display:block}
-svg.hbar .track,svg.ratio .track{fill:var(--surface-2);stroke:var(--line)}
+svg.hbar .track{fill:var(--surface-2);stroke:var(--line)}
 .f-rule{fill:var(--rule)} .f-ready{fill:var(--ready)} .f-model{fill:var(--model)} .f-v1{fill:var(--v1)} .f-v2{fill:var(--v2)}
 ol.kf{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 ol.kf li{border-left:3px solid var(--line-strong);padding:2px 0 2px 12px;display:flex;flex-direction:column;gap:4px}
@@ -203,10 +203,6 @@ table.grid td.alert{display:flex;flex-direction:column;gap:2px;min-width:220px}
 table.grid td.alert .msg,ul.listed .msg{font-size:13px}
 table.grid td.step{color:var(--ink-2);min-width:220px}
 a.chip.rule{text-decoration:none}
-.rate{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-svg.ratio{width:120px;height:18px;display:block;overflow:visible}
-svg.ratio .rtick{stroke:var(--ink-2);stroke-width:.8}
-svg.ratio text{font-family:var(--sans);font-size:6.5px;fill:var(--muted)}
 .pill{display:inline-block;font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line)}
 .pill.stuck{background:var(--ready-soft);color:var(--ready);border-color:transparent}
 .pill.spamming{background:var(--rule-soft);color:var(--rule);border-color:transparent}

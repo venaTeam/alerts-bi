@@ -121,6 +121,8 @@ _FINDING_COLUMNS = (
     "max_clear_cycles_24h",
     "fire_pattern",
     "unseen",
+    "max_episode_firing_rows",
+    "open_since",
 )
 
 _BATCH_ATTEMPT_COLUMNS = (
@@ -210,7 +212,9 @@ def _insert_statement(table: str, columns: Sequence[str]) -> str:
 
 #: Columns whose absence means a counted zero rather than NULL: the R6 facts are counts, and
 #: a row built before they existed simply observed no clears.
-_ZERO_DEFAULTS: Final = frozenset({"clear_count", "max_clear_cycles_24h"})
+_ZERO_DEFAULTS: Final = frozenset(
+    {"clear_count", "max_clear_cycles_24h", "max_episode_firing_rows"}
+)
 
 
 def _project(rows: Sequence[dict[str, Any]], columns: Sequence[str]) -> list[dict[str, Any]]:

@@ -162,7 +162,7 @@ R2  Informational / heartbeat message ("that's a log, not an alert")
 R3  Placeholder or missing required identity/ownership metadata
 R4  Grafana alert missing its alert-rule link
 R5  Self-suppressed: the team filters this alert out of its own panel
-R6  Firing pattern: stuck, spamming or flapping against the schema's repeat interval (deterministic; R6 alerts never reach you)
+R6  Firing pattern: stuck, spamming or flapping episodes (deterministic; R6 alerts never reach you)
 R7  Invalid time_created: later than receipt, or more than 24 hours before it
 R8  Missing or unusable impact (v2)
 R9  Missing or invalid absolute HTTP(S) runbook_url (v2)

@@ -25,10 +25,9 @@ from src.insights import (
     TeamSummary,
     WeekRules,
 )
-from src.portal.charts import TIMES
 from src.portal.explain import rule_explanation
 from src.portal.summary_view import _share, format_projected_week, render_summary_sections
-from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_MIN_SPAN
+from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_OPEN
 
 END = datetime(2026, 9, 28)
 START = END - timedelta(hours=168)
@@ -60,6 +59,8 @@ def alert(**overrides: object) -> AlertRow:
         "max_clear_cycles_24h": 0,
         "fire_pattern": "stuck",
         "unseen": False,
+        "max_episode_firing_rows": 2,
+        "open_since": END - timedelta(hours=72),
     }
     values.update(overrides)
     return AlertRow(**values)  # type: ignore[arg-type]
@@ -193,8 +194,9 @@ def build_summary(
     fire = tuple(
         FireRow(
             alert=a,
-            span_hours=72.0 + (5 / 60 if a.schema == "v1" else 12),
-            ratio=None if a.provider == "api" else a.row_count / 865,
+            span_hours=72.0,
+            max_episode_firing_rows=a.max_episode_firing_rows,
+            open_hours=80.0 if a.fire_pattern == "stuck" else None,
             events_per_24h=a.row_count / 3,
             pattern=a.fire_pattern,
         )
@@ -338,18 +340,18 @@ def test_no_dashboard_is_never_shown_as_zero() -> None:
     assert unseen.count("No dashboard supplied") == 2
 
 
-def test_the_fire_table_shows_the_ratio_bar_with_its_ticks_and_the_thresholds() -> None:
+def test_the_fire_table_shows_episode_columns() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    assert f"1{TIMES}</text>" in fire and f"2{TIMES}</text>" in fire, "the ratio bar's ticks"
-    assert '<svg class="ratio"' in fire
-    assert "stuck" in fire
-    for words in ("3 or more", f"2{TIMES}", f"0.9{TIMES}", "72 hours", "24 or more", "6 hours"):
-        assert words in fire, words
+    for header in ("Clear cycles (most in 24 h)", "Open for", "Pattern"):
+        assert header in fire, header
+    assert "Most rows in one episode" not in fire
+    assert "<svg" not in fire
+    assert "repeat" not in fire.lower()
 
 
 def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
-    """v2 repeats 144 times more slowly, so a shared ranking would hide every v2 alert."""
+    """A shared ranking by events would push a quiet schema's alerts out of sight."""
     many = tuple(
         alert(key_field=f"k{i}", message=f"Alert number {i}", row_count=1000 - i) for i in range(12)
     )
@@ -358,15 +360,19 @@ def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
     assert "Alert number 3" in fire and "Alert number 4" not in fire, "top 4 per schema"
     assert "Slow v2 alert" in fire
-    assert fire.index("repeats every 5 minutes") < fire.index("Alert number 0")
-    assert fire.index("repeats every 12 hours") < fire.index("Slow v2 alert")
 
 
 def test_the_threshold_legend_reads_the_catalogue() -> None:
     html = render()
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    assert f"{R6_FLAP_CYCLES} or more fire-and-clear cycles" in fire
-    assert f"at least {int(R6_STUCK_MIN_SPAN.total_seconds() // 3600)} hours" in fire
+    text = re.sub(r"<[^>]+>", "", fire)
+    assert (
+        f"Stuck: still firing, no clear for \u2265{int(R6_STUCK_OPEN.total_seconds() // 3600)} h "
+        "before the week ends"
+    ) in text
+    assert "Spamming: an API alert at \u226524 events per 24 h over \u22656 h" in text
+    assert f"Flapping: \u2265{R6_FLAP_CYCLES} fire\u2192clear cycles in 24 h" in text
+    assert text.index("Stuck:") < text.index("Spamming:") < text.index("Flapping:")
 
 
 def test_rule_and_model_findings_stay_in_separate_columns() -> None:

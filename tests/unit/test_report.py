@@ -134,13 +134,15 @@ def test_daily_metrics_headers_end_with_the_unseen_pair_after_suppression() -> N
 
 
 def test_worklist_headers_end_with_the_r6_facts_and_unseen() -> None:
-    assert WORKLIST_HEADERS[-4:] == (
+    assert WORKLIST_HEADERS[-6:] == (
         "clear_count",
         "max_clear_cycles_24h",
         "fire_pattern",
         "unseen",
+        "max_episode_firing_rows",
+        "open_since",
     )
-    assert len(WORKLIST_HEADERS) == 25
+    assert len(WORKLIST_HEADERS) == 27
 
 
 def test_a_null_unseen_is_an_empty_daily_cell_not_zero() -> None:
@@ -163,9 +165,16 @@ def test_worklist_writes_the_r6_facts_and_renders_booleans_as_true_false() -> No
             sample_finding(unseen=False),
         ]
     ).split("\r\n")
-    assert rows[1].endswith(",2,3,flapping,true")
-    assert rows[2].endswith(",0,0,,")
-    assert rows[3].endswith(",false")
+    assert rows[1].endswith(",2,3,flapping,true,0,")
+    assert rows[2].endswith(",0,0,,,0,")
+    assert rows[3].endswith(",false,0,")
+
+
+def test_worklist_writes_the_episode_facts() -> None:
+    row = alert_worklist_csv(
+        [sample_finding(max_episode_firing_rows=4, open_since=datetime(2026, 8, 21, 3, 0, 0))]
+    ).split("\r\n")[1]
+    assert row.endswith(",4,2026-08-21T03:00:00.000Z")
 
 
 def test_the_rollup_sums_unseen_and_keeps_none_when_no_bucket_has_a_panel() -> None:
@@ -220,7 +229,7 @@ def test_the_rollup_keeps_unseen_unmeasured_none_when_every_bucket_is_none() -> 
 def test_the_limitations_say_r6_flags_one_alert_never_team_volume() -> None:
     flat = " ".join(scorecard().split())
     assert (
-        "R6 flags one alert's firing pattern against its repeat interval; it never "
+        "R6 flags one alert's firing episodes (stuck, spamming or flapping); it never "
         "scores a team's total volume." in flat
     )
 

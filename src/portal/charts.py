@@ -24,7 +24,6 @@ __all__ = [
     "level_bar",
     "line_chart",
     "nice_step",
-    "ratio_bar",
     "stacked_bar",
 ]
 
@@ -179,29 +178,5 @@ def level_bar(value: float, maximum: float, *, css: str) -> str:
     )
 
 
-#: The fire-rate bar runs from zero to this multiple of the repeat interval.
-RATIO_SCALE = 3
-#: The multiplication sign written after a multiple of the repeat interval.
+#: The multiplication sign.
 TIMES = "\N{MULTIPLICATION SIGN}"
-
-
-def ratio_bar(ratio: float, *, css: str, label: str) -> str:
-    """A fire-rate bar from 0x to 3x the repeat interval, with ticks at 1x and 2x.
-
-    The viewBox keeps its aspect ratio, so the tick labels are not stretched.
-    """
-    width, top = 120, 8
-    filled = max(0.0, min(ratio, RATIO_SCALE)) / RATIO_SCALE * width
-    ticks = "".join(
-        f'<line class="rtick" x1="{width * m // RATIO_SCALE}" x2="{width * m // RATIO_SCALE}" '
-        f'y1="{top - 1}" y2="{top + 9}"/>'
-        f'<text x="{width * m // RATIO_SCALE}" y="6" text-anchor="middle">{m}{TIMES}</text>'
-        for m in (1, 2)
-    )
-    return (
-        f'<svg class="ratio" viewBox="0 0 {width} 18" role="img" '
-        f'aria-label="{escape(label, quote=True)}">'
-        f'<rect class="track" x="0" y="{top}" width="{width}" height="8" rx="2"/>'
-        f'<rect class="{css}" x="0" y="{top}" width="{max(filled, 1.0):.1f}" height="8" rx="2"/>'
-        f"{ticks}</svg>"
-    )
