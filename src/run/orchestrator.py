@@ -275,6 +275,9 @@ def execute_run(
         flagged = compute_daily_flagged(evaluation[schema].rows, snapshot_dates)
         quality = _allocate_quality_by_date(evaluation[schema], outcomes, snapshot_dates)
         suppressed_by_date = _count_suppressed_by_date(evaluation[schema], snapshot_dates)
+        unseen_by_date = _count_unseen_by_date(
+            evaluation[schema], suppression[schema].unseen_row_ids, snapshot_dates
+        )
 
         for index, day in enumerate(daily):
             flagged_rows, flagged_distinct = flagged[day.snapshot_date]
@@ -313,9 +316,16 @@ def execute_run(
                     "suppression_unmeasured": (
                         suppression[schema].unmeasured_leaves if index == 0 else 0
                     ),
-                    # Filled by the `unseen` evaluation (spec section 6); NULL until then.
-                    "unseen": None,
-                    "unseen_unmeasured": None,
+                    # `unseen` is NULL, never 0, for a schema with no panel. Its unmeasured
+                    # count sits on the first bucket for the same reason as above.
+                    "unseen": (
+                        None if unseen_by_date is None else unseen_by_date[day.snapshot_date]
+                    ),
+                    "unseen_unmeasured": (
+                        None
+                        if unseen_by_date is None
+                        else (suppression[schema].unseen_unmeasured if index == 0 else 0)
+                    ),
                 }
             )
 
@@ -335,7 +345,12 @@ def execute_run(
 
         for identity in evaluation[schema].identities.values():
             payload.findings.append(
-                _build_finding_row(run_id, identity, outcomes.get(identity.identity))
+                _build_finding_row(
+                    run_id,
+                    identity,
+                    outcomes.get(identity.identity),
+                    suppression[schema].unseen_row_ids,
+                )
             )
 
         for interpretation in suppression[schema].interpretations:
@@ -468,8 +483,29 @@ def _count_suppressed_by_date(evaluation: Evaluation, snapshot_dates: list[str])
     return counts
 
 
+def _count_unseen_by_date(
+    evaluation: Evaluation, unseen_row_ids: set[int] | None, snapshot_dates: list[str]
+) -> dict[str, int] | None:
+    """Rows no panel shows, on the dates of the rows themselves.
+
+    ``None`` when the schema has no panel: that is "not measured", which is not zero.
+    """
+    if unseen_row_ids is None:
+        return None
+    counts = dict.fromkeys(snapshot_dates, 0)
+    for evaluated in evaluation.rows:
+        if id(evaluated.row) in unseen_row_ids:
+            key = evaluated.row.snapshot_date
+            if key in counts:
+                counts[key] += 1
+    return counts
+
+
 def _build_finding_row(
-    run_id: str, identity: Any, outcome: AssessmentOutcome | None
+    run_id: str,
+    identity: Any,
+    outcome: AssessmentOutcome | None,
+    unseen_row_ids: set[int] | None,
 ) -> dict[str, Any]:
     representative: AlertRecord = identity.representative
     timestamps = [evaluated.row.timestamp for evaluated in identity.rows]
@@ -534,5 +570,10 @@ def _build_finding_row(
         "clear_count": identity.clear_count,
         "max_clear_cycles_24h": identity.max_clear_cycles_24h,
         "fire_pattern": identity.fire_pattern,
-        "unseen": None,
+        # NULL with no panel; otherwise true when any row of the identity is unseen.
+        "unseen": (
+            None
+            if unseen_row_ids is None
+            else any(id(evaluated.row) in unseen_row_ids for evaluated in identity.rows)
+        ),
     }

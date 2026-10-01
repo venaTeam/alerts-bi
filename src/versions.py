@@ -9,14 +9,14 @@ deliberately and never edited in place:
   rewritten for it in prompt 1.3.0.
 - ``PROMPT_VERSION`` covers the classification instructions, the two guides carried in the
   cached prefix, and the R/P catalogue as presented to the model.
-- ``PARSER_VERSION`` covers the panel-SQL parser; cached panel parses are keyed by
+- ``PARSER_VERSION`` covers the panel-SQL interpretation (suppression and identity leaves); cached panel parses are keyed by
   ``(sql_text_hash, parser_version)`` so a parser change re-derives rather than reusing.
 
 ``model_version`` is not here: it is supplied by configuration (the exact on-prem
 deployment identifier) and recorded per run.
 
 The language port preserved these versions. Later prompt improvements receive their own
-version; the rule and principle catalogues remain unchanged.
+version.
 """
 
 # 1.1.0 (2026-10-01): R6 (stuck, spamming, flapping) became a core rule. The ruleset version
@@ -27,6 +27,7 @@ RULESET_VERSION = "1.1.0"
 # Ruleset 1.1.0 is embedded in the prompt, so the text changed and carries a new version;
 # prompt artifacts are immutable per version (design 7.13).
 PROMPT_VERSION = "1.3.0"
-PARSER_VERSION = "1.0.0"
+# 1.1.0 (2026-10-01): positive identity leaves are interpreted for `unseen`.
+PARSER_VERSION = "1.1.0"
 
 APP_VERSION = "0.1.0"

@@ -94,7 +94,7 @@ Keep these decisions intact unless the design is explicitly revised:
 - R3 checks required identity fields and an optional supplied `node_name`; an absent or empty optional `node_name` is valid.
 - R4 applies only when `provider = grafana`. API alerts do not carry an alert-rule URL and never match R4 for its absence.
 - R5 comes only from the approved panel-suppression evaluation.
-- R6 is a core rule from ruleset 1.1.0 (design section 7.14): one alert's firing pattern — flapping (≥3 fire→clear cycles in 24h), spamming (Grafana ≥2× the repeat interval; API ≥24 events per 24h over ≥6h), stuck (Grafana ≥0.9× for ≥72h, never cleared) — against v1 5 min / v2 12 h. It never scores a team's total volume. The prompt stays at 1.2.0 on purpose.
+- R6 is a core rule from ruleset 1.1.0 (design section 7.14): one alert's firing pattern — flapping (≥3 fire→clear cycles in 24h), spamming (Grafana ≥2× the repeat interval; API ≥24 events per 24h over ≥6h), stuck (Grafana ≥0.9× for ≥72h, never cleared) — against v1 5 min / v2 12 h. It never scores a team's total volume. It shipped with prompt 1.3.0, because the prompt embeds `ruleset_version` and prompt artifacts are immutable per version.
 - `unseen` is a visibility measure, never a rule: rows every panel leaves out through a positive identity predicate, disjoint from `suppressed`, `NULL` when no panel was supplied.
 - R7 applies only to v1. `time_created` is valid on both inclusive boundaries from `@timestamp - 24h` through `@timestamp`; future and older values are invalid.
 - R8-R10 apply only to v2 and follow the exact catalogs and URL rules in the design.

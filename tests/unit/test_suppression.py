@@ -421,7 +421,7 @@ def test_the_interpretation_is_keyed_by_sql_text_hash_and_parser_version() -> No
     c = interpret_panel(panel("SELECT * FROM t WHERE node_name != 'y'"))
     assert a.sql_text_hash == b.sql_text_hash
     assert a.sql_text_hash != c.sql_text_hash
-    assert a.parser_version == "1.0.0"
+    assert a.parser_version == "1.1.0"
 
 
 def test_every_panel_in_the_checked_in_registry_interprets_without_a_parse_failure() -> None:
@@ -431,3 +431,134 @@ def test_every_panel_in_the_checked_in_registry_interprets_without_a_parse_failu
             assert interpretation.safety_state == "parsed", (
                 f"{team_panel.panel_id}: {interpretation.unmeasured_reason}"
             )
+
+
+# ------------------------------------------------------------------- unseen
+
+
+def _unseen(rows: list[Any], *panels: Panel) -> SuppressionResult:
+    return evaluate_suppression(rows, list(panels))
+
+
+def test_unseen_a_row_outside_the_application_narrowing_is_unseen() -> None:
+    inside = v1_row(application="a")
+    outside = v1_row(application="b", key_field="k2")
+    result = _unseen([inside, outside], panel("SELECT * FROM t WHERE application = 'a'"))
+    assert result.unseen_row_ids == {id(outside)}
+
+
+def test_unseen_a_row_matching_the_narrowing_is_not_unseen() -> None:
+    row = v1_row(application="a")
+    result = _unseen([row], panel("SELECT * FROM t WHERE application = 'a'"))
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_a_null_node_name_is_never_hidden() -> None:
+    row = v1_row(node_name=None)
+    result = _unseen([row], panel("SELECT * FROM t WHERE node_name LIKE 'n%'"))
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_like_hides_a_non_matching_value() -> None:
+    row = v1_row(node_name="x-1")
+    result = _unseen([row], panel("SELECT * FROM t WHERE node_name LIKE 'n%'"))
+    assert result.unseen_row_ids == {id(row)}
+
+
+def test_unseen_needs_every_panel_to_hide_the_row() -> None:
+    row = v1_row(application="b")
+    showing = panel("SELECT * FROM t WHERE application = 'b'", panel_id="p1")
+    hiding = panel("SELECT * FROM t WHERE application = 'a'", panel_id="p2")
+    assert _unseen([row], showing, hiding).unseen_row_ids == set()
+    assert _unseen([row], hiding, hiding).unseen_row_ids == {id(row)}
+
+
+def test_unseen_is_disjoint_from_suppressed() -> None:
+    row = v1_row(application="b", node_name="junk")
+    others = [v1_row(application="a", node_name=f"n{i}", key_field=f"k{i}") for i in range(3)]
+    result = _unseen(
+        [row, *others],
+        panel("SELECT * FROM t WHERE application = 'a' AND node_name != 'junk'"),
+    )
+    assert result.suppressed_row_ids == {id(row)}
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_or_nested_identity_leaf_is_unmeasured_and_hides_nothing() -> None:
+    row = v1_row(application="b")
+    result = _unseen(
+        [row],
+        panel("SELECT * FROM t WHERE (application = 'a' OR severity = 'critical')"),
+    )
+    assert result.unseen_unmeasured == 1
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_unresolved_query_variable_is_unmeasured() -> None:
+    row = v1_row(application="b")
+    result = _unseen(
+        [row],
+        panel(
+            "SELECT * FROM t WHERE application = $app",
+            [{"name": "app", "type": "query"}],
+        ),
+    )
+    assert result.unseen_unmeasured == 1
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_all_selected_variable_never_hides() -> None:
+    row = v1_row(application="b")
+    result = _unseen(
+        [row],
+        panel(
+            "SELECT * FROM t WHERE application IN ($apps)",
+            [
+                {
+                    "name": "apps",
+                    "type": "custom",
+                    "values": ["a"],
+                    "multi": True,
+                    "all_selected": True,
+                }
+            ],
+        ),
+    )
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_is_none_when_the_schema_has_no_panel() -> None:
+    result = _unseen([v1_row()])
+    assert result.unseen_row_ids is None
+    assert result.unseen_unmeasured == 0
+
+
+def test_unseen_operator_narrowing_hides_a_different_operator() -> None:
+    row = v1_row(operator="y")
+    result = _unseen([row], panel("SELECT * FROM t WHERE operator IN ('x')"))
+    assert result.unseen_row_ids == {id(row)}
+
+
+def test_unseen_operator_remains_a_classification_field_for_suppression() -> None:
+    result = _unseen([v1_row()], panel("SELECT * FROM t WHERE operator != 'team-op'"))
+    assert result.suppressed_row_ids == set()
+
+
+def test_unseen_classification_fields_never_hide() -> None:
+    row = v1_row(severity="error")
+    result = _unseen([row], panel("SELECT * FROM t WHERE severity = 'critical'"))
+    assert result.unseen_row_ids == set()
+
+
+def test_unseen_an_unparseable_panel_hides_nothing() -> None:
+    row = v1_row()
+    result = _unseen([row], panel("SELECT * FROM t WHERE node_name !="))
+    assert result.unseen_row_ids == set()
+    # The unmeasured zero must read as under-reported rather than as a measured zero.
+    assert result.unseen_unmeasured == 1
+
+
+def test_unseen_component_maps_the_v1_object_field() -> None:
+    row = v1_row(object="c2")
+    result = _unseen([row], panel("SELECT * FROM t WHERE object = 'c1'"))
+    assert result.unseen_row_ids == {id(row)}
