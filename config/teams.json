@@ -1,6 +1,6 @@
 {
-  "registry_version": "2026-09-24.1",
-  "effective_date": "2026-09-24",
+  "registry_version": "2026-10-01.1",
+  "effective_date": "2026-10-01",
   "teams": [
     {
       "team_id": "payments-core",
@@ -162,6 +162,26 @@
           "panel_id": "acceptance-blast-radius-main",
           "schema": "v1",
           "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-blast' AND node_name NOT IN ('blast-node-1','blast-node-2','blast-node-3')"
+        }
+      ]
+    },
+    {
+      "team_id": "acceptance-fire-patterns",
+      "display_name": "Acceptance — R6 fire patterns",
+      "v1_operators": ["acc-fire"],
+      "v2_operator": "acc-fire-v2",
+      "planning": { "v1_rule_effort_days": 1.5 }
+    },
+    {
+      "team_id": "acceptance-unseen",
+      "display_name": "Acceptance — unseen visibility",
+      "v1_operators": ["acc-unseen"],
+      "v2_operator": "acc-unseen-v2",
+      "panels": [
+        {
+          "panel_id": "acceptance-unseen-v1",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-unseen' AND application = 'shown-app' AND (node_name = 'n1' OR severity = 'critical') AND node_name != 'junk'"
         }
       ]
     }

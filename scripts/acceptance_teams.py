@@ -12,12 +12,15 @@ The acceptance window is the exact 168 hours ending at the generator's fixed clo
   window_start 2026-08-18T18:00:00Z (inclusive)
   window_end   2026-08-25T18:00:00Z (exclusive)
 
-Rows sit on 2026-08-20 and 2026-08-21 so both single-date and multi-date allocation are
-exercised, well inside the window's partial first and last buckets.
+The first four teams' rows sit on 2026-08-20 and 2026-08-21 so both single-date and
+multi-date allocation are exercised, well inside the window's partial first and last
+buckets. ``acceptance-fire-patterns`` needs days of continuous firing for R6, so its rows
+run from 2026-08-19 to 2026-08-24 - still entirely inside the window.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 __all__ = ["T20", "T21", "acceptance_teams"]
@@ -269,11 +272,220 @@ ACCEPTANCE_BLAST_RADIUS: dict[str, Any] = {
 }
 
 
+FIVE_MINUTES = timedelta(minutes=5)
+FIRE_URL = "https://grafana.internal/d/acc-fire-1"
+FIRE_V2_URL = "https://grafana.internal/d/acc-fire-v2"
+
+
+def _at(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _iso(value: datetime) -> str:
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _every(start: str, step: timedelta, count: int) -> list[str]:
+    """``count`` instants from ``start`` (inclusive), ``step`` apart."""
+    first = _at(start)
+    return [_iso(first + index * step) for index in range(count)]
+
+
+def _fire(obj: str, rows_at: list[str], **overrides: Any) -> dict[str, Any]:
+    return {
+        "application": "acc-fire-app",
+        "obj": obj,
+        "node_name": "node-f",
+        "message": GOOD_V1_MESSAGE,
+        "operatorPick": "acc-fire",
+        "alert_rule_url": FIRE_URL,
+        "provider": "grafana",
+        "rowsAt": rows_at,
+        **overrides,
+    }
+
+
+def _fire_api(obj: str, rows_at: list[str]) -> dict[str, Any]:
+    # API alerts carry no rule URL (R4 is Grafana-only) and have no repeat interval.
+    return _fire(obj, rows_at, application="acc-fire-api", alert_rule_url=None, provider="api")
+
+
+def _fire_v2_episode(fired: str, resolved: str) -> dict[str, Any]:
+    # One fire -> resolve cycle. `resolves` marks the def's LAST row resolved, and the v2 key
+    # excludes status, so the three episode defs below are one identity; the explicit
+    # key_field just makes that identity readable in the oracle.
+    return {
+        "application": "acc-fire-app-v2",
+        "obj": "f-h-flap",
+        "message": GOOD_V2_MESSAGE,
+        "severity": "high",
+        "impact": GOOD_IMPACT,
+        "runbook_url": GOOD_RUNBOOK,
+        "alert_rule_url": FIRE_V2_URL,
+        "provider": "grafana",
+        "key_field": "acc-fire-h-flap-v2",
+        "rowsAt": [fired, resolved],
+        "resolves": True,
+    }
+
+
+#: acceptance-fire-patterns - R6 boundaries (team summary spec section 5).
+#:
+#: One identity per case; every v1 case is a distinct ``obj``. A v1 clear is a row with
+#: severity ``clear`` (code 1) under the SAME application/object/node_name - the v1 key does
+#: not include severity - so a fire -> clear sequence is two defs sharing one identity.
+#: Span = last - first + repeat interval (v1 5 min, v2 12 h).
+ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
+    "name": "acceptance-fire-patterns",
+    "phase": "acceptance",
+    "quality": "mixed",
+    "schemas": ["v1", "v2"],
+    "v1Operators": ["acc-fire"],
+    "v2Operator": "acc-fire-v2",
+    "v1PanelQuery": None,
+    "v2PanelQuery": None,
+    "v1Defs": [
+        # (a) stuck: every 5 min from 08-21 00:00 through 08-24 00:00 = 865 rows, span
+        #     exactly 72h05m, ratio 1.0, no clear.
+        _fire("f-a-stuck", _every("2026-08-21T00:00:00.000Z", FIVE_MINUTES, 865)),
+        # (b) none: every 5 min from 08-21 00:00 through 08-23 23:00 = 853 rows, span
+        #     71h05m < 72h.
+        _fire("f-b-short", _every("2026-08-21T00:00:00.000Z", FIVE_MINUTES, 853)),
+        # (c) spamming: two definitions with one key firing on the SAME 5-minute ticks for
+        #     24h. 576 rows over a span of exactly 24h (288 intervals): ratio exactly 2.0,
+        #     the inclusive boundary.
+        _fire("f-c-dup", _every("2026-08-20T00:00:00.000Z", FIVE_MINUTES, 288)),
+        _fire("f-c-dup", _every("2026-08-20T00:00:00.000Z", FIVE_MINUTES, 288)),
+        # (c2) none: the same two definitions interleaved at a 2.5-minute offset instead.
+        #     576 rows over a span of 24h02m30s (288.5 intervals): ratio 2n/(n+1) =
+        #     576/288.5 = 1.9965 < 2.0. Interleaving can never reach 2.0; pinned here so
+        #     that property is visible rather than surprising.
+        _fire("f-c2-offset", _every("2026-08-19T00:00:00.000Z", FIVE_MINUTES, 288)),
+        _fire("f-c2-offset", _every("2026-08-19T00:02:30.000Z", FIVE_MINUTES, 288)),
+        # (d) flapping: three fire -> clear cycles on 08-24, clears at 00:05, 10:05 and 20:05
+        #     (20h apart, inside one rolling 24h).
+        _fire(
+            "f-d-flap",
+            ["2026-08-24T00:00:00.000Z", "2026-08-24T10:00:00.000Z", "2026-08-24T20:00:00.000Z"],
+        ),
+        _fire(
+            "f-d-flap",
+            ["2026-08-24T00:05:00.000Z", "2026-08-24T10:05:00.000Z", "2026-08-24T20:05:00.000Z"],
+            severity="clear",
+        ),
+        # (e) none: three cycles with clears at 08-22 18:05, 08-23 07:05 and 08-23 20:05 -
+        #     26h from first to last clear, so no rolling 24h holds more than two.
+        _fire(
+            "f-e-spread",
+            ["2026-08-22T18:00:00.000Z", "2026-08-23T07:00:00.000Z", "2026-08-23T20:00:00.000Z"],
+        ),
+        _fire(
+            "f-e-spread",
+            ["2026-08-22T18:05:00.000Z", "2026-08-23T07:05:00.000Z", "2026-08-23T20:05:00.000Z"],
+            severity="clear",
+        ),
+        # (f) spamming: v1 API, 24 rows - hourly 00:00..22:00 plus 23:55 on 08-22. Span
+        #     23h55m + 5m = exactly 24h, so exactly 24 events per 24h, the inclusive
+        #     boundary, with span >= 6h.
+        _fire_api(
+            "f-f-api24",
+            [
+                *_every("2026-08-22T00:00:00.000Z", timedelta(hours=1), 23),
+                "2026-08-22T23:55:00.000Z",
+            ],
+        ),
+        # (g) none: v1 API, 23 rows over the same 24h span - hourly 00:00..21:00 plus 23:55.
+        _fire_api(
+            "f-g-api23",
+            [
+                *_every("2026-08-22T00:00:00.000Z", timedelta(hours=1), 22),
+                "2026-08-22T23:55:00.000Z",
+            ],
+        ),
+    ],
+    "v2Defs": [
+        # (h) flapping: v2 Grafana with per-row `resolved`. One long firing row on 08-21,
+        #     then resolved at 08-23 02:00, 08:00 and 14:00 - three cycles inside 12h.
+        #     Span 62h (50h + 12h) gives ratio 6/(62/12) = 1.16, deliberately below 2.0, so
+        #     flapping is the ONLY pattern that can match: if per-row resolved were not
+        #     read, this identity would be R6-free and acceptance would fail.
+        _fire_v2_episode("2026-08-21T12:00:00.000Z", "2026-08-23T02:00:00.000Z"),
+        _fire_v2_episode("2026-08-23T06:00:00.000Z", "2026-08-23T08:00:00.000Z"),
+        _fire_v2_episode("2026-08-23T12:00:00.000Z", "2026-08-23T14:00:00.000Z"),
+    ],
+}
+
+
+UNSEEN_URL = "https://grafana.internal/d/acc-unseen-1"
+UNSEEN_V2_URL = "https://grafana.internal/d/acc-unseen-v2"
+
+
+def _unseen_v1(obj: str, application: str, node_name: str, rows_at: list[str]) -> dict[str, Any]:
+    return {
+        "application": application,
+        "obj": obj,
+        "node_name": node_name,
+        "message": GOOD_V1_MESSAGE,
+        "operatorPick": "acc-unseen",
+        "alert_rule_url": UNSEEN_URL,
+        "provider": "grafana",
+        "rowsAt": rows_at,
+    }
+
+
+def _unseen_v2(obj: str) -> dict[str, Any]:
+    return {
+        **_v2(obj),
+        "application": "acc-unseen-app-v2",
+        "alert_rule_url": UNSEEN_V2_URL,
+        "key_field": f"acc-unseen-{obj}",
+    }
+
+
+#: acceptance-unseen - the ``unseen`` visibility measure (team summary spec section 6).
+#:
+#: The registry gives this team ONE v1 panel and no v2 panel:
+#:   WHERE operator = 'acc-unseen' AND application = 'shown-app'
+#:     AND (node_name = 'n1' OR severity = 'critical') AND node_name != 'junk'
+#: ``application = 'shown-app'`` is the identity leaf that hides rows; the OR-nested
+#: ``node_name = 'n1'`` is unmeasured and never hides; ``node_name != 'junk'`` suppresses.
+ACCEPTANCE_UNSEEN: dict[str, Any] = {
+    "name": "acceptance-unseen",
+    "phase": "acceptance",
+    "quality": "mixed",
+    "schemas": ["v1", "v2"],
+    "v1Operators": ["acc-unseen"],
+    "v2Operator": "acc-unseen-v2",
+    "v1PanelQuery": None,
+    "v2PanelQuery": None,
+    "v1Defs": [
+        # Outside the panel's application narrowing -> unseen, on both dates.
+        _unseen_v1("u01-other", "other-app", "n1", [T20, T21]),
+        # Inside the narrowing -> seen.
+        _unseen_v1("u02-shown", "shown-app", "n1", [T20, T21]),
+        # Excluded by node_name != 'junk' -> suppressed (R5), not unseen.
+        _unseen_v1("u03-junk", "shown-app", "junk", [T20]),
+        # Fails only the OR-nested node_name = 'n1' leaf, which is unmeasured -> seen.
+        _unseen_v1("u04-or", "shown-app", "n2", [T20]),
+        # Outside the narrowing AND suppressed -> counted only as suppressed.
+        _unseen_v1("u05-other-junk", "other-app", "junk", [T20]),
+    ],
+    # No v2 panel, so v2 `unseen` is NULL rather than 0.
+    "v2Defs": [_unseen_v2("uv01"), _unseen_v2("uv02")],
+}
+
+
 def acceptance_teams() -> list[dict[str, Any]]:
-    """Every acceptance team, appended after the realistic ones."""
+    """Every acceptance team, appended after the realistic ones.
+
+    New teams go at the END: nothing here draws from the seeded RNG (every def pins its
+    operator and its timestamps), but appending keeps that guarantee independent of it.
+    """
     return [
         ACCEPTANCE_CORE,
         _batching_team(),
         ACCEPTANCE_SUPPRESSION,
         ACCEPTANCE_BLAST_RADIUS,
+        ACCEPTANCE_FIRE_PATTERNS,
+        ACCEPTANCE_UNSEEN,
     ]
