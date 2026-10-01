@@ -1,6 +1,6 @@
 # Team summary — design
 
-**Status:** draft for review, not yet implemented
+**Status:** implemented (2026-10-01). Amended the same day by the product owner: the presentation slides show day-by-day distinct and rule-flagged distinct alerts for the one selected published week, labelled "by UTC day", through the `portal_daily_metrics` view (migration `007_portal_daily`). This is a within-week view, never a comparison across weeks (design 7.10). Migration `008` later changed `portal_reviews.basis_changed` to compare the team's own registry entry.
 **Date:** 2026-10-01
 **Base:** `origin/main` at `a2fca5c` (review portal, weekly schedule, admin app, LLM audit)
 **Visual reference:** the design canvas "Alerts BI Team Summary"
@@ -82,7 +82,7 @@ that team's published weeks. v1 and v2 are never summed.
 | **Key findings** | up to five templated sentences from `src/insights` (largest core finding and its co-occurring rule, how few alerts make 80% of the events, rows hidden by the team's panels, `unseen` rows, readiness with critical alerts lacking a runbook, non-zero `unassessed`) | the same sentences. They never contain internals. |
 | **Noisy alerts by application** | per application and schema: flagged alerts of all, flagged events of all events, rules seen | same |
 | **How often alerts fire** | per alert: events, active span, fire rate as a multiple of the repeat interval, clear cycles, the R6 pattern | same |
-| **Day by day** | complete UTC days of `daily_metrics`, one SVG per schema | **omitted**: the portal publishes weekly figures only |
+| **Day by day** | complete UTC days of `daily_metrics`, one SVG per schema | shown in the slides for the one selected published week, labelled "by UTC day", from `portal_daily_metrics` (migration 007). A within-week view; the portal's headline figures stay weekly totals. |
 | **Biggest single source** | alert with the most rows, with fields, findings and the fix | same |
 | **Flagged by rule** | rule, title, schema, rows, distinct per day, top applications, what to change | same, counted per week |
 | **Hidden by your own panels** | suppressed and unmeasured per schema; each panel's frozen SQL from `runs.registry_entry_snapshot` with suppression clauses highlighted | suppressed rows, the hidden alerts and their fix. **No** panel SQL. |
@@ -340,7 +340,7 @@ Shared contracts first, then disjoint lanes, one integrator.
 
 - Cross-team views, leaderboards, company totals, deltas, two-run diffs, and an estimate for
   phase 2 or "done".
-- A day-by-day chart in the portal.
+- A day-by-day chart across weeks in the portal. (The within-week, by-UTC-day chart on the summary slides is in scope; see section 4.)
 - Model classification of backfilled history.
 - Porting the historical backfill and the Claude client from `integration/all-upgrades`.
   Recommended as a separate PR; not part of this spec.
