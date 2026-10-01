@@ -28,6 +28,15 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "R3": {"violations": [{"field": "application", "reason": "placeholder", "normalized": "test"}]},
     "R4": {"provider": "grafana", "alert_rule_url": None},
     "R5": {"panels": ["team-v1-main"], "reason": "excluded by every supplied panel"},
+    "R6": {
+        "pattern": "stuck",
+        "rows": 865,
+        "span_hours": 72.08,
+        "ratio": 1.0,
+        "events_per_24h": 287.78,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+    },
     "R7": {
         "reason": "older_than_24h",
         "time_created": "2026-08-20T00:00:00Z",
@@ -88,3 +97,24 @@ def test_dates_are_shown_in_utc_in_one_format() -> None:
     assert format_week(datetime(2026, 8, 23, 16, 44), datetime(2026, 8, 30, 16, 44)) == (
         f"23 Aug {EN_DASH} 30 Aug 2026"
     )
+
+
+def test_r6_copy_follows_the_stored_pattern() -> None:
+    for pattern, word in (("stuck", "Stuck"), ("spamming", "Spamming"), ("flapping", "Flapping")):
+        explained = rule_explanation("R6", {**SAMPLES["R6"], "pattern": pattern})
+        assert explained.title.startswith(word)
+        assert explained.next_step
+
+
+def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
+    forbidden = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
+    for pattern in ("stuck", "spamming", "flapping", "bogus"):
+        for evidence in ({**SAMPLES["R6"], "pattern": pattern}, {"pattern": pattern}):
+            e = rule_explanation("R6", evidence)
+            text = " ".join((e.title, e.reason, e.why, e.observed, e.next_step)).lower()
+            assert not [f for f in forbidden if f in text]
+    assert "per repeat interval" in principle_next_step("R6")
+
+
+def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:
+    assert "stuck" not in principle_next_step("R6").lower()

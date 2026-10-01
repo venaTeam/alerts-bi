@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import secrets
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -234,6 +235,37 @@ def _daily(run_id: str, team: str, end: datetime) -> list[dict[str, Any]]:
     return rows
 
 
+#: Per-rule events over the three dates `_daily` writes, matching the rich findings: R1 on
+#: the generic message (592) and on an earlier row of checkout-svc (3); R4 on the generic
+#: message; R8 and R9 on the critical sms-gateway alert.
+_RULE_EVENTS = {
+    ("v1", "R1"): (200, 198, 197),
+    ("v1", "R4"): (200, 196, 196),
+    ("v2", "R8"): (1, 1, 0),
+    ("v2", "R9"): (1, 1, 0),
+}
+
+
+def _rule_counts(run_id: str, team: str, end: datetime) -> list[dict[str, Any]]:
+    rows = []
+    for (schema, rule), events in _RULE_EVENTS.items():
+        for offset, count in enumerate(events):
+            if count:
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "team_id": team,
+                        "alert_schema": schema,
+                        "snapshot_date": (end - timedelta(days=offset + 1)).date().isoformat(),
+                        "rule_id": rule,
+                        "ruleset_version": "1.0.0",
+                        "match_count": count,
+                        "distinct_count": 1,
+                    }
+                )
+    return rows
+
+
 def _store(name: str, team: str, end: datetime, *, rich: bool = False) -> None:
     run_id = _run_id(name)
     payload = PersistencePayload(
@@ -246,6 +278,7 @@ def _store(name: str, team: str, end: datetime, *, rich: bool = False) -> None:
             window_end=end,
         ),
         daily_metrics=_daily(run_id, team, end),
+        rule_counts=_rule_counts(run_id, team, end) if rich else [],
         findings=_findings(run_id)
         if rich
         else [sample_finding(run_id=run_id, key_field=f"{name}:only", row_count=5)],
@@ -553,13 +586,22 @@ def test_the_latest_week_is_the_default_and_every_week_is_addressable(portal: Te
 
 def test_history_has_one_point_per_published_week(portal: TestClient) -> None:
     page = portal.get(f"/teams/{TEAM}").text
-    # Two schemas x two measures, three contiguous weeks each.
+    # Two schemas x two measures, three contiguous weeks each. Checked again for the team
+    # summary: its widgets draw bars (rect geometry), never a line, so the count is still
+    # exactly the four history lines.
     assert page.count("<polyline") == 4
+    summary = page[page.index('id="summary"') : page.index("Over time")]
+    assert "<polyline" not in summary and '<svg class="ratio"' in summary
     assert page.count('class="dot v1') == 6 and page.count('class="dot v2') == 6
 
 
+def _worklist(page: str) -> str:
+    """The work list alone: the Summary above it quotes alert messages too."""
+    return page[page.index('id="worklist"') :]
+
+
 def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> None:
-    first = portal.get(f"/teams/{TEAM}").text
+    first = _worklist(portal.get(f"/teams/{TEAM}").text)
     assert "Needs attention · 5" in first and "All alerts · 8" in first
     assert "Showing 1&ndash;3 of 5" in first
     order = [
@@ -568,7 +610,7 @@ def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> No
     ]
     assert order == sorted(order), "rule findings by event count, then model findings"
 
-    second = portal.get(f"/teams/{TEAM}", params={"page": 2}).text
+    second = _worklist(portal.get(f"/teams/{TEAM}", params={"page": 2}).text)
     assert "Showing 4&ndash;5 of 5" in second
     assert "Nightly token cleanup" in second and "Something went wrong" not in second
 
@@ -576,6 +618,187 @@ def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> No
         f"/teams/{TEAM}", params={"show": "all", "schema": "v2", "page": 2}
     ).text
     assert "Showing 4&ndash;4 of 4" in everything
+
+
+# ------------------------------------------------------------------ the Summary section
+
+
+def _summary_html(page: str) -> str:
+    return page[page.index('id="summary"') : page.index("Over time")]
+
+
+def test_the_summary_totals_are_the_stored_weekly_totals(
+    portal: TestClient, reader: SqlConfig
+) -> None:
+    with connect(reader, DB) as db:
+        schemas = {
+            str(row["alert_schema"]): (int(row["distinct_alerts"]), int(row["events"]))
+            for row in db.query(
+                "SELECT alert_schema, distinct_alerts, events FROM portal_schema_totals "
+                "WHERE run_id = :r",
+                {"r": _run_id("wk3")},
+            )
+        }
+        rules = {
+            (str(row["alert_schema"]), str(row["rule_id"])): (
+                int(row["events"]),
+                int(row["alerts"]),
+            )
+            for row in db.query(
+                "SELECT alert_schema, rule_id, events, alerts FROM portal_rule_totals "
+                "WHERE run_id = :r",
+                {"r": _run_id("wk3")},
+            )
+        }
+    assert rules == {
+        ("v1", "R1"): (595, 2),
+        ("v1", "R4"): (592, 1),
+        ("v2", "R8"): (2, 1),
+        ("v2", "R9"): (2, 1),
+    }
+
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    tiles = re.findall(
+        r'<span class="n">([\d,]+)</span><span class="u">distinct alerts this week</span>.*?'
+        r'<span class="n">([\d,]+)</span><span class="u">alert events this week</span>',
+        summary,
+    )
+    assert [(int(d.replace(",", "")), int(e.replace(",", ""))) for d, e in tiles] == [
+        schemas["v1"],
+        schemas["v2"],
+    ]
+
+    table = summary[summary.index("Flagged by rule") : summary.index("Hidden by your own panels")]
+    shown = {
+        (schema, rule): (int(events.replace(",", "")), int(alerts.replace(",", "")))
+        for rule, schema, events, alerts in re.findall(
+            r'<tr><td><a href="[^"]*">(R\d+)</a></td><td>.*?</td>'
+            r'<td><span class="chip (v\d)">v\d</span></td>'
+            r'<td class="num">([\d,]+)</td><td class="num">([\d,]+)</td>',
+            table,
+        )
+    }
+    assert shown == rules
+    assert 'href="/teams/portal-team/weeks/2026-08-30?rule=R1#worklist"' in summary
+    assert "per day" not in summary and _run_id("wk3") not in summary
+
+
+def test_the_summary_says_no_dashboard_was_supplied_rather_than_zero(portal: TestClient) -> None:
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    unseen = summary[summary.index("Not on any of your dashboards") : summary.index("Migration")]
+    assert unseen.count("No dashboard supplied") == 2, "no panel for either schema"
+
+
+def test_the_work_list_filters_by_state_and_rule(portal: TestClient) -> None:
+    page = portal.get(
+        f"/teams/{TEAM}", params={"show": "all", "state": "rule_flagged", "rule": "R1"}
+    ).text
+    listing = page[page.index('id="worklist"') :]
+    assert "Showing 1&ndash;2 of 2" in listing
+    assert "All alerts · 2" in listing
+    assert "Something went wrong" in listing and "Cart error rate" in listing
+    for other in ("Unhandled exception", "Nightly token cleanup", "SMS failure rate"):
+        assert other not in listing, other
+    assert "Rule R1 · Generic message" in listing
+
+    readiness = portal.get(f"/teams/{TEAM}", params={"rule": "R9"}).text
+    listing = readiness[readiness.index('id="worklist"') :]
+    assert "Showing 1&ndash;1 of 1" in listing and "SMS failure rate" in listing
+
+    nothing = portal.get(f"/teams/{TEAM}", params={"state": "assessed_good", "rule": "R1"}).text
+    assert "Nothing matches this filter." in nothing
+
+    assert portal.get(f"/teams/{TEAM}", params={"rule": "R11"}).status_code == 422
+    assert portal.get(f"/teams/{TEAM}", params={"state": "bad"}).status_code == 422
+
+
+def test_paging_keeps_the_filters(portal: TestClient) -> None:
+    params = {"show": "all", "state": "assessed_good"}
+    first = portal.get(f"/teams/{TEAM}", params=params).text
+    listing = first[first.index('id="worklist"') :]
+    assert "Showing 1&ndash;3 of 4" in listing
+    assert "show=all&amp;state=assessed_good&amp;page=2#worklist" in listing
+    second = portal.get(f"/teams/{TEAM}", params={**params, "page": 2}).text
+    assert "Showing 4&ndash;4 of 4" in second
+
+
+PACE_TEAM = "pace-team"
+#: Four back-to-back published weeks whose v1 rules shrink a, b, c, d -> a.
+PACE_WEEKS = {
+    "pace1": (W1 - WEEK, "abcd"),
+    "pace2": (W1, "abc"),
+    "pace3": (W2, "ab"),
+    "pace4": (W3, "a"),
+}
+
+
+def _pace_run(name: str, end: datetime, rules: str, *, effort: float | None = None) -> None:
+    RUN[name] = name.ljust(64, "2")
+    run_id = _run_id(name)
+    snapshot: dict[str, Any] = {"team_id": PACE_TEAM}
+    if effort is not None:
+        snapshot["planning"] = {"v1_rule_effort_days": effort}
+    findings = [
+        sample_finding(
+            run_id=run_id,
+            alert_schema="v1",
+            application=f"app-{rule}",
+            key_field=f"app-{rule}:c:n",
+            alert_rule_url=f"https://grafana.internal/rules/{rule}",
+            row_count=10,
+            first_seen=end - timedelta(days=2),
+            last_seen=end - timedelta(hours=1),
+        )
+        for rule in rules
+    ]
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=run_id,
+                    team_id=PACE_TEAM,
+                    team_display_name="Pace Team",
+                    run_at=end,
+                    window_start=end - WEEK,
+                    window_end=end,
+                    registry_entry_snapshot=json.dumps(snapshot),
+                ),
+                daily_metrics=_daily(run_id, PACE_TEAM, end),
+                findings=findings,
+            ),
+        )
+
+
+def test_the_estimate_is_drawn_from_published_weeks_only(portal: TestClient) -> None:
+    for name, (end, rules) in PACE_WEEKS.items():
+        _pace_run(name, end, rules, effort=2.0 if name == "pace4" else None)
+    # An unpublished run overlapping an earlier week, firing rules nobody published. Were it
+    # read, four more rules would count as retired and the pace would change.
+    _pace_run("pace-shadow", W2 - timedelta(hours=49), "wxyz")
+    with connect(CONFIG.sql, DB) as db:
+        for name in PACE_WEEKS:
+            publish_run(db, _run_id(name), published_by="operator")
+
+    page = portal.get(f"/teams/{PACE_TEAM}").text
+    progress = page[page.index("Migration progress") : page.index("Over time")]
+    # Three earlier weeks back to back; b, c and d stopped firing: pace 1 rule a week, and
+    # the one rule left projects one week past the selected week.
+    assert "week of 6 Sep 2026" in progress
+    assert "3 rules stopped firing across the 3 earlier published weeks" in progress
+    assert "pace: 1 rule a week" in progress
+    assert "2 working days" in progress and "set for this team" in progress
+    assert "configured, not measured" in progress
+    assert "cleanup rather than migration" in progress
+    assert "registry" not in page and "per day" not in page
+
+    # An earlier week sees only the weeks before it, never a later one: one earlier week.
+    earlier = portal.get(f"/teams/{PACE_TEAM}/weeks/{W1.date()}").text
+    progress = earlier[earlier.index("Migration progress") : earlier.index("Over time")]
+    assert "No estimate:" in progress
+    assert "Needs at least 2 earlier published weeks back to back; found 1." in progress
+    assert "1.5 working days" in progress
+    assert "0.5 working days each (default)" in progress
 
 
 def _alert(portal: TestClient, schema: str, application: str, key: str, week: datetime = W3) -> str:

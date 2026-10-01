@@ -174,6 +174,56 @@ blockquote{margin:0;font-style:italic;background:var(--surface-2);border-radius:
 details.tech summary{cursor:pointer;font-weight:600;font-size:13px}
 details.tech[open] summary{margin-bottom:8px}
 .back{font-size:13px}
+.summary{display:flex;flex-direction:column;gap:16px}
+.kpis.k3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.sm{padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.sm-h h3{font-size:15px;font-weight:600}
+.sm-h p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.groups{display:flex;flex-direction:column;gap:12px}
+.bars{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.bars li{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(60px,1fr) auto;gap:4px 10px;align-items:center;font-size:12.5px}
+.bars .bl{color:var(--ink-2);overflow-wrap:anywhere}
+.bars .bv{color:var(--muted);text-align:right;white-space:nowrap}
+.bars .bv b{color:var(--ink)}
+@media (max-width:560px){.bars li{grid-template-columns:1fr}.bars .bv{text-align:left}}
+svg.hbar{width:100%;height:8px;display:block}
+svg.hbar .track,svg.ratio .track{fill:var(--surface-2);stroke:var(--line)}
+.f-rule{fill:var(--rule)} .f-ready{fill:var(--ready)} .f-model{fill:var(--model)} .f-v1{fill:var(--v1)} .f-v2{fill:var(--v2)}
+ol.kf{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+ol.kf li{border-left:3px solid var(--line-strong);padding:2px 0 2px 12px;display:flex;flex-direction:column;gap:4px}
+ol.kf li.largest,ol.kf li.hidden{border-left-color:var(--rule)} ol.kf li.unseen,ol.kf li.readiness{border-left-color:var(--ready)}
+ol.kf li.unassessed{border-left-color:var(--model)}
+ol.kf p{margin:0;color:var(--ink-2);font-size:13px}
+a.more{font-size:12.5px;align-self:flex-start}
+table.grid{width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px}
+table.grid th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+table.grid td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.grid tr:last-child td{border-bottom:0}
+table.grid td.alert{display:flex;flex-direction:column;gap:2px;min-width:220px}
+table.grid td.alert .msg,ul.listed .msg{font-size:13px}
+table.grid td.step{color:var(--ink-2);min-width:220px}
+a.chip.rule{text-decoration:none}
+.rate{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+svg.ratio{width:120px;height:18px;display:block;overflow:visible}
+svg.ratio .rtick{stroke:var(--ink-2);stroke-width:.8}
+svg.ratio text{font-family:var(--sans);font-size:6.5px;fill:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line)}
+.pill.stuck{background:var(--ready-soft);color:var(--ready);border-color:transparent}
+.pill.spamming{background:var(--rule-soft);color:var(--rule);border-color:transparent}
+.pill.flapping{background:var(--model-soft);color:var(--model);border-color:transparent}
+ul.thresholds{list-style:none;margin:0;padding:10px 12px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);border-radius:6px}
+ul.fixes,ul.inputs,ul.caveats{margin:0;padding-left:18px;font-size:12.5px;color:var(--ink-2);display:flex;flex-direction:column;gap:4px}
+p.msg{margin:0}
+ul.vis,ul.listed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px}
+ul.listed li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;border-top:1px solid var(--line);padding-top:8px}
+ul.listed .msg{grid-column:1} ul.listed .ctx{grid-column:1} ul.listed .cnt{grid-row:1;grid-column:2;color:var(--muted);font-size:12px;white-space:nowrap}
+ol.phases{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+ol.phases li{border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;font-size:12.5px;background:var(--surface-2)}
+ol.phases li.on{border-color:var(--ink);background:var(--surface);box-shadow:inset 0 3px 0 var(--ink)}
+@media (max-width:760px){ol.phases{grid-template-columns:1fr 1fr}}
+.estc{border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.estc .big{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em}
+.estc .sub,.estc .noest{margin:0}
 """.strip()
 
 #: Content-addressed, so a changed stylesheet is never served from a stale cache.

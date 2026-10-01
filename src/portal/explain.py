@@ -55,6 +55,58 @@ def _text(value: Any) -> str:
 # ------------------------------------------------------------------ deterministic rules
 
 
+_R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
+    # pattern: (title, next step, what the pattern means)
+    "stuck": (
+        "Stuck: re-fired for days without clearing",
+        "Resolve the cause or clear the alert when it recovers; a stuck alert hides new problems.",
+        "It kept re-firing at its repeat interval for days and never cleared.",
+    ),
+    "spamming": (
+        "Spamming: fires faster than its repeat interval",
+        "Send each alert from one place, once per repeat interval.",
+        "It fired faster than its repeat interval allows.",
+    ),
+    "flapping": (
+        "Flapping: fires and clears over and over",
+        "Add hysteresis or a longer pending period so the alert settles before it fires.",
+        "It fired and cleared at least three times inside 24 hours.",
+    ),
+    "neutral": (
+        "Firing pattern: stuck, spamming or flapping",
+        "Fix how often this alert fires: clear it on recovery and send it once per repeat "
+        "interval.",
+        "Its firing pattern was stuck, spamming or flapping.",
+    ),
+}
+
+
+def _r6_pattern(evidence: Evidence) -> str:
+    pattern = _text(evidence.get("pattern"))
+    return pattern if pattern in _R6_COPY else "neutral"
+
+
+def _r6_why(evidence: Evidence) -> str:
+    pattern = _r6_pattern(evidence)
+    if evidence.get("rows") is None:
+        return _R6_COPY[pattern][2]
+    return (
+        f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))} over "
+        f"{_text(evidence.get('span_hours'))} hours, {_text(evidence.get('clear_count'))} "
+        f"clears, {_text(evidence.get('max_clear_cycles_24h'))} fire-and-clear cycles in "
+        "the busiest 24 hours."
+    )
+
+
+def _r6_observed(evidence: Evidence) -> str:
+    ratio = evidence.get("ratio")
+    return (
+        f"{_r6_pattern(evidence)} · {_text(evidence.get('rows'))} events · "
+        f"{_text(evidence.get('span_hours'))} h"
+        + (f" · fire rate {_text(ratio)}x" if ratio is not None else "")
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuleText:
     title: str
@@ -198,6 +250,13 @@ RULE_TEXT: Final[dict[str, RuleText]] = {
             "from the panel."
         ),
     ),
+    "R6": RuleText(
+        title=_R6_COPY["neutral"][0],
+        reason=lambda e: _R6_COPY[_r6_pattern(e)][0],
+        why=_r6_why,
+        observed=_r6_observed,
+        next_step=_R6_COPY["neutral"][1],
+    ),
     "R7": RuleText(
         title="Creation time out of range",
         reason=lambda _: "Creation time outside the allowed 24 hours",
@@ -260,13 +319,16 @@ def rule_explanation(rule_id: str, evidence: Evidence | None) -> RuleExplanation
         return RuleExplanation(
             rule_id, rule_id, f"Rule {rule_id}", f"Rule {rule_id} matched.", "", "", False
         )
+    title, next_step = text.title, text.next_step
+    if rule_id == "R6":
+        title, next_step = _R6_COPY[_r6_pattern(sample)][:2]
     return RuleExplanation(
         rule_id=rule_id,
-        title=text.title,
+        title=title,
         reason=text.reason(sample),
         why=text.why(sample),
         observed=text.observed(sample),
-        next_step=text.next_step,
+        next_step=next_step,
         readiness=text.readiness,
     )
 

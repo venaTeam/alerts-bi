@@ -140,7 +140,7 @@ A runbook URL establishes only a link: you have NOT read the runbook or verified
 P10 requires evidence that the response is entirely robotic, not speculation about what
 the runbook might say. Do not infer panel suppression (R5), spam (R6), duration or firing
 frequency from repeated documents or neighbours. No panel evidence or volume history is
-supplied, and R6 remains deferred. R5/R6 remain catalogue labels, not evidence.
+supplied, and R6 is decided deterministically and must not be inferred. R5/R6 remain catalogue labels, not evidence.
 
 Application-fallback groups can contain unrelated rules. Neighbours may illustrate
 variation, but cannot supply missing impact, environment or actions for an alert.
@@ -162,7 +162,7 @@ R2  Informational / heartbeat message ("that's a log, not an alert")
 R3  Placeholder or missing required identity/ownership metadata
 R4  Grafana alert missing its alert-rule link
 R5  Self-suppressed: the team filters this alert out of its own panel
-R6  Spam volume (not evaluated deterministically in this version)
+R6  Firing pattern: stuck, spamming or flapping against the schema's repeat interval (deterministic; R6 alerts never reach you)
 R7  Invalid time_created: later than receipt, or more than 24 hours before it
 R8  Missing or unusable impact (v2)
 R9  Missing or invalid absolute HTTP(S) runbook_url (v2)

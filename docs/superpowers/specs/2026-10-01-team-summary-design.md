@@ -147,7 +147,7 @@ constants under `ruleset_version`, never environment settings.
   pattern).
 - **`ruleset_version` → 1.1.0.** This changes every new `run_id`, as any version bump does.
   Published runs are never re-persisted.
-- **Prompt left at 1.2.0 (recommended).** The prompt calls R6 a catalogue label that is
+- **Prompt: superseded 2026-10-01 — ships as 1.3.0 (design 7.14), because the prompt embeds `ruleset_version`.** Original text: The prompt calls R6 a catalogue label that is
   "not evaluated deterministically in this version" and tells the model not to infer volume.
   Every R6 alert is withheld from the model, so the line cannot affect a verdict. Changing it
   forces `PROMPT_VERSION` 1.3.0, a new pinned prompt artifact and **re-classification of every
@@ -171,7 +171,9 @@ reaches the model and gets no blast-radius guard, because nothing is marked bad.
   multi-value selection never hides. A row is **unseen** when every panel for its schema hides
   it, minus rows already suppressed, so the two counts are disjoint.
 - **Unmeasured:** identity leaves nested in `OR`, or with an unresolved `query` variable, add to
-  `unseen_unmeasured`. That panel is treated as showing the row.
+  `unseen_unmeasured`, and that leaf never hides a row. Another top-level identity leaf of
+  the same panel can still hide it. An unparseable panel hides nothing and adds 1 to
+  `unseen_unmeasured`.
 - **No panel for a schema:** `unseen` is `NULL`.
 - **Allocation:** `unseen` per bucket by row date; `unseen_unmeasured` on the schema's first
   bucket, like `suppression_unmeasured` (design 7.6).

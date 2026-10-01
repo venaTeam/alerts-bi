@@ -89,7 +89,7 @@ def _num(value: Any) -> float:
 
 def rollup_schema(daily: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Roll daily rows up for one schema using the approved formulas."""
-    totals = {
+    totals: dict[str, Any] = {
         key: sum(_num(row[key]) for row in daily)
         for key in (
             "alerts",
@@ -112,10 +112,9 @@ def rollup_schema(daily: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
     # ``unseen`` is NULL, not zero, where no panel was supplied: it stays None unless at
     # least one bucket carries a measured count.
-    unseen_values = [row.get("unseen") for row in daily]
-    measured = [v for v in unseen_values if v is not None]
-    totals["unseen"] = sum(_num(v) for v in measured) if measured else None  # type: ignore[assignment]
-    totals["unseen_unmeasured"] = sum(_num(row.get("unseen_unmeasured")) for row in daily)
+    for key in ("unseen", "unseen_unmeasured"):
+        measured = [row.get(key) for row in daily if row.get(key) is not None]
+        totals[key] = sum(_num(v) for v in measured) if measured else None
     node_den = totals["node_name_denominator"]
     key_den = totals["key_inflation_denominator"]
     return {
@@ -354,13 +353,17 @@ because that would count what nobody looked at as fine.</p>
 def _render_visibility(rollup: Mapping[str, Any], panels: Sequence[Mapping[str, Any]]) -> str:
     suppressed = rollup["v1"]["suppressed"] + rollup["v2"]["suppressed"]
     unmeasured = rollup["v1"]["suppression_unmeasured"] + rollup["v2"]["suppression_unmeasured"]
-    unseen_values = [rollup[s]["unseen"] for s in ("v1", "v2") if rollup[s]["unseen"] is not None]
-    unseen_unmeasured = rollup["v1"]["unseen_unmeasured"] + rollup["v2"]["unseen_unmeasured"]
-    unseen_card = (
-        _int(sum(unseen_values))
-        if unseen_values
-        else '<span class="empty">&mdash; no panel supplied</span>'
-    )
+
+    def per_schema(key: str) -> str:
+        parts = []
+        for schema in ("v1", "v2"):
+            value = rollup[schema][key]
+            shown = _int(value) if value is not None else "&mdash; no panel supplied"
+            parts.append(f'<span class="unseen-{schema}">{schema}: {shown}</span>')
+        return " &middot; ".join(parts)
+
+    unseen_card = per_schema("unseen")
+    unseen_unmeasured_card = per_schema("unseen_unmeasured")
     if panels:
         panel_rows = "".join(
             f"<tr><td>{escape_html(p['panel_id'])}</td><td>{escape_html(p['alert_schema'])}</td>"
@@ -385,7 +388,7 @@ rather than passing for zero.</p>
   {_card("Suppressed (rows)", _int(suppressed))}
   {_card("Suppression unmeasured (leaves)", _int(unmeasured))}
   {_card("Unseen (rows no panel shows)", unseen_card, "owned rows hidden by every supplied panel")}
-  {_card("Unseen unmeasured (leaves)", _int(unseen_unmeasured))}
+  {_card("Unseen unmeasured (leaves)", unseen_unmeasured_card)}
 </div>
 <h3>Supplied panels</h3>
 <div class="table-wrap"><table>
