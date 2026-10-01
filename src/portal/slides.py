@@ -238,11 +238,14 @@ def _slide_one(summary: TeamSummary) -> str:
 
 #: The chart's drawing box in CSS px: the SVG is drawn 1:1, so text sizes are real sizes.
 CHART_W, CHART_H = 576, 170
-_LEFT, _RIGHT, _TOP, _BOTTOM = 66, 64, 10, 26
-#: Two fixed categorical slots, validated together on the white slide surface.
+_LEFT, _RIGHT, _TOP, _BOTTOM = 72, 64, 10, 34
+#: Two fixed categorical slots, validated together on the white slide surface. Distinct
+#: alerts are drawn first and wide, rule-flagged on top, thin and dashed, with a smaller
+#: marker: the noisy line often equals the distinct one, and both must stay visible
+#: without relying on colour alone. The radius is each series' marker size.
 SERIES = (
-    ("distinct", "Distinct alerts", "sl-s1"),
-    ("flagged", "Rule-flagged (noisy)", "sl-s2"),
+    ("distinct", "Distinct alerts", "sl-s1", 6),
+    ("flagged", "Rule-flagged (noisy)", "sl-s2", 4),
 )
 PARTIAL_NOTE = "Hollow points are partial days (the week does not start at midnight UTC)."
 
@@ -278,7 +281,7 @@ def _chart_svg(schema: str, points: Sequence[DailyPoint]) -> str:
         parts.append(
             f'<line class="sl-grid" x1="{_LEFT}" x2="{CHART_W - _RIGHT}" '
             f'y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
-            f'<text class="sl-tick" x="{_LEFT - 8}" y="{y(tick) + 6:.1f}" '
+            f'<text class="sl-tick" x="{_LEFT - 10}" y="{y(tick) + 6:.1f}" '
             f'text-anchor="end">{tick:,}</text>'
         )
     for i, point in enumerate(points):
@@ -287,7 +290,7 @@ def _chart_svg(schema: str, points: Sequence[DailyPoint]) -> str:
             f"{point.day:%a} {point.day.day}</text>"
         )
     ends = []
-    for key, label, css in SERIES:
+    for key, label, css, radius in SERIES:
         values = [_value(p, key) for p in points]
         path = " ".join(
             f"{'M' if i == 0 else 'L'}{x(i):.1f} {y(v):.1f}" for i, v in enumerate(values)
@@ -296,17 +299,21 @@ def _chart_svg(schema: str, points: Sequence[DailyPoint]) -> str:
         for i, (point, value) in enumerate(zip(points, values, strict=True)):
             hollow = " sl-hollow" if _is_partial(point) else ""
             parts.append(
-                f'<circle class="sl-pt {css}{hollow}" cx="{x(i):.1f}" cy="{y(value):.1f}" r="5">'
+                f'<circle class="sl-pt {css}{hollow}" cx="{x(i):.1f}" cy="{y(value):.1f}" r="{radius}">'
                 f"<title>{h(label)}, {point.day:%a} {point.day.day}: {value:,}</title></circle>"
             )
         ends.append(y(values[-1]))
     # Direct-label the last value of each line only. Distinct alerts never sit below the
-    # rule-flagged count, so when the two ends meet the labels part above and below.
+    # rule-flagged count, so when the two ends meet the labels part above and below, and
+    # the lower one stays clear of the baseline and the day labels under it.
     upper, lower = ends
-    if lower - upper < 20:
+    if lower - upper < 22:
         middle = (upper + lower) / 2
-        upper, lower = middle - 10, middle + 10
-    for (key, _label, _css), label_y in zip(SERIES, (upper, lower), strict=True):
+        upper, lower = middle - 11, middle + 11
+    lowest = base - 10
+    if lower > lowest:
+        upper, lower = min(upper, lowest - 22), lowest
+    for (key, _label, _css, _radius), label_y in zip(SERIES, (upper, lower), strict=True):
         parts.append(
             f'<text class="sl-end" x="{x(len(points) - 1) + 10:.1f}" y="{label_y + 6:.1f}">'
             f"{_value(points[-1], key):,}</text>"
@@ -329,20 +336,34 @@ def _fire_line(summary: TeamSummary, schema: str) -> str:
     return f'<p class="sl-fire-line">Firing patterns · {h(schema)}: {text}</p>'
 
 
-def _chart(summary: TeamSummary, schema: str) -> str:
+def _charted(summary: TeamSummary, schema: str) -> list[DailyPoint]:
+    """The schema's day buckets in stored order, or nothing when there is nothing to draw."""
     points = [p for p in summary.inputs.daily if p.alert_schema == schema]
-    legend = "".join(
-        f'<li><span class="sl-key {css}" aria-hidden="true"></span>{h(label)}</li>'
-        for _key, label, css in SERIES
+    if any(p.distinct_alerts or p.rule_flagged_distinct for p in points):
+        return points
+    return []
+
+
+def _legend() -> str:
+    items = "".join(
+        f'<li><svg class="sl-key" viewBox="0 0 28 8" aria-hidden="true">'
+        f'<path class="sl-key-l {css}" d="M0 4H28"/></svg>{h(label)}</li>'
+        for _key, label, css, _radius in SERIES
     )
-    if points and any(p.distinct_alerts or p.rule_flagged_distinct for p in points):
-        body = _chart_svg(schema, points)
+    return f'<ul class="sl-chart-legend">{items}</ul>'
+
+
+def _chart(summary: TeamSummary, schema: str) -> str:
+    points = _charted(summary, schema)
+    if points:
+        body = _legend() + _chart_svg(schema, points)
     else:
+        # The box takes the legend's place too, so both charts keep one height.
         body = f'<p class="sl-chart-empty">No {h(schema)} alerts this week</p>'
     return (
         f'<div class="sl-block sl-chartbox {schema}">'
         f'<h5 class="sl-chart-h">{h(schema)}: distinct alerts by UTC day</h5>'
-        f'<ul class="sl-chart-legend">{legend}</ul>{body}{_fire_line(summary, schema)}</div>'
+        f"{body}{_fire_line(summary, schema)}</div>"
     )
 
 
@@ -372,6 +393,14 @@ def _not_consumed_tile(summary: TeamSummary, schema: str) -> str:
     # so an event count reflects the evaluation cadence more than the alert, while distinct
     # alerts are what the charts above count. Events stay beside it as the secondary line.
     totals = summary.inputs.schemas[schema]
+    if totals.unseen is None:
+        # No panel was supplied for this schema, so nothing was measured: a "0" here would
+        # say the team's panel hides nothing when no panel was read (design 3.2).
+        return (
+            f'<div class="sl-nc {schema}">'
+            f'<p class="sl-nc-n">{_chip(schema)}<b>{DASH}</b></p>'
+            '<p class="sl-na">no dashboard supplied</p></div>'
+        )
     filtered = sum(
         r.alerts for r in summary.inputs.rules if r.schema == schema and r.rule_id == "R5"
     )
@@ -383,7 +412,8 @@ def _not_consumed_tile(summary: TeamSummary, schema: str) -> str:
     return (
         f'<div class="sl-nc {schema}">'
         f'<p class="sl-nc-n">{_chip(schema)}<b>{filtered:,}</b></p>'
-        '<p class="sl-nc-u">alerts filtered out by your panel SQL</p>'
+        f'<p class="sl-nc-u">{"alert" if filtered == 1 else "alerts"} filtered out by your '
+        "panel SQL</p>"
         f"<p>{_plural(totals.suppressed, 'event')}</p><p>{unseen}</p></div>"
     )
 
@@ -421,7 +451,8 @@ def _time_left(estimate: Estimate) -> str:
 
 def _slide_two(summary: TeamSummary) -> str:
     charts = "".join(_chart(summary, schema) for schema in SCHEMAS)
-    partial = any(_is_partial(p) for p in summary.inputs.daily)
+    # Only drawn points can be hollow, so the footnote follows the charts actually shown.
+    partial = any(_is_partial(p) for schema in SCHEMAS for p in _charted(summary, schema))
     note = f'<p class="sl-partial">{h(PARTIAL_NOTE)}</p>' if partial else ""
     body = (
         f'<div class="sl-charts">{charts}</div>{note}'

@@ -780,6 +780,10 @@ def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> No
     assert "stands</h4>" in slides and "The week, day by day</h4>" in slides
     assert "Biggest single alert" in slides and "What to fix" not in slides
     assert "Top rules" not in slides and "<polyline" not in slides
+    # Both fixtures store non-zero day buckets for v1 and v2: two charts, no empty box.
+    assert slides.count('<svg class="sl-chart"') == 2
+    assert "No v1 alerts this week" not in slides
+    assert "No v2 alerts this week" not in slides
     assert "week ending 30 Aug 2026 · Alerts BI" in slides
     assert _run_id("wk3") not in slides and "href=" not in slides
 

@@ -297,7 +297,7 @@ svg.donut .r7,.dlegend .r7{fill:var(--r7)}
 .sl-big b{font-size:48px;font-weight:600;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .sl-big span{color:var(--sl-ink-2)}
 .sl-facts{min-width:0;color:var(--sl-ink-2);font-variant-numeric:tabular-nums}
-.sl-lines li,.sl-app,.sl-an,.sl-af,.sl-fire-line,.sl-nc-h,.sl-when{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl-app,.sl-an,.sl-af,.sl-fire-line,.sl-when{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 svg.sl-bar{width:100%;height:12px;display:block}
 .sl-track{fill:var(--sl-line)}
 .sl-q-rule{fill:var(--sl-rule)} .sl-q-model{fill:var(--sl-model)} .sl-q-review{fill:var(--sl-model);opacity:.5} .sl-q-good{fill:var(--sl-good)} .sl-q-un{fill:var(--sl-un)}
@@ -309,7 +309,8 @@ svg.sl-bar{width:100%;height:12px;display:block}
 .sl-label{font-size:16px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--sl-muted);padding-bottom:4px;border-bottom:2px solid var(--sl-line)}
 .sl-none,.sl-pad,.sl-na{color:var(--sl-muted)}
 .sl-kf,.sl-big1{grid-column:span 6} .sl-big1{gap:8px}
-.sl-lines{display:flex;flex-direction:column;gap:10px}
+.sl-lines{display:flex;flex-direction:column;gap:8px}
+.sl-lines li{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-height:2.5em}
 .sl-lines span{color:var(--sl-ink-2)}
 .sl-def{font-size:18px;color:var(--sl-muted)}
 .sl-lead b{font-variant-numeric:tabular-nums}
@@ -322,23 +323,23 @@ svg.sl-bar{width:100%;height:12px;display:block}
 .sl-chartbox{gap:6px}
 .sl-chart-h{font-size:20px;font-weight:600;display:flex;align-items:center}
 .sl-chart-legend{display:flex;gap:24px;font-size:18px;color:var(--sl-ink)}
-.sl-key{display:inline-block;width:18px;height:4px;border-radius:2px;margin-right:8px;vertical-align:middle}
-.sl-key.sl-s1{background:var(--sl-s1)} .sl-key.sl-s2{background:var(--sl-s2)}
+svg.sl-key{display:inline-block;width:28px;height:8px;margin-right:8px;vertical-align:middle;overflow:visible}
+.sl-key-l{fill:none}
 svg.sl-chart{display:block;width:100%;height:170px;overflow:visible}
 .sl-grid{stroke:var(--sl-line);stroke-width:1}
 .sl-tick{font-family:var(--sans);font-size:16px;fill:var(--sl-muted);font-variant-numeric:tabular-nums}
-.sl-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-.sl-line.sl-s1{stroke:var(--sl-s1)} .sl-line.sl-s2{stroke:var(--sl-s2)}
-.sl-pt{stroke:var(--sl-bg);stroke-width:2} .sl-pt.sl-s1{fill:var(--sl-s1)} .sl-pt.sl-s2{fill:var(--sl-s2)}
-.sl-pt.sl-hollow{fill:var(--sl-bg)} .sl-pt.sl-hollow.sl-s1{stroke:var(--sl-s1)} .sl-pt.sl-hollow.sl-s2{stroke:var(--sl-s2)}
+.sl-line{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.sl-line.sl-s1,.sl-key-l.sl-s1{stroke:var(--sl-s1);stroke-width:4}
+.sl-line.sl-s2,.sl-key-l.sl-s2{stroke:var(--sl-s2);stroke-width:2;stroke-dasharray:6 4;stroke-linecap:butt}
+.sl-pt{stroke:none} .sl-pt.sl-s1{fill:var(--sl-s1)} .sl-pt.sl-s2{fill:var(--sl-s2)}
+.sl-pt.sl-hollow{fill:var(--sl-bg)} .sl-pt.sl-hollow.sl-s1{stroke:var(--sl-s1);stroke-width:2.5} .sl-pt.sl-hollow.sl-s2{stroke:var(--sl-s2);stroke-width:2}
 .sl-end{font-family:var(--sans);font-size:18px;font-weight:600;fill:var(--sl-ink)}
-.sl-chart-empty{height:170px;margin:0;display:flex;align-items:center;justify-content:center;color:var(--sl-muted);background:var(--sl-soft);border-radius:8px}
+.sl-chart-empty{height:199px;margin:0;display:flex;align-items:center;justify-content:center;color:var(--sl-muted);background:var(--sl-soft);border-radius:8px}
 .sl-fire-line{font-size:18px;color:var(--sl-ink-2)}
 .sl-partial{font-size:14px;color:var(--sl-muted);margin-top:-4px}
 .sl-bottom{display:grid;grid-template-columns:minmax(0,10fr) minmax(0,9fr) minmax(0,9fr);column-gap:32px;flex:1 1 auto;min-height:0;overflow:hidden}
 .sl-nc-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .sl-nc{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:18px;color:var(--sl-ink-2)}
-.sl-nc-h{display:flex;align-items:center;font-weight:600;color:var(--sl-ink)}
 .sl-nc-n b{font-size:48px;font-weight:600;line-height:1.05;color:var(--sl-ink)}
 .sl-app-list{display:flex;flex-direction:column;gap:8px}
 .sl-app-list li{display:grid;grid-template-columns:minmax(0,auto) auto 1fr;align-items:baseline}

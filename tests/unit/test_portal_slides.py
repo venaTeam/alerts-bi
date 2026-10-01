@@ -17,7 +17,7 @@ from src.insights import DailyPoint, KeyFinding, RuleTotal, TeamSummary
 from src.portal.assets import STYLESHEET
 from src.portal.explain import EN_DASH
 from src.portal.pages import h
-from src.portal.slides import MESSAGE_LIMIT, PARTIAL_NOTE, percent, render_slides
+from src.portal.slides import CHART_H, MESSAGE_LIMIT, PARTIAL_NOTE, percent, render_slides
 from src.portal.summary_view import render_summary_sections
 
 from tests.unit.test_portal_summary_view import (
@@ -266,6 +266,16 @@ def test_a_schema_with_no_alerts_says_so() -> None:
     assert "No v1 alerts this week" not in one
 
 
+def test_key_findings_wrap_to_two_lines_rather_than_one() -> None:
+    css = STYLESHEET[STYLESHEET.index("Presentation slides") :]
+    rule = css[css.index(".sl-lines li{") :]
+    rule = rule[: rule.index("}")]
+    for declaration in ("display:-webkit-box", "-webkit-line-clamp:2", "max-height:2.5em"):
+        assert declaration in rule, declaration
+    nowrap = css[: css.index("{white-space:nowrap;")]
+    assert ".sl-lines li" not in nowrap[nowrap.rindex("}") :]
+
+
 def test_only_the_first_three_key_findings_are_shown() -> None:
     findings = tuple(
         KeyFinding("largest", f"Finding {i}", f"Body {i}.", None, None) for i in range(5)
@@ -347,13 +357,46 @@ def test_only_the_last_value_of_each_line_is_labelled() -> None:
     assert labels == ["3", "2"], "distinct, then rule-flagged, on the last day"
 
 
+def end_label_ys(svg: str) -> list[float]:
+    return [float(y) for y in re.findall(r'<text class="sl-end" x="[\d.]+" y="([\d.]+)"', svg)]
+
+
+def test_end_labels_stay_clear_of_the_baseline_and_of_each_other() -> None:
+    base = CHART_H - 34  # the plot's baseline: chart height minus the bottom margin
+    for distinct, flagged in ((0, 0), (1, 0), (5, 5), (9, 1)):
+        points = week("v1", [9, 9, distinct], [1, 1, flagged])
+        upper, lower = end_label_ys(chart(slides(with_daily(build_summary(), points)), "v1"))
+        assert lower <= base - 4, (distinct, flagged, lower)
+        assert lower - upper >= 22, "18px labels never overlap"
+
+
 def test_the_axis_starts_at_zero_with_three_or_four_gridlines() -> None:
     for values in ([3], [7], [12], [1234], [0, 1]):
         points = week("v1", values, [0] * len(values))
         one = chart(slides(with_daily(build_summary(), points)), "v1")
-        ticks = re.findall(r'<text class="sl-tick" x="58" [^>]*>([\d,]+)</text>', one)
+        ticks = re.findall(r'<text class="sl-tick" x="62" [^>]*>([\d,]+)</text>', one)
         assert ticks[0] == "0" and 3 <= len(ticks) <= 4, (values, ticks)
         assert one.count('<line class="sl-grid"') == len(ticks)
+
+
+def test_overlapping_lines_both_stay_visible() -> None:
+    """Rule-flagged often equals distinct: distinct is drawn first and wide, flagged on top,
+    thin and dashed, with a smaller marker, and the legend shows the same dash."""
+    same = week("v1", [4, 4, 4], [4, 4, 4])
+    v1 = chart(slides(with_daily(build_summary(), same)), "v1")
+    paths = re.findall(r'<path class="sl-line (sl-s\d)"', v1)
+    assert paths == ["sl-s1", "sl-s2"], "distinct first, rule-flagged on top"
+    assert v1.index('<circle class="sl-pt sl-s1') < v1.index('<path class="sl-line sl-s2"')
+    assert set(re.findall(r'<circle class="sl-pt sl-s1[^"]*"[^>]* r="(\d+)"', v1)) == {"6"}
+    assert set(re.findall(r'<circle class="sl-pt sl-s2[^"]*"[^>]* r="(\d+)"', v1)) == {"4"}
+    legend = v1[v1.index('<ul class="sl-chart-legend">') : v1.index("</ul>")]
+    assert '<path class="sl-key-l sl-s1"' in legend and '<path class="sl-key-l sl-s2"' in legend
+    css = STYLESHEET[STYLESHEET.index("Presentation slides") :]
+    wide = css[css.index(".sl-line.sl-s1,.sl-key-l.sl-s1{") :]
+    assert "stroke-width:4" in wide[: wide.index("}")]
+    dashed = css[css.index(".sl-line.sl-s2,.sl-key-l.sl-s2{") :]
+    assert "stroke-width:2" in dashed[: dashed.index("}")]
+    assert "stroke-dasharray:6 4" in dashed[: dashed.index("}")]
 
 
 def test_a_partial_day_is_hollow_and_footnoted() -> None:
@@ -372,12 +415,19 @@ def test_a_partial_day_is_hollow_and_footnoted() -> None:
     )
 
 
+def test_the_partial_day_footnote_follows_only_the_charts_drawn() -> None:
+    quiet_partial = week("v1", [0, 0, 0], [0, 0, 0], [6.0, 24.0, 18.0])
+    html = slides(with_daily(build_summary(), quiet_partial + V2_WEEK))
+    assert "No v1 alerts this week" in chart(html, "v1")
+    assert PARTIAL_NOTE not in html, "no hollow point is drawn, so nothing to explain"
+
+
 def test_a_schema_with_no_rows_says_so_in_the_charts_place() -> None:
     html = slides(with_daily(build_summary(), V1_WEEK))
     v2 = chart(html, "v2")
     assert '<p class="sl-chart-empty">No v2 alerts this week</p>' in v2
-    assert "<svg" not in v2
-    assert "<svg" in chart(html, "v1")
+    assert "<svg" not in v2 and "sl-chart-legend" not in v2, "no legend over an empty box"
+    assert "<svg" in chart(html, "v1") and "sl-chart-legend" in chart(html, "v1")
 
 
 def test_the_charts_never_combine_v1_and_v2() -> None:
@@ -394,15 +444,31 @@ def test_not_consumed_by_your_dashboards_leads_with_filtered_alerts() -> None:
         frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
     )
     v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
-    v2 = nc[nc.index('"sl-chip v2"') :]
     assert '<span class="sl-chip v1">v1</span><b>4</b></p>' in nc
-    assert "alerts filtered out by your panel SQL" in v1
+    assert '<p class="sl-nc-u">alerts filtered out by your panel SQL</p>' in v1
     assert "<p>120 events</p>" in v1 and "<p>1 alert on no dashboard</p>" in v1
-    assert '<span class="sl-chip v2">v2</span><b>0</b></p>' in nc
-    assert "alerts filtered out by your panel SQL" in v2 and "<p>0 events</p>" in v2
-    assert '<span class="sl-na">no dashboard supplied</span>' in v2
     assert nc.index('"sl-chip v1"') < nc.index('"sl-chip v2"'), "v1 then v2"
     assert "124" not in nc and "4,321" not in nc, "v1 and v2 are never added"
+
+
+def test_not_consumed_never_turns_a_missing_dashboard_into_zero() -> None:
+    """No panel for a schema (unseen is None) is unmeasured, not zero (design 3.2)."""
+    rules = (RuleTotal("v1", "R5", 120, 4),)
+    nc = block(
+        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
+    )
+    v2 = nc[nc.index('"sl-chip v2"') :]
+    assert '<span class="sl-chip v2">v2</span><b>—</b></p>' in nc
+    assert '<p class="sl-na">no dashboard supplied</p>' in v2
+    assert "<b>0</b>" not in v2 and "events" not in v2 and "filtered out" not in v2
+
+    no_panel = {
+        "v1": schema_totals("v1", unseen=None, unseen_alerts=None),
+        "v2": schema_totals("v2"),
+    }
+    nc = block(frame(slides(build_summary(schemas=no_panel)), 2), "Not consumed by your dashboards")
+    v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
+    assert "<b>—</b>" in v1 and "no dashboard supplied" in v1 and "events" not in v1
 
 
 def test_not_consumed_reads_the_r5_alerts_of_its_own_schema_only() -> None:
@@ -411,22 +477,22 @@ def test_not_consumed_reads_the_r5_alerts_of_its_own_schema_only() -> None:
         RuleTotal("v2", "R5", 30, 2),
         RuleTotal("v1", "R1", 5, 3),
     )
-    nc = block(
-        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
-    )
+    with_panel = {"v1": schema_totals("v1"), "v2": schema_totals("v2", unseen=0, unseen_alerts=0)}
+    summary = with_rules(build_summary(schemas=with_panel), rules)
+    nc = block(frame(slides(summary), 2), "Not consumed by your dashboards")
     assert '<span class="sl-chip v1">v1</span><b>7</b></p>' in nc
     assert '<span class="sl-chip v2">v2</span><b>2</b></p>' in nc
     assert "<b>9</b>" not in nc and "<b>10</b>" not in nc
+    assert "<p>0 alerts on no dashboard</p>" in nc
 
 
-def test_not_consumed_with_a_panel_but_no_unseen_figure() -> None:
-    schemas = {
-        "v1": schema_totals("v1", unseen=None, unseen_alerts=None),
-        "v2": schema_totals("v2"),
-    }
-    nc = block(frame(slides(build_summary(schemas=schemas)), 2), "Not consumed by your dashboards")
-    v1 = nc[nc.index('"sl-chip v1"') : nc.index('"sl-chip v2"')]
-    assert "<p>120 events</p>" in v1 and "no dashboard supplied" in v1
+def test_one_filtered_alert_reads_in_the_singular() -> None:
+    rules = (RuleTotal("v1", "R5", 120, 1),)
+    nc = block(
+        frame(slides(with_rules(build_summary(), rules)), 2), "Not consumed by your dashboards"
+    )
+    assert '<p class="sl-nc-u">alert filtered out by your panel SQL</p>' in nc
+    assert "alerts filtered out" not in nc
 
 
 def test_noisiest_applications_keep_rule_and_model_figures_apart() -> None:
