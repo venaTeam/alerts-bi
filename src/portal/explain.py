@@ -72,16 +72,24 @@ _R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "Add hysteresis or a longer pending period so the alert settles before it fires.",
         "It fired and cleared at least three times inside 24 hours.",
     ),
+    "neutral": (
+        "Firing pattern: stuck, spamming or flapping",
+        "Fix how often this alert fires: clear it on recovery and send it once per repeat "
+        "interval.",
+        "Its firing pattern was stuck, spamming or flapping.",
+    ),
 }
 
 
 def _r6_pattern(evidence: Evidence) -> str:
     pattern = _text(evidence.get("pattern"))
-    return pattern if pattern in _R6_COPY else "stuck"
+    return pattern if pattern in _R6_COPY else "neutral"
 
 
 def _r6_why(evidence: Evidence) -> str:
     pattern = _r6_pattern(evidence)
+    if evidence.get("rows") is None:
+        return _R6_COPY[pattern][2]
     return (
         f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))} over "
         f"{_text(evidence.get('span_hours'))} hours, {_text(evidence.get('clear_count'))} "
@@ -243,11 +251,11 @@ RULE_TEXT: Final[dict[str, RuleText]] = {
         ),
     ),
     "R6": RuleText(
-        title="Firing pattern: stuck, spamming or flapping",
+        title=_R6_COPY["neutral"][0],
         reason=lambda e: _R6_COPY[_r6_pattern(e)][0],
         why=_r6_why,
         observed=_r6_observed,
-        next_step=_R6_COPY["stuck"][1],
+        next_step=_R6_COPY["neutral"][1],
     ),
     "R7": RuleText(
         title="Creation time out of range",

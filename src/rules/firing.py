@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from fractions import Fraction
 
 from src.domain.cadence import REPEAT_INTERVAL
 from src.domain.normalize import AlertRecord
@@ -21,6 +22,13 @@ from src.rules.catalogs import (
 __all__ = ["FiringFacts", "firing_facts", "is_clear"]
 
 _DAY = timedelta(hours=24)
+_US = timedelta(microseconds=1)
+
+
+def _at_least(events_x_unit: timedelta, threshold: float, span: timedelta) -> bool:
+    """Exact ``events_x_unit >= threshold * span`` (threshold is a short decimal)."""
+    t = Fraction(str(threshold))
+    return Fraction(events_x_unit // _US) >= t * (span // _US)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +48,12 @@ def is_clear(row: AlertRecord) -> bool:
     return row.status == "resolved"
 
 
-def firing_facts(schema: str, rows: Sequence[AlertRecord]) -> FiringFacts:
-    """Facts and R6 pattern for one identity's rows (``rows`` must not be empty)."""
+def firing_facts(schema: str, rows: Sequence[AlertRecord], provider: str | None) -> FiringFacts:
+    """Facts and R6 pattern for one identity's rows (``rows`` must not be empty).
+
+    ``provider`` is the identity's representative row's provider. Thresholds are decided
+    with exact ``timedelta`` arithmetic; floats are kept only for evidence and display.
+    """
     ordered = sorted(rows, key=lambda r: (r.timestamp, r.doc_hash))
     clears = [is_clear(r) for r in ordered]
     cycle_times = [
@@ -56,20 +68,21 @@ def firing_facts(schema: str, rows: Sequence[AlertRecord]) -> FiringFacts:
     interval = REPEAT_INTERVAL[schema]
     span = ordered[-1].timestamp - ordered[0].timestamp + interval
     n = len(ordered)
-    grafana = ordered[-1].provider == "grafana"
+    grafana = provider == "grafana"
     ratio = n / (span / interval) if grafana else None
     per_24h = n / (span / _DAY)
     clear_count = sum(clears)
+    expected = n * interval  # rows x interval, compared against the span exactly
     pattern: str | None = None
     if max_cycles >= R6_FLAP_CYCLES:
         pattern = "flapping"
-    elif (ratio is not None and ratio >= R6_SPAM_RATIO) or (
-        not grafana and per_24h >= R6_API_SPAM_PER_24H and span >= R6_API_MIN_SPAN
+    elif (grafana and _at_least(expected, R6_SPAM_RATIO, span)) or (
+        not grafana and _at_least(n * _DAY, R6_API_SPAM_PER_24H, span) and span >= R6_API_MIN_SPAN
     ):
         pattern = "spamming"
     elif (
-        ratio is not None
-        and ratio >= R6_STUCK_RATIO
+        grafana
+        and _at_least(expected, R6_STUCK_RATIO, span)
         and span >= R6_STUCK_MIN_SPAN
         and clear_count == 0
     ):

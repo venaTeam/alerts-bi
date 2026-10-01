@@ -104,3 +104,17 @@ def test_r6_copy_follows_the_stored_pattern() -> None:
         explained = rule_explanation("R6", {**SAMPLES["R6"], "pattern": pattern})
         assert explained.title.startswith(word)
         assert explained.next_step
+
+
+def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
+    forbidden = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
+    for pattern in ("stuck", "spamming", "flapping", "bogus"):
+        for evidence in ({**SAMPLES["R6"], "pattern": pattern}, {"pattern": pattern}):
+            e = rule_explanation("R6", evidence)
+            text = " ".join((e.title, e.reason, e.why, e.observed, e.next_step)).lower()
+            assert not [f for f in forbidden if f in text]
+    assert "per repeat interval" in principle_next_step("R6")
+
+
+def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:
+    assert "stuck" not in principle_next_step("R6").lower()

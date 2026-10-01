@@ -121,7 +121,9 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
 
         # R6 judges the identity's whole firing pattern, so a match belongs to every row
         # of the identity and the per-bucket allocation then applies unchanged.
-        facts = firing_facts(representative.schema, [item.row for item in group])
+        facts = firing_facts(
+            representative.schema, [item.row for item in group], representative.provider
+        )
         if facts.pattern is not None:
             evidence = {
                 "pattern": facts.pattern,
