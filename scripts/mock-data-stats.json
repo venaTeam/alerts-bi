@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-08-25T18:00:00.000Z",
-  "totalRows": 40107,
+  "totalRows": 40125,
   "summary": [
     {
       "team": "payments-core",
@@ -105,9 +105,9 @@
       "team": "acceptance-fire-patterns",
       "phase": "acceptance",
       "quality": "mixed",
-      "v1Rows": 123,
+      "v1Rows": 141,
       "v2Rows": 16,
-      "v1Distinct": 19,
+      "v1Distinct": 20,
       "v2Distinct": 4
     },
     {
