@@ -224,6 +224,40 @@ ol.phases li.on{border-color:var(--ink);background:var(--surface);box-shadow:ins
 .estc{border:1px dashed var(--line-strong);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .estc .big{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em}
 .estc .sub,.estc .noest{margin:0}
+/* ---- Why alerts were flagged: Bars / Donut toggle (team summary, task E2) ----
+   Two radios and their labels precede the two views as siblings, so the checked radio
+   hides the other view without script. Rule colours are a fixed categorical order. */
+:root{--r1:#3460C8;--r2:#C8701E;--r3:#16877A;--r4:#8A43BF;--r5:#C23A63;--r6:#5E7F12;--r7:#86602A}
+@media (prefers-color-scheme: dark){:root{--r1:#7FA4F0;--r2:#F0A65E;--r3:#5CC7B7;--r4:#C08BEA;--r5:#EE7D9C;--r6:#A9C95E;--r7:#D2AE78}}
+.vtoggle{display:flex;flex-wrap:wrap;align-items:center}
+.vtoggle > input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.vtoggle > label{font-size:12.5px;padding:4px 12px;border:1px solid var(--line-strong);color:var(--ink-2);background:var(--surface);cursor:pointer}
+.vtoggle > label[for$="-bars"]{border-radius:6px 0 0 6px}
+.vtoggle > label[for$="-donut"]{border-radius:0 6px 6px 0;border-left:0}
+.vtoggle > input:checked + label{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.vtoggle > input:focus-visible + label{outline:2px solid var(--focus);outline-offset:2px}
+.vtoggle > .view-bars,.vtoggle > .view-donut{flex:1 0 100%;margin-top:12px;min-width:0}
+.vt-bars:checked ~ .view-donut{display:none}
+.vt-donut:checked ~ .view-bars{display:none}
+.view-donut{display:flex;flex-direction:column;gap:12px}
+.donuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:560px){.donuts{grid-template-columns:1fr}}
+.donut-one{display:flex;flex-direction:column;gap:6px;min-width:0}
+.donut-body{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+svg.donut{width:120px;height:120px;flex:none}
+svg.donut .slice{stroke:var(--surface);stroke-width:2}
+svg.donut text{font-family:var(--sans);fill:var(--muted)}
+svg.donut .dl-schema{font-size:9px}
+svg.donut .dl-n{font-size:20px;font-weight:600;fill:var(--ink)}
+svg.donut .dl-u{font-size:7.5px}
+.dlegend{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink-2);min-width:0;flex:1 1 140px}
+.dlegend svg{width:9px;height:9px;margin-right:5px;vertical-align:0}
+.dlegend b{color:var(--ink)}
+svg.donut .r1,.dlegend .r1{fill:var(--r1)} svg.donut .r2,.dlegend .r2{fill:var(--r2)}
+svg.donut .r3,.dlegend .r3{fill:var(--r3)} svg.donut .r4,.dlegend .r4{fill:var(--r4)}
+svg.donut .r5,.dlegend .r5{fill:var(--r5)} svg.donut .r6,.dlegend .r6{fill:var(--r6)}
+svg.donut .r7,.dlegend .r7{fill:var(--r7)}
+/* ---- end of the Bars / Donut toggle ---- */
 """.strip()
 
 #: Content-addressed, so a changed stylesheet is never served from a stale cache.
