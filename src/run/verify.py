@@ -84,6 +84,31 @@ def _number(value: Any) -> float:
     return float(value)
 
 
+def _nullable_number(value: Any) -> float | None:
+    """A stored value that may be NULL, such as ``unseen`` on a schema with no panel.
+
+    NULL stays None so a manifest ``null`` can match it, and a manifest number against a
+    NULL is reported as a mismatch rather than raising.
+    """
+    return None if value is None else _number(value)
+
+
+def _nullable_bool(value: Any) -> bool | None:
+    """A BIT column read back as bool, 0/1 or NULL."""
+    return None if value is None else bool(value)
+
+
+def _nullable_sum(values: Sequence[Any]) -> float | None:
+    """Sum a nullable column: NULL when every value is NULL, which means "not measured".
+
+    A schema either has a panel or not, so its buckets are all NULL or all numbers.
+    """
+    present = [_number(value) for value in values if value is not None]
+    if not present and values:
+        return None
+    return sum(present)
+
+
 def _date_key(value: Any) -> str:
     if isinstance(value, datetime | date):
         return value.isoformat()[:10]
@@ -113,11 +138,66 @@ _SUM_ALIASES = {
 }
 
 
-def _sum_daily(daily: Sequence[Mapping[str, Any]]) -> dict[str, float]:
-    totals = {name: sum(_number(row[name]) for row in daily) for name in _SUM_FIELDS}
+#: Daily columns that are NULL when the schema has no supplied panel (team summary spec 6).
+_NULLABLE_SUM_FIELDS = ("unseen", "unseen_unmeasured")
+
+#: Per-alert work-list values the manifest's ``fire_patterns`` block pins (spec 5.1).
+_FIRE_PATTERN_FIELDS = ("fire_pattern", "clear_count", "max_clear_cycles_24h")
+
+
+def _sum_daily(daily: Sequence[Mapping[str, Any]]) -> dict[str, float | None]:
+    totals: dict[str, float | None] = {
+        name: sum(_number(row[name]) for row in daily) for name in _SUM_FIELDS
+    }
     for alias, column in _SUM_ALIASES.items():
         totals[alias] = sum(_number(row[column]) for row in daily)
+    for name in _NULLABLE_SUM_FIELDS:
+        totals[name] = _nullable_sum([row.get(name) for row in daily])
     return totals
+
+
+def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or not denominator:
+        return None
+    return numerator / denominator
+
+
+def _verify_alerts(
+    check: VerificationResult,
+    team_id: str,
+    findings: Sequence[Mapping[str, Any]],
+    expected: Mapping[str, Any],
+) -> None:
+    """Compare per-alert work-list values against the ``fire_patterns`` and ``unseen`` blocks.
+
+    Both are keyed by schema, then ``key_field``. A listed alert missing from the work list
+    is a failure, not a skip.
+    """
+    by_key = {(str(f["alert_schema"]), str(f["key_field"])): f for f in findings}
+
+    def lookup(schema: str, key_field: str, where: str) -> Mapping[str, Any] | None:
+        finding = by_key.get((schema, key_field))
+        if finding is None:
+            check.checks += 1
+            check.failures.append(Failure(where, "present in the work list", "missing"))
+        return finding
+
+    for schema, alerts in expected.get("fire_patterns", {}).items():
+        for key_field, fields in alerts.items():
+            where = f"{team_id}.{schema}.fire_patterns.{key_field}"
+            finding = lookup(schema, key_field, where)
+            if finding is None:
+                continue
+            for name in _FIRE_PATTERN_FIELDS:
+                if name in fields:
+                    check.equal(f"{where}.{name}", fields[name], finding[name])
+
+    for schema, block in expected.get("unseen", {}).items():
+        for key_field, value in block.get("worklist_unseen", {}).items():
+            where = f"{team_id}.{schema}.unseen.worklist.{key_field}"
+            finding = lookup(schema, key_field, where)
+            if finding is not None:
+                check.equal(where, value, _nullable_bool(finding["unseen"]))
 
 
 def _verify_team(
@@ -159,16 +239,20 @@ def _verify_team(
         for field_name, value in expected_schema.get("totals", {}).items():
             where = f"{team_id}.{schema}.totals.{field_name}"
             if field_name == "distinct_per_day":
-                check.equal(where, value, totals["distinct_sum"] / 7)
+                check.equal(where, value, _ratio(totals["distinct_sum"], 7))
             elif field_name == "alerts_per_hour":
-                check.equal(where, value, totals["alerts"] / 168)
+                check.equal(where, value, _ratio(totals["alerts"], 168))
             elif field_name == "node_name_ratio":
-                den = totals["node_name_denominator"]
-                check.equal(where, value, None if den == 0 else totals["node_name_numerator"] / den)
-            elif field_name == "key_inflation_ratio":
-                den = totals["key_inflation_denominator"]
                 check.equal(
-                    where, value, None if den == 0 else totals["key_inflation_numerator"] / den
+                    where,
+                    value,
+                    _ratio(totals["node_name_numerator"], totals["node_name_denominator"]),
+                )
+            elif field_name == "key_inflation_ratio":
+                check.equal(
+                    where,
+                    value,
+                    _ratio(totals["key_inflation_numerator"], totals["key_inflation_denominator"]),
                 )
             else:
                 check.equal(where, value, totals[field_name])
@@ -189,7 +273,7 @@ def _verify_team(
                 check.equal(
                     f"{team_id}.{schema}.daily.{date_key}.{field_name}",
                     value,
-                    _number(actual_day[field_name]),
+                    _nullable_number(actual_day[field_name]),
                 )
         for date_key, day in by_date.items():
             if date_key in expected_daily:
@@ -263,6 +347,18 @@ def _verify_team(
             check.equal(
                 f"{team_id}.suppression.not_suppressed.{name}", False, name in suppressed_nodes
             )
+
+    for schema, block in expected.get("unseen", {}).items():
+        schema_daily = [d for d in daily if d["alert_schema"] == schema]
+        for name, column in (("unseen_rows", "unseen"), ("unseen_unmeasured", "unseen_unmeasured")):
+            if name in block:
+                check.equal(
+                    f"{team_id}.{schema}.unseen.{name}",
+                    block[name],
+                    _nullable_sum([d.get(column) for d in schema_daily]),
+                )
+
+    _verify_alerts(check, team_id, findings, expected)
 
     if "llm_batches" in expected:
         expected_batches = expected["llm_batches"]
