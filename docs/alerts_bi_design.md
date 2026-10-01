@@ -964,7 +964,8 @@ scorecard or the exports. The unit of work is a v1 alert rule: distinct `alert_r
 `application` when there is none. Two figures sit side by side, each labelled a projection:
 
 * **Measured pace:** v1 rules that stopped firing across up to three earlier published weeks,
-  back to back, with the lookback ending at a publication gap or a ruleset/registry change.
+  back to back, with the lookback ending at a publication gap, a ruleset change, or a change to the team's own
+  operators or panels (migration 008).
   It projects the week the remaining rules would reach zero, and says "No estimate" with the
   reason when there are fewer than two earlier weeks or fewer than two retired rules.
 * **Configured effort:** rules left × working days per rule, default 0.5 (rebuilding the

@@ -200,8 +200,9 @@ exception, bounded as follows.
 ### 7.1 Measured pace → a date
 
 - **Lookback:** the selected published week and up to **3** consecutive published weeks before
-  it. A publication gap ends the lookback. So does a change of `ruleset_version` or
-  `registry_version`, which the portal sees only as a `basis_changed` flag on
+  it. A publication gap ends the lookback. So does a change of `ruleset_version`, or of
+  the team's own v1 operators, v2 operator or panels (migration 008; another team's
+  enrolment no longer ends it), which the portal sees only as a `basis_changed` flag on
   `portal_reviews`, never as a version.
 - **Retired** = v1 rules present in an earlier lookback week and absent from the selected week.
 - **Pace** = retired ÷ earlier weeks in the lookback, in rules a week.

@@ -215,6 +215,13 @@ spec:
             - secretRef: {name: alerts-bi-secrets}
 ```
 
+Before the first rollout that includes `005_team_summary`, confirm the database's
+compatibility level is 130 or higher, because 005 uses `STRING_SPLIT`:
+
+```sql
+SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME();
+```
+
 It is safe to re-run: Alembic skips revisions already at or below the current head. A
 migration whose file changed after being applied is a hard error rather than a silent
 re-apply - that check is the `schema_migrations` ledger, not Alembic, which records only a

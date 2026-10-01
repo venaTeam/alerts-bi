@@ -298,7 +298,7 @@ described here because its numbers are the ones most easily misread against the 
 | View | One row per | Holds |
 |---|---|---|
 | `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness, `basis_changed` (true when the previous published week of the team ran under a different basis, so the retirement estimate stops looking back; migration 008 compares the team's own registry entry, its operators and panels, instead of the whole-file registry version) and `v1_rule_effort_days` (the team's optional `planning.v1_rule_effort_days` override) |
-| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention, `unseen` (events, `NULL` when no panel was supplied), `unseen_alerts` and `r6_alerts` |
+| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention, `unseen` (events, `NULL` when no panel was supplied or for a week stored before migration 005), `unseen_alerts` and `r6_alerts` |
 | `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, `attention_rank`, and the R6 and `unseen` columns: `clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows` (a diagnostic only) and `open_since` |
 | `portal_decisions` | human decision made on a published week | finding id, `pending` / `confirmed` / `dismissed`, note, time, operator |
 | `portal_rule_totals` | published week, schema and rule | weekly matched events and alerts per rule, for the team summary |
@@ -342,4 +342,5 @@ section 7.4.
 * **R6 never scores volume.** It flags one alert's firing episodes (stuck, spamming or
   flapping); it never scores a team's total volume.
 * **`unseen` is a count, not a verdict.** It is empty, not zero, for a schema with no supplied
-  panel, because zero would claim the team's dashboard was checked.
+  panel, or for a week stored before migration 005, because zero would claim the team's
+  dashboard was checked.

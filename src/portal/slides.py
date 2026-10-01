@@ -409,8 +409,8 @@ def _not_consumed_tile(summary: TeamSummary, schema: str) -> str:
         )
     unseen = (
         '<span class="sl-na">not measured this week</span>'
-        if totals.unseen_alerts is None
-        else f"{_plural(totals.unseen_alerts, 'alert')} on no dashboard"
+        if totals.unseen is None
+        else f"{_plural(totals.unseen_alerts or 0, 'alert')} on no dashboard"
     )
     return (
         f'<div class="sl-nc {schema}">'
