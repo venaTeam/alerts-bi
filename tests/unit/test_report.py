@@ -178,17 +178,43 @@ def test_the_rollup_sums_unseen_and_keeps_none_when_no_bucket_has_a_panel() -> N
     assert mixed["unseen"] == 5
 
 
-def test_the_visibility_section_shows_unseen_when_a_panel_was_supplied() -> None:
-    html = scorecard(daily=[sample_daily(unseen=3, unseen_unmeasured=1)])
-    assert "Unseen (rows no panel shows)" in html
-    assert "Unseen unmeasured (leaves)" in html
-    assert "no panel supplied" not in html
+def _card_html(html: str, label: str) -> str:
+    start = html.index(label)
+    return html[start : html.index("</div></div>", start)]
 
 
-def test_the_visibility_section_says_no_panel_supplied_rather_than_zero() -> None:
-    html = scorecard(daily=[sample_daily(unseen=None)])
-    assert "Unseen (rows no panel shows)" in html
-    assert "no panel supplied" in html
+def test_the_visibility_section_shows_unseen_per_schema_never_summed() -> None:
+    html = scorecard(
+        daily=[
+            sample_daily(unseen=3, unseen_unmeasured=1),
+            sample_daily(alert_schema="v2", unseen=4, unseen_unmeasured=2),
+        ]
+    )
+    card = _card_html(html, "Unseen (rows no panel shows)")
+    assert "v1: 3" in card and "v2: 4" in card
+    assert "7" not in card
+    unm = _card_html(html, "Unseen unmeasured (leaves)")
+    assert "v1: 1" in unm and "v2: 2" in unm
+
+
+def test_an_unseen_schema_without_a_panel_says_so_in_its_own_card() -> None:
+    html = scorecard(
+        daily=[
+            sample_daily(unseen=3, unseen_unmeasured=None),
+            sample_daily(alert_schema="v2", unseen=None, unseen_unmeasured=None),
+        ]
+    )
+    card = _card_html(html, "Unseen (rows no panel shows)")
+    assert "v1: 3" in card
+    assert "v2: &mdash; no panel supplied" in card
+    unm = _card_html(html, "Unseen unmeasured (leaves)")
+    assert "v1: &mdash; no panel supplied" in unm
+    assert "v2: &mdash; no panel supplied" in unm
+
+
+def test_the_rollup_keeps_unseen_unmeasured_none_when_every_bucket_is_none() -> None:
+    assert rollup_schema([sample_daily(unseen_unmeasured=None)])["unseen_unmeasured"] is None
+    assert rollup_schema([sample_daily(unseen_unmeasured=0)])["unseen_unmeasured"] == 0
 
 
 def test_the_limitations_say_r6_flags_one_alert_never_team_volume() -> None:

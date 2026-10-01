@@ -183,7 +183,9 @@ One row per identity. This is the deliverable a team acts on.
 | `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
 | `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 
-`clear_count`, `max_clear_cycles_24h`, `fire_pattern` and `unseen` are the last four columns, after `message`. The first three are the stored facts behind R6 and are computed over every row of the identity in the window, not the representative row alone.
+`clear_count`, `max_clear_cycles_24h`, `fire_pattern` and `unseen` are the last four
+columns, after `message`. The first three are the stored facts behind R6 and are computed
+over every row of the identity in the window, not the representative row alone.
 
 Every field from `component` to `message` comes from the **representative row**: the identity's most
 recent row in the window. An alert enriched on Tuesday is judged as it stands on Friday.
