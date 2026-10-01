@@ -18,6 +18,7 @@ from src.admin.summary import (
     read_snapshot,
     rule_totals,
     schema_totals,
+    shared_sections,
     summary_inputs,
     summary_page,
     worklist_where,
@@ -247,15 +248,13 @@ def test_the_worklist_filter_becomes_parameterised_sql() -> None:
 # ------------------------------------------------------------------ the page
 
 
-def _page(**changes: Any) -> str:
-    inputs = summary_inputs(
-        run(),
-        [daily(20)],
-        [],
-        (alert_row(finding(message="<script>alert(1)</script>")),),
-        published=False,
-        history=(),
+def _summary(**changes: Any) -> AdminSummary:
+    alerts = (
+        alert_row(finding(message="<script>alert(1)</script>")),
+        alert_row(finding(key_field="b", quality_state="rule_flagged", core_rule_ids="R1")),
     )
+    counts = [{"alert_schema": "v1", "rule_id": "R1", "match_count": 4, "distinct_count": 1}]
+    inputs = summary_inputs(run(), [daily(20)], counts, alerts, published=False, history=())
     summary = AdminSummary(
         run=run(),
         inputs=inputs,
@@ -266,10 +265,14 @@ def _page(**changes: Any) -> str:
         publication=changes.pop("publication", Publication("never")),
         schedule=changes.pop("schedule", None),
         worklist=inputs.alerts,
-        total=1,
-        filters=WorklistFilter(),
+        total=2,
+        filters=changes.pop("filters", WorklistFilter()),
     )
-    return summary_page("alice", summary, shared="")
+    return summary
+
+
+def _page(**changes: Any) -> str:
+    return summary_page("alice", _summary(**changes), shared="")
 
 
 def test_the_page_escapes_alert_text_and_carries_no_script_or_inline_style() -> None:
@@ -306,3 +309,23 @@ def test_the_page_states_the_last_schedule_outcome() -> None:
     assert "never scheduled" in _page()
     html = _page(schedule={"outcome": "held", "invoked_at": END, "detail": "3 unassessed"})
     assert "held" in html and "3 unassessed" in html
+
+
+def test_the_shared_widgets_render_on_the_admin_surface_with_rule_links_here() -> None:
+    html = shared_sections(_summary())
+    for title in ("Why alerts were flagged", "How often alerts fire", "Migration progress"):
+        assert title in html
+    assert "per day" in html, "the admin surface prints per-day rates"
+    assert f"/teams/checkout-api/summary?run_id={'1' * 64}&amp;rule=R1#worklist" in html
+    assert "This week is not published" in html, "an unpublished run has no estimate"
+    assert "<script" not in html and " style=" not in html
+
+
+def test_the_sort_is_kept_by_the_pager_and_offered_in_the_form() -> None:
+    html = summary_page(
+        "alice",
+        _summary(filters=WorklistFilter(sort="application", page=2)),
+        shared="",
+    )
+    assert '<option value="application" selected>' in html
+    assert "sort=application" in html and "page=1" in html

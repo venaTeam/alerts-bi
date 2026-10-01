@@ -55,6 +55,7 @@ RunId = Annotated[str | None, Query(max_length=128)]
 StateFilter = Annotated[str, Query(pattern="^(" + "|".join(summary.STATES) + ")$")]
 SchemaFilter = Annotated[str, Query(pattern="^(all|v1|v2)$")]
 RuleFilter = Annotated[str, Query(pattern=summary.RULE_PATTERN)]
+SortOrder = Annotated[str, Query(pattern="^(" + "|".join(summary.SORTS) + ")$")]
 
 
 def build_admin(settings: AdminSettings) -> FastAPI:
@@ -206,9 +207,12 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         state: StateFilter = "all",
         schema: SchemaFilter = "all",
         rule: RuleFilter = "",
+        sort: SortOrder = "events",
         page: Page = 1,
     ) -> HTMLResponse:
-        filters = summary.WorklistFilter(state=state, schema=schema, rule=rule, page=page)
+        filters = summary.WorklistFilter(
+            state=state, schema=schema, rule=rule, sort=sort, page=page
+        )
         with database() as db:
             try:
                 loaded = summary.load_admin_summary(db, team_id, run_id, filters)

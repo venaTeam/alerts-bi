@@ -39,6 +39,7 @@ from src.portal.explain import (
     format_week,
 )
 from src.portal.pages import h
+from src.portal.summary_view import render_summary_sections
 from src.suppression.fields import classify_field
 from src.suppression.lexer import SqlParseError, Token, tokenize
 from src.suppression.parser import Leaf, collect_leaves, parse_panel_sql
@@ -46,6 +47,7 @@ from src.suppression.parser import Leaf, collect_leaves, parse_panel_sql
 __all__ = [
     "PAGE_SIZE",
     "RULE_PATTERN",
+    "SORTS",
     "STATES",
     "AdminSummary",
     "Publication",
@@ -81,6 +83,12 @@ STATES: Final = (
 )
 #: A rule filter is one deterministic rule id, or empty for none.
 RULE_PATTERN: Final = "^(R(10|[1-9]))?$"
+#: Work-list orders. ``events``: the noisiest alerts first. ``application``: grouped by
+#: application. Each ends on the identity, so paging is stable.
+SORTS: Final = {
+    "events": "row_count DESC, application, key_field, alert_schema",
+    "application": "application, alert_schema, key_field",
+}
 
 #: The ``alert_findings`` columns an :class:`AlertRow` needs. The representative document and
 #: the evidence stay in SQL: the summary never shows them.
@@ -89,14 +97,6 @@ _ALERT_COLUMNS: Final = (
     "component, node_name, row_count, first_seen, last_seen, quality_state, core_rule_ids, "
     "readiness_rule_ids, llm_principle_id, llm_confidence, clear_count, max_clear_cycles_24h, "
     "fire_pattern, unseen"
-)
-
-#: Work-list order, the same as the portal's: rule findings, model findings, decisions,
-#: readiness-only gaps, then the rest; within each by events.
-_WORKLIST_ORDER: Final = (
-    "CASE WHEN quality_state = 'rule_flagged' THEN 0 WHEN quality_state = 'llm_flagged' THEN 1 "
-    "WHEN quality_state = 'needs_review' THEN 2 WHEN readiness_rule_ids <> '' THEN 3 ELSE 4 END, "
-    "row_count DESC, alert_schema, application, key_field"
 )
 
 
@@ -112,6 +112,7 @@ class WorklistFilter:
     state: str = "all"
     schema: str = "all"
     rule: str = ""
+    sort: str = "events"
     page: int = 1
 
 
@@ -356,7 +357,8 @@ def _worklist(
     row = db.query_one(f"SELECT COUNT(*) AS n FROM alert_findings WHERE {where}", params)
     total = int(row["n"]) if row else 0
     rows = db.query(
-        f"SELECT {_ALERT_COLUMNS} FROM alert_findings WHERE {where} ORDER BY {_WORKLIST_ORDER} "
+        f"SELECT {_ALERT_COLUMNS} FROM alert_findings WHERE {where} "
+        f"ORDER BY {SORTS.get(filters.sort, SORTS['events'])} "
         "OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY",
         {**params, "offset": (max(filters.page, 1) - 1) * PAGE_SIZE, "size": PAGE_SIZE},
     )
@@ -522,13 +524,14 @@ def summary_url(team_id: str, run_id: str, **query: Any) -> str:
 
 
 def shared_sections(summary: AdminSummary) -> str:
-    """TEMPORARY until Task E merges ``render_summary_sections``: the shared widgets are
-    computed (``summarize``) but rendered only as a placeholder here."""
-    summarize(summary.inputs)
-    return (
-        '<section class="card pending"><p class="sub">The shared summary widgets render here '
-        "once the portal's summary view is merged.</p></section>"
-    )
+    """The widgets both surfaces share, with each rule linking to this page's work list
+    filtered by that rule (``None`` clears the filter)."""
+    team_id, run_id = summary.inputs.team_id, str(summary.run["run_id"])
+
+    def rule_link(rule_id: str | None) -> str:
+        return h(summary_url(team_id, run_id, rule=rule_id) + "#worklist")
+
+    return render_summary_sections(summarize(summary.inputs), rule_link=rule_link)
 
 
 def _is_complete_day(day: Mapping[str, Any]) -> bool:
@@ -799,6 +802,12 @@ def _worklist_html(summary: AdminSummary) -> str:
             "schema", "Schema", [("all", "v1 + v2"), ("v1", "v1"), ("v2", "v2")], filters.schema
         )
         + _select("rule", "Rule", [("", "Any rule"), *((r, r) for r in rules)], filters.rule)
+        + _select(
+            "sort",
+            "Sort",
+            [("events", "Most events"), ("application", "Application")],
+            filters.sort,
+        )
         + '<button class="button" type="submit">Filter</button>'
         f'<a href="{h(summary_url(team_id, run_id))}#worklist">Clear</a></form>'
     )
@@ -828,6 +837,7 @@ def _worklist_html(summary: AdminSummary) -> str:
             state=None if filters.state == "all" else filters.state,
             schema=None if filters.schema == "all" else filters.schema,
             rule=filters.rule,
+            sort=None if filters.sort == "events" else filters.sort,
             page=target,
         )
         return f'<a class="button" href="{h(href)}#worklist">{text}</a>'

@@ -303,6 +303,25 @@ def test_the_summary_of_a_published_week_reads_its_published_history(client: Tes
     assert published is not None, "the publishing test above left a week published"
     page = client.get(f"/teams/{TEAM}/summary?run_id={published['run_id']}", headers=ALICE)
     assert page.status_code == 200 and "published</span>" in page.text
+    assert "This week is not published" not in page.text
+    assert "found 0" in page.text, "one published week: no earlier week to measure a pace from"
+
+
+def test_the_admin_summary_renders_the_shared_widgets(client: TestClient) -> None:
+    page = client.get(f"/teams/{TEAM}/summary?run_id={RUN0}", headers=ALICE).text
+    for title in ("Why alerts were flagged", "How often alerts fire", "Migration progress"):
+        assert title in page
+    assert "per day" in page, "the admin surface shows per-day rates"
+    assert f"/teams/{TEAM}/summary?run_id={RUN0}&amp;rule=R1#worklist" in page
+    assert "This week is not published" in page, "the estimate reads published weeks only"
+    assert "<script" not in page and " style=" not in page
+
+
+def test_the_work_list_sorts_by_events_or_application(client: TestClient) -> None:
+    base = f"/teams/{TEAM}/summary?run_id={RUN0}&schema=v1"
+    by_app = client.get(base + "&sort=application", headers=ALICE).text
+    assert '<option value="application" selected>' in by_app
+    assert client.get(base + "&sort=bogus", headers=ALICE).status_code == 422
 
 
 def test_an_unknown_run_or_another_teams_run_is_not_found(client: TestClient) -> None:

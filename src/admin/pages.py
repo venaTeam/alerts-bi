@@ -53,7 +53,6 @@ ul.panels{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;
 pre.sql{margin:4px 0 0;padding:10px 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
 mark.sup{background:var(--rule-soft);color:var(--rule);border-radius:3px;padding:0 2px}
 mark.sup.unmeasured{background:var(--ready-soft);color:var(--ready)}
-.pending{padding:12px 16px}
 """.strip()
 
 
