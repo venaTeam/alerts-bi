@@ -492,7 +492,9 @@
             "node_name_ratio": 1,
             "key_inflation_numerator": 14,
             "key_inflation_denominator": 14,
-            "key_inflation_ratio": 1
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
           },
           "daily": {
             "2026-08-19": {
@@ -616,7 +618,9 @@
             "node_name_ratio": null,
             "key_inflation_numerator": 2,
             "key_inflation_denominator": 2,
-            "key_inflation_ratio": 1
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
           },
           "daily": {
             "2026-08-21": {
@@ -741,7 +745,9 @@
             "node_name_ratio": 1,
             "key_inflation_numerator": 7,
             "key_inflation_denominator": 7,
-            "key_inflation_ratio": 1
+            "key_inflation_ratio": 1,
+            "unseen": 2,
+            "unseen_unmeasured": 1
           },
           "daily": {
             "2026-08-18": {
@@ -819,7 +825,9 @@
             "node_name_ratio": null,
             "key_inflation_numerator": 2,
             "key_inflation_denominator": 2,
-            "key_inflation_ratio": 1
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
           },
           "daily": {
             "2026-08-20": {
