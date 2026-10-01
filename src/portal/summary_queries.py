@@ -20,6 +20,9 @@ from src.insights.estimate import v1_rule_key
 __all__ = ["load_portal_summary"]
 
 _SCHEMAS = ("v1", "v2")
+#: The selected week plus the up to 3 earlier weeks of the estimate's lookback (spec 7.1).
+#: Older weeks cannot change the estimate, so they are never read.
+HISTORY_WEEKS = 4
 _STATES = ("rule_flagged", "llm_flagged", "needs_review", "assessed_good", "unassessed")
 
 
@@ -117,24 +120,31 @@ def _rule_key(application: str, alert_rule_url: str | None, week_end: datetime) 
 
 
 def _history(db: Database, team_id: str, window_end: datetime) -> tuple[WeekRules, ...]:
-    weeks = db.query(
-        """
-        SELECT run_id, window_end, basis_changed
+    """The selected week and the published weeks just before it that the estimate can use.
+
+    Published weeks of one team never overlap, so ``window_end`` orders them strictly.
+    """
+    newest_first = db.query(
+        f"""
+        SELECT TOP ({HISTORY_WEEKS}) run_id, window_end, basis_changed
         FROM portal_reviews
         WHERE team_id = :team_id AND window_end <= :window_end
-        ORDER BY window_end ASC, run_id ASC
+        ORDER BY window_end DESC, run_id DESC
         """,
         {"team_id": team_id, "window_end": window_end},
     )
+    weeks = list(reversed(newest_first))
+    if not weeks:
+        return ()
+    run_params = {f"run{i}": str(week["run_id"]) for i, week in enumerate(weeks)}
     rules = db.query(
-        """
+        f"""
         SELECT DISTINCT a.run_id, a.application, a.alert_rule_url
         FROM portal_alerts AS a
-        JOIN portal_reviews AS r ON r.run_id = a.run_id
-        WHERE r.team_id = :team_id AND r.window_end <= :window_end AND a.alert_schema = 'v1'
+        WHERE a.alert_schema = 'v1' AND a.run_id IN ({", ".join(f":{name}" for name in run_params)})
         ORDER BY a.run_id ASC, a.application ASC, a.alert_rule_url ASC
         """,
-        {"team_id": team_id, "window_end": window_end},
+        run_params,
     )
     ends = {str(week["run_id"]): week["window_end"] for week in weeks}
     keys: dict[str, set[str]] = defaultdict(set)
@@ -157,7 +167,10 @@ def _history(db: Database, team_id: str, window_end: datetime) -> tuple[WeekRule
 def load_portal_summary(db: Database, team_id: str, run_id: str) -> SummaryInputs:
     """Build portal SummaryInputs for one published week from portal_* views only.
     history = the team's published weeks up to and including this one, oldest first,
-    v1_rules = {v1_rule_key(...)} per week from portal_alerts where alert_schema = 'v1'."""
+    v1_rules = {v1_rule_key(...)} per week from portal_alerts where alert_schema = 'v1'.
+
+    Only the weeks the estimate can reach are loaded: this one and the
+    ``HISTORY_WEEKS - 1`` published weeks before it (spec section 7.1)."""
     review = db.query_one(
         """
         SELECT team_id, team_display_name, window_start, window_end, phase_derived,

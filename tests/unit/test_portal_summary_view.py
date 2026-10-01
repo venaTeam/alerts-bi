@@ -27,6 +27,7 @@ from src.insights import (
 )
 from src.portal.charts import TIMES
 from src.portal.summary_view import format_projected_week, render_summary_sections
+from src.rules.catalogs import R6_FLAP_CYCLES, R6_STUCK_MIN_SPAN
 
 END = datetime(2026, 9, 28)
 START = END - timedelta(hours=168)
@@ -213,7 +214,7 @@ def build_summary(
             KeyFinding(
                 "unseen",
                 "Some alerts reach none of your dashboards",
-                "1 alerts (40 events) are outside every panel's narrowing.",
+                "1 v1 alert (40 events) is outside every panel's narrowing.",
                 "Widen a panel to include them, or confirm they are meant to stay out of view.",
                 None,
             ),
@@ -346,13 +347,74 @@ def test_the_fire_table_shows_the_ratio_bar_with_its_ticks_and_the_thresholds() 
         assert words in fire, words
 
 
-def test_the_fire_table_shows_at_most_eight_alerts() -> None:
+def test_the_fire_table_ranks_each_schema_on_its_own() -> None:
+    """v2 repeats 144 times more slowly, so a shared ranking would hide every v2 alert."""
     many = tuple(
-        alert(key_field=f"k{i}", message=f"Alert number {i}", row_count=100 - i) for i in range(12)
+        alert(key_field=f"k{i}", message=f"Alert number {i}", row_count=1000 - i) for i in range(12)
     )
-    html = render(build_summary(alerts=many))
+    slow = alert(schema="v2", key_field="v2-k", message="Slow v2 alert", row_count=3)
+    html = render(build_summary(alerts=(*many, slow)))
     fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
-    assert "Alert number 7" in fire and "Alert number 8" not in fire
+    assert "Alert number 3" in fire and "Alert number 4" not in fire, "top 4 per schema"
+    assert "Slow v2 alert" in fire
+    assert fire.index("repeats every 5 minutes") < fire.index("Alert number 0")
+    assert fire.index("repeats every 12 hours") < fire.index("Slow v2 alert")
+
+
+def test_the_threshold_legend_reads_the_catalogue() -> None:
+    html = render()
+    fire = html[html.index("How often alerts fire") : html.index("Biggest single source")]
+    assert f"{R6_FLAP_CYCLES} or more fire-and-clear cycles" in fire
+    assert f"at least {int(R6_STUCK_MIN_SPAN.total_seconds() // 3600)} hours" in fire
+
+
+def test_rule_and_model_findings_stay_in_separate_columns() -> None:
+    html = render()
+    apps = html[html.index("Noisy alerts by application") : html.index("How often alerts fire")]
+    assert "Rule-flagged" in apps and "Model (advisory)" in apps
+    row = apps[apps.index("warehouse-sync") :]
+    row = row[: row.index("</tr>")]
+    # warehouse-sync has one advisory model finding and no rule finding.
+    assert row.count("1 alert · 40 events") == 1
+    assert "of 1" not in row, "no combined 'flagged of all' figure"
+    # etl-loader's two rule-flagged alerts are not merged with anything model-flagged.
+    loader = apps[apps.index("etl-loader") :]
+    assert "2 alerts · 984 events" in loader[: loader.index("</tr>")]
+
+
+def test_nothing_is_called_hidden_free_unless_every_clause_was_checked() -> None:
+    clean = {
+        "v1": schema_totals("v1", suppressed=0, unseen=0, unseen_alerts=0),
+        "v2": schema_totals("v2"),
+    }
+    portal = render(build_summary(schemas=clean))
+    hidden = portal[portal.index("Hidden by your own panels") : portal.index("Not on any")]
+    assert "Nothing hidden" not in hidden
+    assert "could be checked" in hidden
+
+    checked = {
+        "v1": schema_totals("v1", suppressed=0, suppression_unmeasured=0),
+        "v2": schema_totals("v2"),
+    }
+    admin = render(build_summary(surface="admin", schemas=checked))
+    assert "Nothing hidden by your own panels" in admin
+
+    unchecked = {
+        "v1": schema_totals("v1", suppressed=0, suppression_unmeasured=2),
+        "v2": schema_totals("v2"),
+    }
+    admin = render(build_summary(surface="admin", schemas=unchecked))
+    assert "Nothing hidden" not in admin and "2 clauses unmeasured" in admin
+
+
+def test_no_unseen_alert_is_stated_without_claiming_every_alert_is_shown() -> None:
+    clean = {
+        "v1": schema_totals("v1", unseen=0, unseen_alerts=0),
+        "v2": schema_totals("v2"),
+    }
+    html = render(build_summary(schemas=clean))
+    assert "No alert falls outside every panel's narrowing." in html
+    assert "Every v1 alert appears" not in html
 
 
 def test_rule_links_come_from_the_callback() -> None:

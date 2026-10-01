@@ -333,8 +333,35 @@ def test_largest_without_co_occurrence() -> None:
 
 def test_unassessed_text() -> None:
     f = key_findings(full_inputs())[1]
-    assert f.title == "2 alerts could not be classified"
+    assert f.title == "2 v1 alerts could not be classified"
     assert f.body.startswith("Unassessed should be zero.")
+
+
+def test_unassessed_is_counted_per_schema_never_summed() -> None:
+    both = inputs(
+        schemas={
+            "v1": totals("v1", states={"unassessed": 1}),
+            "v2": totals("v2", states={"unassessed": 2}),
+        }
+    )
+    (f,) = key_findings(both)
+    assert f.title == "1 v1 alert and 2 v2 alerts could not be classified"
+    assert "3" not in f.title, "v1 and v2 are never added together"
+
+
+def test_counts_of_one_read_in_the_singular() -> None:
+    one = inputs(
+        schemas={
+            "v1": totals("v1", suppressed=1, unseen=1, unseen_alerts=1),
+            "v2": totals("v2"),
+        },
+        alerts=(alert(core_rule_ids=("R1",), row_count=1),),
+        rules=(RuleTotal("v1", "R1", 1, 1),),
+    )
+    found = {f.kind: f for f in key_findings(one)}
+    assert found["largest"].body == "1 v1 event from 1 alert."
+    assert found["hidden"].body == "1 v1 event matches a filter in your dashboard (R5)."
+    assert found["unseen"].body == "1 v1 alert (1 event) is outside every panel's narrowing."
 
 
 def test_concentration_threshold() -> None:
@@ -374,7 +401,7 @@ def test_unseen_omitted_when_none_and_present_otherwise() -> None:
     f = next(x for x in key_findings(base) if x.kind == "unseen")
     assert (
         f.body
-        == "1 v1 alerts (3 events) and 1 v2 alerts (1 events) are outside every panel's narrowing."
+        == "1 v1 alert (3 events) and 1 v2 alert (1 event) are outside every panel's narrowing."
     )
     assert f.fix == "Widen a panel to include them, or confirm they are meant to stay out of view."
 
