@@ -114,6 +114,16 @@ def test_open_since_is_the_first_firing_row_after_the_last_clear() -> None:
     assert facts.open_since == T0 + 2 * HOUR
 
 
+def test_a_grafana_alert_that_cleared_then_fired_again_for_72h_is_stuck() -> None:
+    # Fire, clear, then firing rows every 12 h spanning exactly 72 h: only the episode
+    # after the last clear is measured, and it is long enough.
+    reopen = T0 + 2 * HOUR
+    times = [T0, T0 + HOUR] + [reopen + i * timedelta(hours=12) for i in range(7)]
+    facts = _facts(_v1(times, clears={1}))
+    assert facts.open_since == reopen
+    assert facts.pattern == "stuck"
+
+
 def test_api_alert_firing_for_100h_is_never_stuck() -> None:
     facts = _facts(_v1([T0, T0 + timedelta(hours=100)], **API))
     assert facts.open_span == timedelta(hours=100)
