@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-09-27 (portal SQL connection, design section 7.10)
+**Last updated:** 2026-10-01 (team summary, R6 and `unseen`, design section 7.14)
 
 This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
 
@@ -94,7 +94,8 @@ Keep these decisions intact unless the design is explicitly revised:
 - R3 checks required identity fields and an optional supplied `node_name`; an absent or empty optional `node_name` is valid.
 - R4 applies only when `provider = grafana`. API alerts do not carry an alert-rule URL and never match R4 for its absence.
 - R5 comes only from the approved panel-suppression evaluation.
-- R6 spam detection is post-MVP.
+- R6 is a core rule from ruleset 1.1.0 (design section 7.14): one alert's firing pattern — flapping (≥3 fire→clear cycles in 24h), spamming (Grafana ≥2× the repeat interval; API ≥24 events per 24h over ≥6h), stuck (Grafana ≥0.9× for ≥72h, never cleared) — against v1 5 min / v2 12 h. It never scores a team's total volume. The prompt stays at 1.2.0 on purpose.
+- `unseen` is a visibility measure, never a rule: rows every panel leaves out through a positive identity predicate, disjoint from `suppressed`, `NULL` when no panel was supplied.
 - R7 applies only to v1. `time_created` is valid on both inclusive boundaries from `@timestamp - 24h` through `@timestamp`; future and older values are invalid.
 - R8-R10 apply only to v2 and follow the exact catalogs and URL rules in the design.
 
@@ -130,7 +131,7 @@ Do not expand the MVP with deferred features. The approved next steps are:
 1. ~~Design and build the interactive frontend over persisted runs.~~ Delivered as the read-only review portal (design section 7.10). The HTTP trigger surface of section 7.9 stays separate and is never mounted on the portal.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
-Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. Plan the unattributed-alert audit, cross-team leaderboard, R6, the rest of the Kubernetes work, and other deferred work separately afterward.
+Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. The team summary (admin page and portal section), R6 and `unseen` are built (design section 7.14), including one scoped exception to the no-comparison rule: the estimated time to retire v1, computed from published weeks only and never written to the scorecard or exports. Plan the unattributed-alert audit, cross-team leaderboard, the rest of the Kubernetes work, and other deferred work separately afterward.
 
 ## Local mock environment
 
