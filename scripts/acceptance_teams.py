@@ -16,13 +16,12 @@ Every acceptance team except ``acceptance-fire-patterns`` puts its rows on two i
 DAY1 = 2026-08-23T12:00Z and DAY2 = 2026-08-24T12:00Z, so both single-date and multi-date
 allocation are exercised on two full UTC days well inside the window.
 
-Why those two days: R6 (design section 7.14) calls a Grafana alert stuck when its last row
-is firing and its open episode began 72 hours or more before window_end. DAY1 is 54 hours
-before window_end, so a firing row there is an ordinary alert, not a stuck one. These
-instants were 2026-08-20 and 2026-08-21 until R6 moved to episodes; there every single-row
-Grafana alert would have been stuck, which would have withheld the batching, suppression
-and unseen paths from the model. Moving the rows keeps every count the same, where adding
-a clear row to each alert would have changed the counts and the representative rows.
+Why those two days: these instants were 2026-08-20 and 2026-08-21 until R6 moved to
+episodes, when R6 (design section 7.14) measured stuck from the open episode's start to
+window_end, and there every single-row Grafana alert would have been stuck. Stuck now
+measures the open episode's firing rows from first to last (at least 72 hours), so rows
+on DAY1 and DAY2, 24 hours apart at most, can never be stuck wherever they sit; the days
+were kept rather than churn every count and date key again.
 
 ``acceptance-fire-patterns`` is the one team that exercises R6 on purpose; its rows run
 from 2026-08-20 to 2026-08-25, still entirely inside the window.
@@ -104,7 +103,7 @@ ACCEPTANCE_CORE: dict[str, Any] = {
         # The R1 match is on the DAY2 row only, which proves findings are not projected
         # onto the DAY1 rows that did not match, and that one core finding anywhere in the
         # window still withholds the whole identity from the model.
-        # Three firing rows opened at DAY1, 54h before window_end: not stuck, so no R6.
+        # Three firing rows spanning DAY1 to DAY2 (24h, under 72h): not stuck, so no R6.
         _v1("c11-multiday", message="Alert triggered", rowsAt=[DAY2]),
         _v1("c11-multiday", rowsAt=[DAY1, DAY1]),
     ],
@@ -367,12 +366,13 @@ def _fire_v2_episode(fired: str, resolved: str) -> dict[str, Any]:
 #: any provider. spamming: API (non-Grafana) only, n * 24h >= 24 * span and span >= 6h
 #: (span = last - first, nothing added); Grafana writes a row per evaluation, so repeated
 #: Grafana rows are never spamming. stuck: Grafana whose last row is firing and whose open
-#: episode began >= 72h before window_end (2026-08-25T18:00Z), so at or before
-#: 2026-08-22T18:00Z. Priority flapping -> spamming -> stuck. max_episode_firing_rows is
-#: stored as a diagnostic only.
+#: episode's firing rows span >= 72h (last firing row - open_since, inclusive). It is never
+#: measured to window_end: Grafana writes a row on every evaluation while an alert fires, so
+#: silence after the last row means it stopped firing, and one row spans 0. Priority
+#: flapping -> spamming -> stuck. max_episode_firing_rows is stored as a diagnostic only.
 #:
 #: One identity per case; every v1 case is a distinct ``obj``. Every Grafana case that
-#: should NOT be stuck either ends on a clear or opened less than 72h before window_end.
+#: should NOT be stuck either ends on a clear or has open-episode rows spanning under 72h.
 ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
     "name": "acceptance-fire-patterns",
     "phase": "acceptance",
@@ -383,10 +383,18 @@ ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
     "v1PanelQuery": None,
     "v2PanelQuery": None,
     "v1Defs": [
-        # (a) stuck, inclusive: one firing row exactly 72h before window_end.
-        _fire("f-a-stuck-72h", ["2026-08-22T18:00:00.000Z"]),
-        # (b) none: one firing row 71h59m before window_end.
-        _fire("f-b-open-71h59m", ["2026-08-22T18:01:00.000Z"]),
+        # (a) stuck, inclusive: one row per 12h evaluation from 08-21 12:00 to 08-24 12:00
+        #     (7 rows), never cleared. The open episode's rows span exactly 72h.
+        _fire("f-a-stuck-72h", _every("2026-08-21T12:00:00.000Z", timedelta(hours=12), 7)),
+        # (b) none: 12-hourly from 08-21 12:01 (6 rows to 08-24 00:01), then a last row at
+        #     08-24 12:00 (7 rows), never cleared. The rows span 71h59m.
+        _fire(
+            "f-b-open-71h59m",
+            [
+                *_every("2026-08-21T12:01:00.000Z", timedelta(hours=12), 6),
+                "2026-08-24T12:00:00.000Z",
+            ],
+        ),
         # (c) none: F, F, C - one episode of two firing rows, closed.
         _fire("f-c-ffc", ["2026-08-24T01:00:00.000Z", "2026-08-24T01:05:00.000Z"]),
         _clear("f-c-ffc", ["2026-08-24T01:10:00.000Z"]),
@@ -403,12 +411,10 @@ ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
             ["2026-08-24T03:00:00.000Z", "2026-08-24T03:10:00.000Z", "2026-08-24T03:15:00.000Z"],
         ),
         _clear("f-e-fcffc", ["2026-08-24T03:05:00.000Z", "2026-08-24T03:20:00.000Z"]),
-        # (f) stuck: an open episode of 3 firing rows that began 114h before window_end.
-        #     Many rows in the open episode do not make it spamming.
-        _fire(
-            "f-f-open-stuck",
-            ["2026-08-21T00:00:00.000Z", "2026-08-22T00:00:00.000Z", "2026-08-23T00:00:00.000Z"],
-        ),
+        # (f) stuck: an open episode of 8 firing rows, one per 12h evaluation from 08-21
+        #     00:00 to 08-24 12:00, spanning 84h. Many rows in the open episode do not make it
+        #     spamming.
+        _fire("f-f-open-stuck", _every("2026-08-21T00:00:00.000Z", timedelta(hours=12), 8)),
         # (g) flapping: three single-row episodes on 08-24, clears 00:05, 10:05 and 20:05
         #     (20h apart, inside one rolling 24h).
         _fire(
@@ -468,6 +474,10 @@ ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
         # (m) none: API firing for 100h with no clear - 5 rows 25h apart from 08-20 00:00.
         #     Stuck is Grafana-only, and 5 x 24h < 24 x 100h.
         _fire_api("f-m-api-100h", _every("2026-08-20T00:00:00.000Z", timedelta(hours=25), 5)),
+        # (p) none: ONE firing row 100h before window_end (08-21 14:00), then silence. Grafana
+        #     writes a row on every evaluation while firing, so silence means it stopped; one
+        #     row spans 0h. Measuring to window_end instead would call it stuck (review C1).
+        _fire("f-p-stale-100h", ["2026-08-21T14:00:00.000Z"]),
     ],
     "v2Defs": [
         # (n) v2 flapping with per-row `resolved`: one firing row on 08-21, then resolved at
@@ -476,8 +486,8 @@ ACCEPTANCE_FIRE_PATTERNS: dict[str, Any] = {
         _fire_v2_episode("2026-08-21T12:00:00.000Z", "2026-08-23T02:00:00.000Z"),
         _fire_v2_episode("2026-08-23T06:00:00.000Z", "2026-08-23T08:00:00.000Z"),
         _fire_v2_episode("2026-08-23T12:00:00.000Z", "2026-08-23T14:00:00.000Z"),
-        # (o) v2 stuck: firing since 08-21 00:00 (90h before window_end), one row per 12-hour
-        #     evaluation through 08-25 12:00 - 10 rows, never resolved.
+        # (o) v2 stuck: one row per 12-hour evaluation from 08-21 00:00 through 08-25 12:00 -
+        #     10 rows, never resolved. The open episode's rows span 108h.
         _fire_v2(
             "f-v2-stuck",
             "acc-fire-v2-stuck",

@@ -51,6 +51,8 @@ def by_application(alerts: tuple[AlertRow, ...]) -> tuple[AppRow, ...]:
 
 
 def fire_rows(alerts: tuple[AlertRow, ...], window_end: datetime) -> tuple[FireRow, ...]:
+    """One row per alert. ``window_end`` is kept for callers; nothing here reads it any
+    more, because ``open_hours`` ends at the last firing row, not at the week's end."""
     rows: list[FireRow] = []
     for alert in alerts:
         span = alert.last_seen - alert.first_seen
@@ -59,10 +61,12 @@ def fire_rows(alerts: tuple[AlertRow, ...], window_end: datetime) -> tuple[FireR
                 alert=alert,
                 span_hours=span.total_seconds() / 3600,
                 max_episode_firing_rows=alert.max_episode_firing_rows,
+                # When an episode is open the last row is firing, so last_seen is the open
+                # episode's last firing row: this is how long its firing rows span.
                 open_hours=(
                     None
                     if alert.open_since is None
-                    else (window_end - alert.open_since).total_seconds() / 3600
+                    else (alert.last_seen - alert.open_since).total_seconds() / 3600
                 ),
                 events_per_24h=(alert.row_count * (_DAY / span) if span >= _MIN_SPAN else None),
                 pattern=alert.fire_pattern,

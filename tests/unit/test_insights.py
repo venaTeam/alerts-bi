@@ -299,15 +299,19 @@ def test_fire_rows_single_row_has_zero_span_and_no_events_rate() -> None:
     assert row.max_episode_firing_rows == 0
 
 
-def test_fire_rows_open_hours_run_to_the_week_end_and_orders_by_events() -> None:
+def test_fire_rows_open_hours_span_the_open_episode_and_orders_by_events() -> None:
     api = alert(provider="api", key_field="x", row_count=48, last_seen=T0 + timedelta(hours=24))
+    # The open episode's firing rows run from T0 - 30h to the last row at T0 + 10h: 40h. The
+    # week ends later, at T0 + 50h, which open_hours must not reach.
     small = alert(
         key_field="y",
         row_count=2,
         max_episode_firing_rows=2,
+        first_seen=T0 - timedelta(hours=30),
+        last_seen=T0 + timedelta(hours=10),
         open_since=T0 - timedelta(hours=30),
     )
-    rows = fire_rows((small, api), T0 + timedelta(hours=10))
+    rows = fire_rows((small, api), T0 + timedelta(hours=50))
     assert [r.alert.key_field for r in rows] == ["x", "y"]
     assert rows[0].events_per_24h == 48.0
     assert rows[0].span_hours == 24.0

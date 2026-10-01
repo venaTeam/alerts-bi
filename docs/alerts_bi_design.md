@@ -659,7 +659,7 @@ Reconcile before building the pipeline against the mock, or the first thing the 
 
 **Rule 6 data remains in the mock and is simply not consumed**, which is the intended state: the rule stays documented and its fixtures stay generated, so switching R6 on later does not require re-seeding.
 
-**Amended 2026-10-01 (section 7.14).** R6 is now consumed, and the mock's v1 5-minute and v2 12-hour row cadences are read as what they model: Grafana writes a row on every evaluation, so a long-firing Grafana alert yields many firing rows in one episode, never re-sent notifications. The generator logic is unchanged; only its comments and names now say so. Two `acceptance-*` teams were appended, making six: `acceptance-fire-patterns`, one identity per R6 boundary (stuck at exactly 72 hours and one minute short, Grafana row runs that are never spamming, API rate and span edges, flapping inside and outside 24 hours, flapping outranking spamming, and v2 stuck and flapping), and `acceptance-unseen` for the visibility measure. The other acceptance teams' rows moved from 2026-08-20/21 to 2026-08-23/24, 54 hours before the window end, so no single-row Grafana alert there is incidentally stuck; every count and representative row is unchanged and only the oracle's date keys moved.
+**Amended 2026-10-01 (section 7.14).** R6 is now consumed, and the mock's v1 5-minute and v2 12-hour row cadences are read as what they model: Grafana writes a row on every evaluation, so a long-firing Grafana alert yields many firing rows in one episode, never re-sent notifications. The generator logic is unchanged; only its comments and names now say so. Two `acceptance-*` teams were appended, making six: `acceptance-fire-patterns`, one identity per R6 boundary (stuck at exactly 72 hours and one minute short, Grafana row runs that are never spamming, API rate and span edges, flapping inside and outside 24 hours, flapping outranking spamming, and v2 stuck and flapping), and `acceptance-unseen` for the visibility measure. The other acceptance teams' rows moved from 2026-08-20/21 to 2026-08-23/24, 54 hours before the window end, so no single-row Grafana alert there is incidentally stuck; every count and representative row is unchanged and only the oracle's date keys moved. **Revised the same day** when stuck moved to the open episode's firing-row span (section 7.14): a single row can no longer be stuck, so those dates no longer matter for R6 and were kept to avoid churn. `acceptance-fire-patterns` was re-authored by hand: its stuck cases are 12-hourly evaluation rows spanning exactly 72 hours (stuck), 71 hours 59 minutes (not stuck) and 84 hours (stuck), and a new case pins the corrected reading — one Grafana firing row 100 hours before the window end, then silence, is not stuck.
 
 ### 7.6 Boundaries settled during implementation
 
@@ -912,13 +912,26 @@ priority:
 * **spamming** — an API (non-Grafana) alert at 24 or more events per 24 hours over a span
   of at least 6 hours. API senders emit their own rows, so their rate is a real send rate.
   Grafana alerts are never spamming: their rows are evaluations (section 1.1).
-* **stuck** — a Grafana alert whose last row is firing and whose open episode began at least
-  72 hours before the week ends. 72 hours so a genuine day-long outage is not flagged. API
-  senders often never clear, so stuck is Grafana-only.
+* **stuck** — a Grafana alert whose last row is firing and whose open episode's firing rows
+  span at least 72 hours: last firing row − `open_since` ≥ 72 hours, inclusive. 72 hours so a
+  genuine day-long outage is not flagged. API senders often never clear, so stuck is
+  Grafana-only.
+
+**Stuck is measured to the last firing row, never to the week's end** (corrected 2026-10-01,
+product owner). Grafana writes a row on every evaluation while an alert fires, so silence
+after its last row means it is no longer firing — it resolved, or the rule was deleted or
+paused — not that it is stuck. A single firing row spans zero and is never stuck, however
+long before the week's end it was written. The first reading measured from `open_since` to
+the week's end, which made a Grafana alert that fired once days ago and then fell silent
+"still firing"; that was a false positive in `flagged_by_rule`. The evidence's `open_hours`
+is the same span (last firing row − `open_since`, in hours), and is empty when no episode is
+open. Ruleset 1.1.0 and prompt 1.3.0 were unreleased, so they were amended in place.
 
 Because a firing Grafana rule keeps writing rows on every evaluation, an alert that started
 firing before the window still has rows throughout it; its open episode starts at its first
-row in the window, so stuck reads "open for at least 72 hours of this week".
+row in the window, so stuck reads "firing rows spanning at least 72 hours of this week".
+That is a known limitation: an alert open for days before the window is judged only on its
+in-window rows.
 
 Every row of a matching identity matches R6, so the row-level allocation of section 4 is
 unchanged. R6 is a core finding, so the identity is withheld from the model (section 5.1);
