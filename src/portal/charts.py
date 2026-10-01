@@ -17,7 +17,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 
-__all__ = ["ChartPoint", "line_chart", "nice_step"]
+__all__ = [
+    "TIMES",
+    "ChartPoint",
+    "Segment",
+    "level_bar",
+    "line_chart",
+    "nice_step",
+    "stacked_bar",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,3 +125,58 @@ def line_chart(points: Sequence[ChartPoint], *, series: str, label: str) -> str:
         f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="{escape(label, quote=True)}">{"".join(parts)}</svg>'
     )
+
+
+# ------------------------------------------------------------------ bars
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    """One part of a stacked bar: the CSS class that colours it, a label and a count."""
+
+    css: str
+    label: str
+    count: int
+
+
+def stacked_bar(segments: Sequence[Segment], *, label: str) -> str:
+    """One full-width bar split by count, with a legend. Empty segments are left out."""
+    shown = [segment for segment in segments if segment.count]
+    total = sum(segment.count for segment in shown) or 1
+    rects, offset = [], 0.0
+    for segment in shown:
+        width = 100 * segment.count / total
+        rects.append(
+            f'<rect class="{segment.css}" x="{offset:.3f}" y="0" '
+            f'width="{max(width - 0.4, 0.2):.3f}" height="10">'
+            f"<title>{escape(segment.label)}: {segment.count}</title></rect>"
+        )
+        offset += width
+    legend = "".join(
+        f'<li><svg viewBox="0 0 9 9" aria-hidden="true"><rect class="{segment.css}" width="9" '
+        f'height="9" rx="2"/></svg>{escape(segment.label)} <b class="num">{segment.count}</b></li>'
+        for segment in shown
+    )
+    return (
+        f'<svg class="qbar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" '
+        f'aria-label="{escape(label, quote=True)}">{"".join(rects)}</svg>'
+        f'<ul class="legend">{legend}</ul>'
+    )
+
+
+def level_bar(value: float, maximum: float, *, css: str) -> str:
+    """A horizontal bar filled to ``value / maximum``: geometry only, coloured by ``css``."""
+    width = 0.0 if maximum <= 0 else max(0.0, min(100.0, 100 * value / maximum))
+    fill = (
+        f'<rect class="{css}" x="0" y="0" width="{max(width, 0.8):.2f}" height="8" rx="2"/>'
+        if value > 0
+        else ""
+    )
+    return (
+        '<svg class="hbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">'
+        f'<rect class="track" x="0" y="0" width="100" height="8" rx="2"/>{fill}</svg>'
+    )
+
+
+#: The multiplication sign.
+TIMES = "\N{MULTIPLICATION SIGN}"

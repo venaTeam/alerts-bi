@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-08-25T18:00:00.000Z",
-  "totalRows": 39959,
+  "totalRows": 40125,
   "summary": [
     {
       "team": "payments-core",
@@ -100,6 +100,24 @@
       "v2Rows": 0,
       "v1Distinct": 5,
       "v2Distinct": 0
+    },
+    {
+      "team": "acceptance-fire-patterns",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 141,
+      "v2Rows": 16,
+      "v1Distinct": 20,
+      "v2Distinct": 4
+    },
+    {
+      "team": "acceptance-unseen",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 7,
+      "v2Rows": 2,
+      "v1Distinct": 5,
+      "v2Distinct": 2
     }
   ],
   "ruleBreakdown": [
@@ -522,6 +540,24 @@
         "acc-blast"
       ],
       "v2Operator": null
+    },
+    {
+      "team": "acceptance-fire-patterns",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-fire"
+      ],
+      "v2Operator": "acc-fire-v2"
+    },
+    {
+      "team": "acceptance-unseen",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-unseen"
+      ],
+      "v2Operator": "acc-unseen-v2"
     }
   ],
   "unattributed": {

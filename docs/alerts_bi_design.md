@@ -1,7 +1,7 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13)
-**Last updated:** 2026-09-27
+**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13); team summary, R6 and `unseen` (section 7.14)
+**Last updated:** 2026-10-01
 
 ---
 
@@ -19,7 +19,7 @@ Once an alert arrives, it lands in two places:
 * **SQL Server — "hot alerts".** Holds only alerts that are *currently active*. This is the operational surface: teams build Grafana panels that query this database, and that is what the on-call engineer actually looks at.
 * **Elasticsearch (ECK) — history.** Every alert event that ever arrived, with **3-month retention**.
 
-The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3.
+The primary key of an alert is **`key_field` + `application`**. A still-active alert sent via Grafana is re-fired with the same key on the notification policy's repeat interval — and **that interval differs between the two systems**: Appchi v1 repeats every **5 minutes**, Appchi V2 every **12 hours** (confirmed 2026-08-27). That 144x gap dominates raw row counts and is the single most important fact for section 3.3. **Corrected 2026-10-01 (product owner):** the Grafana repeat interval is **disabled** in both v1 and v2 notification policies, so a still-firing alert is not re-sent on a timer; no notification is re-sent on a timer. **Clarified the same day:** Grafana writes an Elasticsearch row on **every evaluation** of a firing rule, so the observed repetition (section 3.3's scale measurement, ~100 rows per alert per day) is evaluation cadence, not notifications. A row count therefore measures how long and how often a rule was evaluated while firing; rule 6 never judges a Grafana alert by its row count (section 7.14). Rows against distinct alerts (section 3.3) stays the counting rule regardless of cause.
 
 ### 1.2 The standardization project
 
@@ -167,7 +167,7 @@ A team that migrates properly drives suppression to zero, because the standard s
 Two categories considered earlier are dropped:
 
 * `out_of_scope` — panel narrowing on a classification dimension (`severity = 'critical'`). Legitimate, and reporting it added a number nobody would act on.
-* `unseen` — alerts outside the panel's identity narrowing, which the team therefore never sees. Correctness no longer depends on this, because ownership comes from the operator list and already includes them (section 3.1). What is lost is the ability to *tell a team* that its dashboard does not show a portion of the alerts it owns. That is a real on-call hazard and it is now invisible; it can be added later from the same parse without changing anything else.
+* `unseen` — alerts outside the panel's identity narrowing, which the team therefore never sees. Correctness no longer depends on this, because ownership comes from the operator list and already includes them (section 3.1). What is lost is the ability to *tell a team* that its dashboard does not show a portion of the alerts it owns. That is a real on-call hazard and it is now invisible; it can be added later from the same parse without changing anything else. **Restored 2026-10-01 (section 7.14)** as a visibility measure, never a rule: it does not count toward `flagged` and never reaches the model.
 
 `suppressed` and rule 5's count are the same number by construction — one is the headline column, the other its per-rule row.
 
@@ -294,13 +294,13 @@ Derived directly from `what_is_an_incorrect_alert_EN.md`. **Alert message text i
 | 3 | Placeholder or missing required identity/ownership metadata | yes | yes | Core |
 | 4 | Grafana alert missing its alert-rule link (`provider = grafana` and no `alert_rule_url`) | yes | yes | Core |
 | 5 | Self-suppressed (matched the team's own exclusion clause) | yes | yes | Core |
-| 6 | Spam volume (same `application` + `key_field` far above expected fire rate) | yes | yes | **Post-MVP** |
+| 6 | Firing pattern by episodes: stuck, spamming or flapping (section 7.14) | yes | yes | Core (since ruleset 1.1.0) |
 | 7 | Invalid `time_created`: later than receipt time or more than 24 hours before receipt | yes | — | Core (v1 only by construction) |
 | 8 | Missing or unusable `impact` | — | yes | V2 |
 | 9 | Missing or invalid absolute HTTP(S) `runbook_url` | — | yes | V2 |
 | 10 | `impact` exactly matches the versioned technical-cause phrase catalogue | — | yes | V2 |
 
-**Rule 6 is deferred to post-MVP** (decided 2026-08-27). The MVP does not treat a quantity of alerts as evidence that an alert is bad, consistent with section 2's decision that volume is displayed rather than scored. Volume is still reported prominently as `alerts` against `distinct_alerts`; it simply does not contribute to `flagged`. The rule stays documented here and the mock dataset still generates matching data, so it can be switched on later without re-scoring history — which is what section 6's "persist facts, not judgments" principle exists for.
+**Superseded 2026-10-01: rule 6 is a core rule from `ruleset_version` 1.1.0** (section 7.14). It judges one alert's firing episodes and never a team's total volume, which stays displayed and unscored. The original deferral reads: **Rule 6 is deferred to post-MVP** (decided 2026-08-27). The MVP does not treat a quantity of alerts as evidence that an alert is bad, consistent with section 2's decision that volume is displayed rather than scored. Volume is still reported prominently as `alerts` against `distinct_alerts`; it simply does not contribute to `flagged`. The rule stays documented here and the mock dataset still generates matching data, so it can be switched on later without re-scoring history — which is what section 6's "persist facts, not judgments" principle exists for.
 
 Rule 5 is the one to put in front of teams first: it is their own filter quoted back to them, and it is their phase-0 work list.
 
@@ -605,7 +605,7 @@ The version fields on the run record exist so that a movement in a team's number
 
 ## 7. Open questions
 
-The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, history backfill, the rule-6 deferrals, a record of what was deliberately left out, the boundaries settled during implementation, the implementation language, the read-only review portal (section 7.10), and automatic weekly reviews (section 7.11).
+The MVP design is settled and the MVP is built. What remains is batching validation, the measurements that need a live endpoint, history backfill, a record of what was deliberately left out, the boundaries settled during implementation, the implementation language, the read-only review portal (section 7.10), and automatic weekly reviews (section 7.11).
 
 ### 7.1 Rule-grouped batching validation (5.1)
 
@@ -623,7 +623,7 @@ The MVP design is settled and the MVP is built. What remains is batching validat
 
 ### 7.3 Deferred with rule 6
 
-Rule 6 (spam volume) is post-MVP (section 4). These move with it.
+**Resolved 2026-10-01 (section 7.14):** with the repeat interval disabled and Grafana writing a row per evaluation, Grafana alerts are judged by firing episodes (flapping fire → clear cycles, or open with no clear), and API alerts by an absolute rate. The original questions read: rule 6 (spam volume) is post-MVP (section 4). These move with it.
 
 1. **Threshold: what fire rate counts as spam?** It must differ **by schema as well as by provider** — the expected Grafana baseline is ~288 rows/day in v1 and ~2/day in v2 (section 3.3), so a single fixed threshold would flag every healthy v1 alert and no unhealthy v2 one. Likely expressed as a multiple of the expected repeat cadence rather than as an absolute count.
 2. **API-sent alerts: do they have any re-fire cadence, or are they one-shot?** Only affects the threshold above. Noted because the mock generator currently leaves API alerts on their authored cadence rather than inventing one.
@@ -633,7 +633,7 @@ Rule 6 (spam volume) is post-MVP (section 4). These move with it.
 Recorded here so they read as choices rather than oversights.
 
 * **A BI-side migration-invariant alert identity** (section 3.7) — `application` + `key_field` only, accepting that the v2 key changes on enrichment and that v1 and v2 keys are not like-for-like.
-* **`unseen` — alerts a team owns but its own dashboard does not show** (section 3.2). A real on-call hazard, currently invisible, addable later from the same parse without changing anything else.
+* **`unseen` — alerts a team owns but its own dashboard does not show** (section 3.2) — **built 2026-10-01** as a visibility measure (section 7.14).
 * **`query` template variables inside suppression predicates** (section 5.2) — counted as unmeasured rather than resolved by executing a team's SQL.
 * **Panel discovery or live variable retrieval via the Grafana API** (section 5.2) — panels and frozen variable definitions are collected by the standardization team instead.
 * **Cross-team leaderboard** (sections 2, 6) — deferred; the MVP produces one independently timed team scorecard per run.
@@ -641,7 +641,7 @@ Recorded here so they read as choices rather than oversights.
 * **Company-wide attribution audit and `Unattributed` work list** (sections 3.1, 6) — deferred because it requires enumerating operators across all alerts, which conflicts with the MVP's team-filtered queries. The future audit enumerates every operator/application value, subtracts all registered operators and reports the remainder with volumes; application may suggest an owner but never assigns one automatically.
 * **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch.
 * **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards.
-* **Any comparison between runs** (section 2) — no trends, deltas, baselines or improvement percentages in the scorecard or the exports. The tool reports one week; people compare. **Amended 2026-09-24:** the review portal plots each team's published weeks over time (section 7.10), still with no delta, percentage or conclusion.
+* **Any comparison between runs** (section 2) — no trends, deltas, baselines or improvement percentages in the scorecard or the exports. The tool reports one week; people compare. **Amended 2026-09-24:** the review portal plots each team's published weeks over time (section 7.10), still with no delta, percentage or conclusion. **Amended 2026-10-01:** one scoped exception, the estimated time to retire v1 on the team summary (section 7.14), computed at request time from published weeks only and never written to the scorecard or the exports.
 * **Sampling and error bars on `unassessed`** (section 5.1) — withdrawn with the classification budget. Under exhaustive coverage `unassessed` is enumerable, so there is nothing left to estimate.
 * **One verdict per alert rule** (section 5.1) — grouping is an input-side optimisation only. Collapsing a rule to a single classification was considered and rejected: alerts under one rule can differ in `message`, `node_name` or `environment` in ways that matter, and the work list is built from alerts.
 
@@ -658,6 +658,8 @@ Reconcile before building the pipeline against the mock, or the first thing the 
 **Reconciled 2026-08-30.** The generator was extended rather than replaced, and four `acceptance-*` teams were appended after the seven realistic ones — appended last on purpose, so the seeded RNG draws consumed by the existing teams are unchanged and their generated data stays byte-stable. They are defined in [`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py) and cover the paths the original fixtures could not reach: both inclusive R7 boundaries and one millisecond outside each, an API alert with no rule URL that must not match R4, a multi-date identity whose finding must stay on the date that matched, all three v2 readiness rules including a non-critical R9 that must not reduce readiness, a 401-alert rule-URL group that must split 134/134/133, a missing-URL application group that must never merge with it, multi-panel suppression disagreement, an `OR`-nested leaf, an unresolved `query` variable, and a 60% blast radius. The generator also gained explicit index mappings and a guarded `RESET=1` clean reload; `team_alert_status.md` was rewritten against the settled phase and rule definitions; and [`scripts/es_scale_probe.py`](../scripts/es_scale_probe.py) now reports the two approved diagnostics with their operands, scoped to one selected team.
 
 **Rule 6 data remains in the mock and is simply not consumed**, which is the intended state: the rule stays documented and its fixtures stay generated, so switching R6 on later does not require re-seeding.
+
+**Amended 2026-10-01 (section 7.14).** R6 is now consumed, and the mock's v1 5-minute and v2 12-hour row cadences are read as what they model: Grafana writes a row on every evaluation, so a long-firing Grafana alert yields many firing rows in one episode, never re-sent notifications. The generator logic is unchanged; only its comments and names now say so. Two `acceptance-*` teams were appended, making six: `acceptance-fire-patterns`, one identity per R6 boundary (stuck at exactly 72 hours and one minute short, Grafana row runs that are never spamming, API rate and span edges, flapping inside and outside 24 hours, flapping outranking spamming, and v2 stuck and flapping), and `acceptance-unseen` for the visibility measure. The other acceptance teams' rows moved from 2026-08-20/21 to 2026-08-23/24, 54 hours before the window end, so no single-row Grafana alert there is incidentally stuck; every count and representative row is unchanged and only the oracle's date keys moved. **Revised the same day** when stuck moved to the open episode's firing-row span (section 7.14): a single row can no longer be stuck, so those dates no longer matter for R6 and were kept to avoid churn. `acceptance-fire-patterns` was re-authored by hand: its stuck cases are 12-hourly evaluation rows spanning exactly 72 hours (stuck), 71 hours 59 minutes (not stuck) and 84 hours (stuck), and a new case pins the corrected reading — one Grafana firing row 100 hours before the window end, then silence, is not stuck.
 
 ### 7.6 Boundaries settled during implementation
 
@@ -736,6 +738,8 @@ Four states are kept distinct and never inferred from one another:
 **What a reader sees is alert data, not service internals.** The portal shows the week covered, when it was published, the review note, the alert fields, the findings with their evidence, and the decisions. It shows no run id, registry, ruleset, prompt or model version, run timing or document hash. Those stay in the scorecard and the operator CLI, where the standardization team needs them.
 
 **Volume in the portal is a weekly total.** For each schema separately it shows **alert events in the week** (every firing, repeats included, `sum(daily_metrics.alerts)`) and **distinct alerts in the week** (distinct `application` + `key_field` identities in the 168-hour window, which equals the number of work-list rows for that schema). This amends section 3.3 for the portal only; the scorecard and the CSV exports keep the per-day distinct rate. v1 and v2 are never added together and no cross-schema or migration percentage is shown.
+
+**Amended 2026-10-01 (product owner): a within-week day-by-day view.** The summary's presentation slides (section 7.14) show, for the single selected published week, the distinct alerts and the rule-flagged distinct alerts of each UTC day, per schema, read through the `portal_daily_metrics` view (migration 007) and labelled "by UTC day". This is a view inside one published week, never a comparison across weeks or a per-day rate: the headline numbers stay weekly totals, and the days of one week carry no delta, trend line or conclusion.
 
 **History is plotted, not interpreted.** Each schema has its own chart of distinct alerts and of events, one point per published week, dated by the week's end. A gap in publication breaks the line instead of joining across it. The portal states no delta, improvement percentage or "fixed" status. An alert that stops appearing may have been deleted, silenced or moved to v2, and this tool cannot tell whether monitoring coverage was kept (section 3.4).
 
@@ -878,3 +882,104 @@ Before deployment, freeze and independently adjudicate representative labels (in
 verdicts), compare baseline/candidate and inspect explanations and group-level uncertainty,
 exercise realistic long/large batches, and record the chosen version/cap and rollback release.
 The proposed gates and remaining policy decisions remain in `llm_review_upgrade_plan.md`.
+
+### 7.14 Team summary, R6 and `unseen`
+
+**Decided 2026-10-01, at the product owner's direction.** Specified in
+`docs/superpowers/specs/2026-10-01-team-summary-design.md`, which is binding for detail.
+
+**One summary page per team, on both reading surfaces.** The operator admin app (section 7.12)
+gains `GET /teams/{team_id}/summary` for any completed run, internals included. The reader
+portal (section 7.10) gains a Summary section on the team week page for published weeks,
+under every portal rule: weekly totals, no per-day rate, no run id or version, no script. Its presentation slides add one within-week view, the day-by-day distinct and rule-flagged distinct alerts of the one selected published week, labelled "by UTC day" (section 7.10, amended 2026-10-01).
+Both are rendered from the same pure building blocks (`src/insights`). The summary shows,
+for one run: volume and rule-flagged tiles per schema, model coverage, phase, why alerts
+were flagged by rule, templated key findings, noisy alerts by application, how often alerts
+fire, the biggest single source, the per-rule table with what to change, hidden and
+`unseen` alerts, migration progress and a filterable work list. v1 and v2 are never summed.
+
+**Rule 6 is a core rule from `ruleset_version` 1.1.0, judged by firing episodes.** The
+Grafana repeat interval is disabled and Grafana writes a row on every evaluation (section
+1.1), so a Grafana alert's row count reflects evaluation cadence and is never judged; only
+its fire → clear transitions and how long it stays open carry meaning. The identity's raw rows in the window are ordered by
+timestamp, then firing before clear at the same instant (so a same-instant clear closes
+the episode and never invents stuck), then document hash. A clear is v1 severity `clear` (code 1) or v2
+`status = resolved`. An **episode** is a run of consecutive firing rows closed by a clear;
+firing rows after the last clear form the open episode. One pattern per alert, in this
+priority:
+
+* **flapping** — at least 3 fire → clear cycles inside any rolling 24 hours.
+* **spamming** — an API (non-Grafana) alert at 24 or more events per 24 hours over a span
+  of at least 6 hours. API senders emit their own rows, so their rate is a real send rate.
+  Grafana alerts are never spamming: their rows are evaluations (section 1.1).
+* **stuck** — a Grafana alert whose last row is firing and whose open episode's firing rows
+  span at least 72 hours: last firing row − `open_since` ≥ 72 hours, inclusive. 72 hours so a
+  genuine day-long outage is not flagged. API senders often never clear, so stuck is
+  Grafana-only.
+
+**Stuck is measured to the last firing row, never to the week's end** (corrected 2026-10-01,
+product owner). Grafana writes a row on every evaluation while an alert fires, so silence
+after its last row means it is no longer firing — it resolved, or the rule was deleted or
+paused — not that it is stuck. A single firing row spans zero and is never stuck, however
+long before the week's end it was written. The first reading measured from `open_since` to
+the week's end, which made a Grafana alert that fired once days ago and then fell silent
+"still firing"; that was a false positive in `flagged_by_rule`. The evidence's `open_hours`
+is the same span (last firing row − `open_since`, in hours), and is empty when no episode is
+open. Ruleset 1.1.0 and prompt 1.3.0 were unreleased, so they were amended in place.
+
+Because a firing Grafana rule keeps writing rows on every evaluation, an alert that started
+firing before the window still has rows throughout it; its open episode starts at its first
+row in the window, so stuck reads "firing rows spanning at least 72 hours of this week".
+That is a known limitation: an alert open for days before the window is judged only on its
+in-window rows.
+
+Every row of a matching identity matches R6, so the row-level allocation of section 4 is
+unchanged. R6 is a core finding, so the identity is withheld from the model (section 5.1);
+a stuck or spamming alert already has a concrete fix. The facts behind it (`clear_count`,
+`max_clear_cycles_24h`, `max_episode_firing_rows` (a diagnostic only), `open_since`) are persisted on the work-list row with the derived `fire_pattern`,
+so history can be re-scored if the thresholds change. Volume itself stays displayed and
+unscored (section 2).
+
+**Prompt 1.3.0 ships with R6** (decided 2026-10-01, revising the spec's first choice to keep
+1.2.0). The system prompt embeds `ruleset_version`, so the ruleset bump to 1.1.0 changes the
+prompt text, and prompt artifacts are immutable per prompt version (section 7.13): keeping
+1.2.0 would make every live assessment fail. 1.3.0 is 1.2.0 with the R6 catalogue line
+describing the deterministic rule; the instruction not to infer volume from neighbours stays.
+Re-classification under the new version costs little in practice, because alert keys rarely
+recur across weeks (section 3.3), so few stored verdicts would have been reused anyway.
+
+**`unseen` is restored as a visibility measure** (section 3.2): rows that every one of the
+team's panels for that schema leaves out through a positive identity predicate (`=`, `IN`,
+`LIKE` on `operator`, `application`, `node_name`, `object` / `component`), minus rows already
+suppressed, so the two are disjoint. Positive-match and case-sensitive like suppression: a
+`NULL` value or an "all" selection never hides a row. Leaves nested under `OR` or carrying an
+unresolved `query` variable are counted in `unseen_unmeasured` and never hide a row; an unparseable panel hides nothing and counts one. Because the interpretation stored per panel gained identity leaves, `PARSER_VERSION` moved to 1.1.0. A schema with no supplied
+panel reports `NULL`, never zero. It is not a rule, never counts toward `flagged`, and has no
+blast-radius guard because nothing is marked bad.
+
+**The estimated time to retire v1 is a scoped exception to section 2.** It answers when phase
+1 ends — no v1 alert rule firing — so teams and management can plan engineering time. It is
+computed at request time from **published weeks only**, never stored, and never written to the
+scorecard or the exports. The unit of work is a v1 alert rule: distinct `alert_rule_url`, or
+`application` when there is none. Two figures sit side by side, each labelled a projection:
+
+* **Measured pace:** v1 rules that stopped firing across up to three earlier published weeks,
+  back to back, with the lookback ending at a publication gap, a ruleset change, or a change to the team's own
+  operators or panels (migration 008).
+  It projects the week the remaining rules would reach zero, and says "No estimate" with the
+  reason when there are fewer than two earlier weeks or fewer than two retired rules.
+* **Configured effort:** rules left × working days per rule, default 0.5 (rebuilding the
+  rule in v2 and re-deciding its severity; impact and runbook are phase 2), overridable per
+  team with `planning.v1_rule_effort_days` in the registry, labelled configured rather than
+  measured.
+
+Both carry section 3.4's caveats: v1 falling may be cleanup rather than migration, and teams
+rebuild rather than port, so v1 can fall while monitoring is lost.
+
+**Storage** (migration `005_team_summary`): `daily_metrics.unseen`, `unseen_unmeasured`;
+`alert_findings.clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`; the portal views
+gain the new columns, `basis_changed` and the planning override, and a new
+`portal_rule_totals` view gives weekly per-rule totals without exposing `ruleset_version`.
+`daily_metrics.csv` and `alert_worklist.csv` gain the new columns and the scorecard's
+dashboard-visibility section shows `unseen` (`outputs.md`). Migration `006_r6_episodes` adds
+`alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`. Migration `007_portal_daily` adds the `portal_daily_metrics` view (published weeks only: per schema and UTC day bucket, covered hours, distinct alerts and rule-flagged distinct alerts) for the summary slides' day-by-day charts, a within-week view of one published week (section 7.10). Migration `008` changes `portal_reviews.basis_changed` to compare the team's own registry entry (its operators and panels) instead of the whole-file registry version, so an edit to another team's entry no longer marks this team's basis as changed.

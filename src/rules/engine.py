@@ -19,10 +19,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from src.domain.normalize import AlertRecord, select_representative
 from src.rules.catalogs import CORE_RULE_IDS, V2_READINESS_RULE_IDS
 from src.rules.core import Finding, evaluate_core_rules
+from src.rules.firing import firing_facts
 from src.rules.readiness import evaluate_readiness_rules
 
 __all__ = [
@@ -74,6 +76,16 @@ class EvaluatedIdentity:
     llm_eligible: bool
     present_dates: set[str]
     """UTC dates this identity appears on."""
+    clear_count: int = 0
+    """Rows that clear the alert: v1 severity ``clear``, v2 ``status = resolved`` (R6 fact)."""
+    max_clear_cycles_24h: int = 0
+    """Most fire -> clear cycles inside any rolling 24 hours (R6 fact)."""
+    fire_pattern: str | None = None
+    """``stuck``, ``spamming`` or ``flapping`` when R6 matched, else None."""
+    max_episode_firing_rows: int = 0
+    """Most firing rows in any one episode (R6 fact)."""
+    open_since: datetime | None = None
+    """First firing row of the open episode when the last row is firing (R6 fact)."""
 
 
 @dataclass(slots=True)
@@ -93,8 +105,12 @@ class RuleBucketCount:
     """Identities with at least one matching row in this bucket."""
 
 
-def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
-    """Evaluate every row of one schema and aggregate to identities."""
+def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluation:
+    """Evaluate every row of one schema and aggregate to identities.
+
+    ``window_end`` is kept for callers; no rule reads it. R6 stuck is measured from the
+    rows alone (``src.rules.firing``), not to the window's end.
+    """
     evaluated = [
         EvaluatedRow(
             row=row,
@@ -111,6 +127,35 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
     identities: dict[str, EvaluatedIdentity] = {}
     for identity, group in grouped.items():
         representative = select_representative([item.row for item in group])
+
+        # R6 judges the identity's whole firing pattern, so a match belongs to every row
+        # of the identity and the per-bucket allocation then applies unchanged.
+        facts = firing_facts(
+            representative.schema, [item.row for item in group], representative.provider
+        )
+        if facts.pattern is not None:
+            evidence = {
+                "pattern": facts.pattern,
+                "rows": len(group),
+                "clear_count": facts.clear_count,
+                "max_clear_cycles_24h": facts.max_clear_cycles_24h,
+                "max_episode_firing_rows": facts.max_episode_firing_rows,
+                # How long the open episode's firing rows span (last firing row minus
+                # open_since), never the time to the window's end; None when none is open.
+                "open_hours": (
+                    None
+                    if facts.open_span is None
+                    else round(facts.open_span.total_seconds() / 3600, 2)
+                ),
+                "span_hours": round(facts.span.total_seconds() / 3600, 2),
+                "events_per_24h": (
+                    None if facts.events_per_24h is None else round(facts.events_per_24h, 2)
+                ),
+            }
+            for item in group:
+                item.core_findings.append(
+                    Finding(rule_id="R6", set="core", evidence=dict(evidence))
+                )
 
         core_rule_ids = {finding.rule_id for item in group for finding in item.core_findings}
 
@@ -133,6 +178,11 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
             has_core_finding=has_core_finding,
             llm_eligible=not has_core_finding,
             present_dates={item.row.snapshot_date for item in group},
+            clear_count=facts.clear_count,
+            max_clear_cycles_24h=facts.max_clear_cycles_24h,
+            fire_pattern=facts.pattern,
+            max_episode_firing_rows=facts.max_episode_firing_rows,
+            open_since=facts.open_since,
         )
 
     return Evaluation(rows=evaluated, identities=identities)

@@ -73,6 +73,11 @@ def _iso_date(value: Any) -> str:
     return str(value or "")[:10]
 
 
+def _bit(value: Any) -> bool | None:
+    """A SQL ``BIT`` read back as 0/1 becomes ``true``/``false``; NULL stays empty."""
+    return None if value is None else bool(value)
+
+
 DAILY_METRIC_HEADERS: Final = (
     "run_id",
     "team_id",
@@ -100,6 +105,8 @@ DAILY_METRIC_HEADERS: Final = (
     "phase2_gaps",
     "suppressed",
     "suppression_unmeasured",
+    "unseen",
+    "unseen_unmeasured",
 )
 
 
@@ -133,6 +140,8 @@ def daily_metrics_csv(daily_metrics: Sequence[Mapping[str, Any]]) -> str:
             row["phase2_gaps"],
             row["suppressed"],
             row["suppression_unmeasured"],
+            row.get("unseen"),
+            row.get("unseen_unmeasured"),
         ]
         for row in daily_metrics
     ]
@@ -191,6 +200,12 @@ WORKLIST_HEADERS: Final = (
     "provider",
     "alert_rule_url",
     "message",
+    "clear_count",
+    "max_clear_cycles_24h",
+    "fire_pattern",
+    "unseen",
+    "max_episode_firing_rows",
+    "open_since",
 )
 
 
@@ -223,6 +238,12 @@ def alert_worklist_csv(findings: Sequence[Mapping[str, Any]]) -> str:
             row["provider"],
             row["alert_rule_url"],
             row["message"],
+            row.get("clear_count", 0),
+            row.get("max_clear_cycles_24h", 0),
+            row.get("fire_pattern"),
+            _bit(row.get("unseen")),
+            row.get("max_episode_firing_rows", 0),
+            row.get("open_since"),
         ]
         for row in findings
     ]

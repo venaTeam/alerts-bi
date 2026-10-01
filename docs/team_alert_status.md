@@ -1,13 +1,13 @@
 # Mock Alert Dataset — Team Status Report
 
-**Last updated:** 2026-08-30
+**Last updated:** 2026-10-01
 **Fixture clock:** `2026-08-25T18:00:00Z`
 **Reported window:** `[2026-08-18T18:00:00Z, 2026-08-25T18:00:00Z)` — the exact 168 hours a run reports
 
 This describes the **synthetic fixture**, not any real team. It is documentation of the
 mock, and it is deliberately **not an acceptance oracle**: the oracle is the hand-authored
 [`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json), which covers
-the four `acceptance-*` teams. The seven realistic teams exist to give the pipeline
+the six `acceptance-*` teams. The seven realistic teams exist to give the pipeline
 lifelike shapes and volumes to run against.
 
 ## Rewritten 2026-08-30 — what changed and why
@@ -35,6 +35,21 @@ RESET=1 uv run python scripts/generate_mock_alerts.py
 ```bash
 uv run alerts-bi run --team <team_id> --run-at 2026-08-25T18:00:00Z --fake-llm
 ```
+
+## Refreshed 2026-10-01 — R6 and two more acceptance teams
+
+R6 is now a core rule (ruleset 1.1.0, design section 7.14), judged by firing episodes:
+flapping on any provider, spamming for API alerts only, stuck for a Grafana alert whose
+last row is firing and whose open episode's firing rows span 72 hours or more (last firing
+row − `open_since`; never measured to the window end, so a single row is never stuck).
+Several realistic teams carry long-firing Grafana alerts, so their **flagged rows** rose
+where R6 (stuck) now applies; volumes are unchanged, because the generator is unchanged.
+`acceptance-fire-patterns` and `acceptance-unseen` were added, and the other acceptance
+teams' rows moved from 08-20/08-21 to 08-23/08-24. Figures below are from runs at the fixture
+clock with the deterministic fake model, re-run the same day after stuck was corrected to
+measure the open episode's firing rows rather than the time to the window end: R6 dropped
+on legacy-batch-jobs, fraud-detection, checkout-api and notifications-svc (fraud-detection
+and checkout-api now have none).
 
 ## Severity in the fixture
 
@@ -70,6 +85,8 @@ team with 4,355 rows over 7 distinct identities has something stuck, while a tea
 | acceptance-batching | done | 100% | 0 | 0 | 404 | 404 | 0 | 0 | 0 |
 | acceptance-suppression | phase_0 | — | 6 | 6 | 0 | 0 | 1 | 1 | 2 |
 | acceptance-blast-radius | phase_0 | — | 5 | 5 | 0 | 0 | 0 | 0 | 1 |
+| acceptance-fire-patterns | phase_1 | 100% | 141 | 30 | 16 | 7 | 73 | 0 | 0 |
+| acceptance-unseen | phase_1 | 100% | 7 | 7 | 2 | 2 | 2 | 2 | 0 |
 
 A dash under readiness means **no v2 identities fired in this window**, which is stored as
 `null` and never as zero: a team cannot fail a measurement that was never taken.
@@ -81,27 +98,30 @@ A dash under readiness means **no v2 identities fired in this window**, which is
 ### payments-core — done
 
 Fully migrated, well-formed alerts. Only 5 rows over 3 identities reach the window because
-v2 re-fires every 12 hours rather than every 5 minutes — the single most important
-arithmetic fact in this dataset. No core findings, no readiness gaps, 100% readiness, and
+Grafana writes a v2 row per 12-hour evaluation rather than every 5 minutes — the single most
+important arithmetic fact in this dataset. (These are evaluation rows; the notification
+repeat interval is disabled on both schemas.) No core findings, no readiness gaps, 100% readiness, and
 with no v1 identities the derived phase is `done`.
 
 ### legacy-batch-jobs — phase_0, the classic stuck-alert shape
 
 4,355 rows over 36 daily-distinct identities: **roughly 622 rows per distinct alert**. That
-is one thing stuck and re-firing, not a team flooding the pipeline, and it is precisely why
+is one thing stuck and evaluated again and again, not a team flooding the pipeline, and it is precisely why
 `alerts` and `distinct_alerts` are always published side by side.
 
-Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R7 1/1`
-(row count / distinct-identity count).
+Rules fired: `R1 4034/17`, `R2 27/15`, `R3 577/3`, `R4 866/5`, `R5 27/15`, `R6 3457/14`,
+`R7 1/1` (row count / distinct identity-days). R6 is stuck: those alerts kept firing with no
+clear, their open episode's firing rows spanning at least 72 hours of the window.
 
 Its panel hides a heartbeat node and anything matching `%test%`, so those alerts are its
 own written admission of what to delete — the phase-0 work list.
 
 ### fraud-detection — phase_0, mid-cleanup
 
-733 rows over 10, with a much lower flagged share than legacy-batch-jobs (154 flagged rows,
-`R1 145/1` dominating). Hygiene is visibly better; one noisy generic-message rule accounts
-for most of the volume.
+733 rows over 10, with 154 flagged rows. No R6: none of its alerts keeps firing for 72
+hours of the window without a clear. The flagged share is much lower than
+legacy-batch-jobs (`R1 145/1`, one noisy generic-message rule, is the largest finding), so
+message hygiene is visibly better.
 
 ### checkout-api — phase_1, dual-run
 
@@ -138,13 +158,17 @@ does not need a second, advisory opinion first.
 
 ---
 
-## The four acceptance teams
+## The six acceptance teams
 
 These are pinned fixtures, defined in
-[`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py). Every row sits on
-`2026-08-20T12:00:00Z` or `2026-08-21T12:00:00Z` with an exact expected outcome, so
+[`scripts/acceptance_teams.py`](../scripts/acceptance_teams.py). Outside
+`acceptance-fire-patterns`, every row sits on `2026-08-23T12:00:00Z` or
+`2026-08-24T12:00:00Z` with an exact expected outcome, so
 [`test/fixtures/expected-results.json`](../test/fixtures/expected-results.json) can be
-computed by hand.
+computed by hand. (They sat on 2026-08-20 and 2026-08-21 until R6 began judging firing
+episodes, when stuck was first measured to the window end and a lone row there would have
+been stuck. Stuck now needs the open episode's firing rows to span 72 hours, which rows at
+most 24 hours apart never do, so the dates no longer matter for R6 and were kept.)
 
 ### acceptance-core — one row per rule boundary
 
@@ -162,7 +186,7 @@ computed by hand.
 | message `i am alive` | R2 |
 | `object` = `Unknown` | R3 |
 | Grafana alert with no rule URL | R4 |
-| identity spanning two dates, bad row on the second | R1 on 08-21 only; whole identity withheld from the model |
+| identity spanning two dates, bad row on the second | R1 on 08-24 only; whole identity withheld from the model |
 | v2 missing `impact` | R8, not completion-ready |
 | v2 `critical` with no runbook | R9, **blocks** completion |
 | v2 `high` with no runbook | R9 visible, does **not** reduce readiness |
@@ -196,6 +220,33 @@ Result: 1 suppressed row, 2 unmeasured leaves.
 
 One panel excluding 3 of 5 owned rows (60%). The leaf is refused, so nothing is suppressed
 and one leaf is counted as unmeasured.
+
+### acceptance-fire-patterns — R6 by firing episodes
+
+One identity per boundary of design section 7.14, with rows from 2026-08-20 to 2026-08-25:
+
+| Case | Expected |
+|---|---|
+| Grafana, a firing row every 12h, rows spanning exactly 72h | stuck (inclusive) |
+| Grafana, a firing row every 12h, rows spanning 71h59m | none |
+| Grafana, one firing row 100h before the window ends, then silence | none — one row spans 0h |
+| Grafana F, F, C and F, F, F, C | none — repeated Grafana rows are evaluations, not spam |
+| Grafana F, C, F, F, C | none |
+| Grafana, eight 12-hourly firing rows spanning 84h, never cleared | stuck |
+| Grafana, three fire → clear cycles within 20h | flapping |
+| API, three F, F, F, C cycles within 8h at 12 rows / 8h | flapping, over spamming |
+| Grafana, three cycles 26h apart first to last | none |
+| API, 24 rows over exactly 24h | spamming (inclusive) |
+| API, 23 rows over 24h; 30 rows over 4h50m; 5 rows over 100h | none |
+| v2 with per-row `resolved`, three cycles within 12h | flapping |
+| v2 evaluated every 12h, rows spanning 108h, never resolved | stuck |
+
+### acceptance-unseen — dashboard visibility
+
+One v1 panel narrowed to `application = 'shown-app'`, with an `OR`-nested `node_name`
+leaf and a `node_name != 'junk'` exclusion; no v2 panel. One alert outside the narrowing is
+unseen on both of its dates; the two `junk` alerts are suppressed and never counted as
+unseen; the `OR` leaf is one unmeasured leaf; and v2 `unseen` is `NULL`, not 0.
 
 ---
 

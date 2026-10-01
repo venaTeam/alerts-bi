@@ -7,6 +7,7 @@ punctuation. Adding a phrase changes what a past number meant, so any addition r
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Final, NamedTuple
 
 __all__ = [
@@ -18,6 +19,12 @@ __all__ = [
     "PRINCIPLE_IDS",
     "R1_GENERIC_MESSAGES",
     "R2_HEARTBEAT_MESSAGES",
+    "R6_API_MIN_SPAN",
+    "R6_API_RATE_WINDOW",
+    "R6_API_SPAM_PER_24H",
+    "R6_FLAP_CYCLES",
+    "R6_FLAP_WINDOW",
+    "R6_STUCK_OPEN",
     "R10_TECHNICAL_CAUSE_IMPACTS",
     "V2_READINESS_RULE_IDS",
     "Principle",
@@ -60,13 +67,34 @@ R10_TECHNICAL_CAUSE_IMPACTS: Final = frozenset(
     {"high cpu", "high cpu usage", "cpu usage is high", "cpu is high"}
 )
 
+#: R6 thresholds (design 7.14). Catalogue constants under ``RULESET_VERSION``, never
+#: environment settings: changing one changes what a past number meant. R6 judges firing
+#: EPISODES, not row counts: Grafana writes a row on every evaluation and its repeat interval
+#: is disabled, so a Grafana row count reflects evaluation frequency, not notifications.
+#: Flapping: fire -> clear cycles inside any rolling window of this length (design 7.14).
+R6_FLAP_WINDOW: Final = timedelta(hours=24)
+#: Flapping: at least this many cycles inside the window, on any provider.
+R6_FLAP_CYCLES: Final = 3
+#: Spamming (API alerts only; Grafana writes a row per evaluation, so its row count says
+#: nothing about re-sending): rows per rate window of span at or above this count ...
+R6_API_SPAM_PER_24H: Final = 24
+#: ... where the rate window is this long (its own constant, apart from the flap window).
+R6_API_RATE_WINDOW: Final = timedelta(hours=24)
+#: ... and only when the span is at least this long.
+R6_API_MIN_SPAN: Final = timedelta(hours=6)
+#: Stuck (Grafana): the open episode's firing rows span at least this long, from its first
+#: firing row to its last (inclusive). Measured to the last firing row, never to the
+#: window's end: Grafana writes a row per evaluation, so silence means it stopped firing.
+R6_STUCK_OPEN: Final = timedelta(hours=72)
+
 #: Rule set membership (design section 3.6): core rules read v1 and v2 side by side.
-CORE_RULE_IDS: Final = ("R1", "R2", "R3", "R4", "R5", "R7")
+CORE_RULE_IDS: Final = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
 
 #: V2 readiness gaps. Never enter ``flagged``, never block LLM assessment.
 V2_READINESS_RULE_IDS: Final = ("R8", "R9", "R10")
 
-#: R6 (spam volume) is post-MVP and is deliberately absent from both lists.
+#: R6 (stuck, spamming, flapping) became a core rule in ruleset 1.1.0 (team summary spec
+#: section 5). It is evaluated per identity by ``src.rules.firing``, not per row.
 ALL_RULE_IDS: Final = CORE_RULE_IDS + V2_READINESS_RULE_IDS
 
 

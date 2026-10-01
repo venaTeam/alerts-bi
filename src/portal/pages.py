@@ -11,7 +11,7 @@ Content-Security-Policy can forbid scripts outright.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date
 from html import escape
 from typing import Any
@@ -45,14 +45,15 @@ __all__ = [
     "directory_page",
     "error_page",
     "h",
+    "rule_link_for",
     "safe_link",
     "team_page",
     "team_url",
     "week_url",
+    "worklist_url",
 ]
 
 SCHEMA_NAMES = {"v1": "Appchi", "v2": "Appchi V2"}
-REPEATS = {"v1": "repeats every 5 minutes", "v2": "repeats every 12 hours"}
 PHASE_STEPS = (
     ("phase_0", "Phase 0 · Clean up"),
     ("phase_1", "Phase 1 · New rules"),
@@ -103,6 +104,42 @@ def week_url(team_id: str, week: date, **query: Any) -> str:
     base = f"{team_url(team_id)}/weeks/{week.isoformat()}"
     params = {key: value for key, value in query.items() if value not in (None, "")}
     return base + ("?" + urlencode(params) if params else "")
+
+
+def worklist_url(
+    team_id: str,
+    week: date,
+    *,
+    show: str = "attention",
+    schema: str = "all",
+    state: str = "all",
+    rule: str = "",
+    page: int | None = None,
+) -> str:
+    """The week page's work list under these filters; defaults are left out of the URL."""
+    return (
+        week_url(
+            team_id,
+            week,
+            show=None if show == "attention" else show,
+            schema=None if schema == "all" else schema,
+            state=None if state == "all" else state,
+            rule=rule or None,
+            page=page,
+        )
+        + "#worklist"
+    )
+
+
+def rule_link_for(team_id: str, week: date) -> Callable[[str | None], str]:
+    """The Summary's ``rule_link``: the escaped href of this week's work list showing every
+    alert that carries one rule (``None`` clears the rule filter). The other filters are
+    reset, so the link always shows exactly the alerts the Summary counted."""
+
+    def link(rule_id: str | None) -> str:
+        return h(worklist_url(team_id, week, rule=rule_id or ""))
+
+    return link
 
 
 def alert_url(team_id: str, week: date, alert: AlertRow) -> str:
@@ -211,80 +248,15 @@ def _readiness(value: float | None) -> str:
 # ------------------------------------------------------------------ team page
 
 
-_STATES = (
-    ("rule_flagged", "q-rule"),
-    ("llm_flagged", "q-model"),
-    ("needs_review", "q-review"),
-    ("assessed_good", "q-good"),
-    ("unassessed", "q-un"),
+#: The review-outcome filter's choices, in the order the work list ranks them.
+_STATE_FILTERS = (
+    ("all", "Any outcome"),
+    ("rule_flagged", QUALITY_STATE_LABELS["rule_flagged"]),
+    ("llm_flagged", "Automated finding"),
+    ("needs_review", QUALITY_STATE_LABELS["needs_review"]),
+    ("assessed_good", QUALITY_STATE_LABELS["assessed_good"]),
+    ("unassessed", QUALITY_STATE_LABELS["unassessed"]),
 )
-
-
-def _quality(totals: SchemaTotals) -> str:
-    counts = [(state, css, int(getattr(totals, state))) for state, css in _STATES]
-    total = sum(count for _, _, count in counts) or 1
-    rects, offset = [], 0.0
-    for state, css, count in counts:
-        if not count:
-            continue
-        width = 100 * count / total
-        rects.append(
-            f'<rect class="{css}" x="{offset:.3f}" y="0" width="{max(width - 0.4, 0.2):.3f}" '
-            f'height="10"><title>{h(QUALITY_STATE_LABELS[state])}: {count}</title></rect>'
-        )
-        offset += width
-    legend = "".join(
-        f'<li><svg viewBox="0 0 9 9" aria-hidden="true"><rect class="{css}" width="9" height="9" '
-        f'rx="2"/></svg>{h(QUALITY_STATE_LABELS[state])} <b class="num">{count}</b></li>'
-        for state, css, count in counts
-        if count
-    )
-    return (
-        f'<svg class="qbar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" '
-        f'aria-label="Alert quality">{"".join(rects)}</svg><ul class="legend">{legend}</ul>'
-    )
-
-
-def _schema_card(review: Review, schema: str) -> str:
-    totals = review.totals.get(schema, SchemaTotals())
-    heading = (
-        f'<h3><span class="chip {schema}">{schema}</span>{SCHEMA_NAMES[schema]} '
-        f"<small>{REPEATS[schema]}</small></h3>"
-    )
-    if totals.events == 0 and totals.distinct_alerts == 0:
-        return (
-            f'<article class="card schema {schema}">{heading}'
-            f'<p class="sub">No {schema} alerts fired this week.</p></article>'
-        )
-    facts = [
-        "<dt>Events with a rule finding</dt>"
-        f'<dd class="num">{totals.flagged_rows:,} of {totals.events:,}</dd>'
-    ]
-    if totals.suppressed:
-        facts.append(
-            f'<dt>Hidden by your own dashboard</dt><dd class="num">{totals.suppressed:,} events</dd>'
-        )
-    if schema == "v2":
-        facts.append(
-            "<dt>v2 readiness gaps</dt>"
-            f"<dd>{_plural(totals.readiness_gaps, 'alert')} missing an impact or a usable "
-            "runbook. Counted apart from quality.</dd>"
-        )
-    return (
-        f'<article class="card schema {schema}">{heading}'
-        '<div class="kpis">'
-        f'<div class="kpi"><span class="n">{totals.distinct_alerts:,}</span>'
-        '<span class="u">distinct alerts this week</span>'
-        '<span class="d">each alert counted once, however often it fired</span></div>'
-        f'<div class="kpi"><span class="n">{totals.events:,}</span>'
-        '<span class="u">alert events this week</span>'
-        '<span class="d">every firing, repeats included</span></div>'
-        "</div>"
-        f'<div><div class="eyebrow">What we found in these '
-        f"{_plural(totals.distinct_alerts, 'alert')}</div>{_quality(totals)}</div>"
-        f'<dl class="facts">{"".join(facts)}</dl>'
-        "</article>"
-    )
 
 
 def _history(reviews: Sequence[Review], selected: Review, schema: str) -> str:
@@ -392,7 +364,12 @@ def team_page(
     show: str,
     schema: str,
     counts: Mapping[str, int],
+    summary: str,
+    state: str = "all",
+    rule: str = "",
 ) -> str:
+    """The team's week. ``summary`` is the markup of
+    :func:`src.portal.summary_view.render_summary_sections` for the selected week."""
     team_id = selected.team_id
     week = selected.week
 
@@ -419,15 +396,25 @@ def team_page(
         )
 
     def filter_link(**changes: Any) -> str:
-        state = {"show": show, "schema": schema, **changes}
-        return (
-            week_url(
-                team_id,
-                week,
-                show=None if state["show"] == "attention" else state["show"],
-                schema=None if state["schema"] == "all" else state["schema"],
+        current = {"show": show, "schema": schema, "state": state, "rule": rule, **changes}
+        return worklist_url(team_id, week, **current)
+
+    rule_filter = ""
+    if rule:
+        title = rule_explanation(rule, None).title
+        rule_filter = (
+            '<span class="seg" role="group" aria-label="Rule">'
+            + _segment(
+                [
+                    (
+                        f"Rule {rule}" + (f" · {title}" if title != rule else ""),
+                        filter_link(),
+                        True,
+                    ),
+                    ("Any rule", filter_link(rule=""), False),
+                ]
             )
-            + "#worklist"
+            + "</span>"
         )
 
     tools = (
@@ -451,7 +438,9 @@ def team_page(
                 ("v2", filter_link(schema="v2"), schema == "v2"),
             ]
         )
-        + "</span></div>"
+        + '</span><span class="seg" role="group" aria-label="Review outcome">'
+        + _segment((label, filter_link(state=key), state == key) for key, label in _STATE_FILTERS)
+        + f"</span>{rule_filter}</div>"
     )
 
     if page.rows:
@@ -474,14 +463,10 @@ def team_page(
     def page_link(target: int, text: str, enabled: bool) -> str:
         if not enabled:
             return f'<span class="button" aria-disabled="true">{text}</span>'
-        href = week_url(
-            team_id,
-            week,
-            show=None if show == "attention" else show,
-            schema=None if schema == "all" else schema,
-            page=target,
+        href = worklist_url(
+            team_id, week, show=show, schema=schema, state=state, rule=rule, page=target
         )
-        return f'<a class="button" href="{h(href)}#worklist">{text}</a>'
+        return f'<a class="button" href="{h(href)}">{text}</a>'
 
     pager = (
         f'<div class="pager"><span>Showing {first}&ndash;{last} of {page.total:,} · one row per '
@@ -510,13 +495,18 @@ def team_page(
         f'<span><span class="k">Published</span>{h(format_instant(selected.published_at))}</span>'
         "</section>"
         f"{note}"
-        '<section><div class="section-h"><h2>This week</h2><p>v1 and v2 are counted separately: '
-        "they repeat at different intervals and identify alerts differently.</p></div>"
+        '<section><div class="section-h"><h2>This week</h2><p>Where the move to v2 stands. '
+        "The phase is derived from which schemas fired this week.</p></div>"
         '<div class="card phase">'
         f'<div><div class="eyebrow">Migration phase</div><div class="steps">{steps}</div></div>'
         f'<div><div class="eyebrow">Phase-2 readiness</div><div class="meter">{meter}</div></div>'
         "</div>"
-        f'<div class="two">{_schema_card(selected, "v1")}{_schema_card(selected, "v2")}</div>'
+        "</section>"
+        '<section id="summary"><div class="section-h"><h2>Summary</h2><p>What the alerts '
+        "did this week, why they were flagged and what is left to do. v1 and v2 are counted "
+        "separately: they write rows at different rates, so their event counts are not comparable, and they identify alerts differently."
+        "</p></div>"
+        f"{summary}"
         "</section>"
         '<section><div class="section-h"><h2>Over time</h2><p>One point per published week, '
         "dated by the day the week ends. Select a point to open that week.</p></div>"

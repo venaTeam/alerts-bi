@@ -1,6 +1,6 @@
 # What a run produces
 
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-01
 
 A run writes exactly four files and no others: `scorecard.html`, `daily_metrics.csv`,
 `rule_counts.csv`, `alert_worklist.csv`. This document says what is in each of them, column
@@ -36,9 +36,10 @@ story the other contradicts.
 a window total — a 7-day total is 7× a 1-day total for arithmetic reasons alone, and reading
 it as "they have seven times more alerts" is the mistake the rate prevents.
 
-**v1 and v2 row counts are never added together.** v1 re-fires a still-active alert every 5
-minutes and v2 every 12 hours, so moving one alert between schemas divides its row count by
-144 without anyone improving anything.
+**v1 and v2 row counts are never added together.** A row count reflects how often rows are written,
+which differs between the two systems, so moving one alert between schemas can change its
+row count without anyone improving anything. Grafana writes a row on every evaluation, so
+`alerts` is evaluation load, not notifications.
 
 ---
 
@@ -78,7 +79,7 @@ Sections, in render order:
 | **Volume** | How much is this team sending? v1 and v2 separately, rows and distinct-per-day, alerts per hour |
 | **Data-quality diagnostics** | Are the identity counts trustworthy? `node_name_ratio` and `key_inflation_ratio` with their operands |
 | **Quality** | How much of it is bad? The five states, plus phase-2 gaps |
-| **Dashboard visibility** | What does the team hide from itself? Suppressed rows, unmeasured suppression leaves, and the supplied panels |
+| **Dashboard visibility** | What does the team hide from itself? Suppressed rows, unmeasured suppression leaves, **unseen** rows (owned rows no supplied panel shows), and the supplied panels |
 | **Rule and principle breakdown** | Which rules and principles fired, and how often |
 | **Daily breakdown** | The per-day table — one row per schema per UTC date, the same figures as `daily_metrics.csv` |
 | **Work list** | The actual list of things to fix, one row per identity |
@@ -102,7 +103,7 @@ simply nothing to measure.
 
 ---
 
-## 4. `daily_metrics.csv` — 26 columns
+## 4. `daily_metrics.csv` — 28 columns
 
 One row per `(schema, UTC date)`. A 168-hour window that does not start at midnight touches
 **eight** dates, so a full run has 8 v1 rows and 8 v2 rows, with the first and last partial.
@@ -131,6 +132,8 @@ One row per `(schema, UTC date)`. A 168-hour window that does not start at midni
 | `phase2_gaps` | v2 identities carrying an R8–R10 readiness gap |
 | `suppressed` | Rows hidden by the team's own panels. **A subset of `flagged_by_rule`, never an addition to it** |
 | `suppression_unmeasured` | Suppression leaves detected but not safely evaluable. Allocated to the schema's **first** bucket and zero elsewhere, so summing the column gives the run total exactly once |
+| `unseen` | Rows the team owns that **every supplied panel for that schema hides** through identity narrowing (a positive mismatch on `operator`, `application`, `node_name` or `object` / `component`), so nobody on the team sees them. It is a visibility measure, never a rule, and never counts toward `flagged_by_rule`. **Empty means no panel was supplied for that schema — not zero.** Disjoint from `suppressed`: a row is one or the other, never both |
+| `unseen_unmeasured` | Identity leaves that could not be evaluated safely (nested in `OR`, or an unresolved `query` variable); such a panel is treated as showing the row. Allocated to the schema's **first** bucket like `suppression_unmeasured`, so summing gives the run total once. Empty when no panel was supplied |
 
 **Both operands are stored beside every ratio** so a reader can check the arithmetic instead
 of trusting it, and so a ratio can be recomputed across days as
@@ -145,7 +148,7 @@ One row per `(schema, date, rule)` that matched at least once.
 | Column | Meaning |
 |---|---|
 | `run_id`, `team_id`, `schema`, `snapshot_date` | Scope |
-| `rule_id` | `R1`–`R5`, `R7`–`R10`. R6 is post-MVP and never appears |
+| `rule_id` | `R1`–`R10`. R6 flags one alert's firing pattern (flapping, spamming or stuck, see section 6) and appears on the dates where a row matched |
 | `ruleset_version` | The rule definitions in force. A movement in counts is always attributable to data or to a version, never ambiguously both |
 | `match_count` | **Rows** the rule matched |
 | `distinct_count` | Distinct identities it matched |
@@ -156,7 +159,7 @@ count with at least one finding is `flagged_by_rule` in `daily_metrics.csv`.
 
 ---
 
-## 6. `alert_worklist.csv` — 21 columns
+## 6. `alert_worklist.csv` — 27 columns
 
 One row per identity. This is the deliverable a team acts on.
 
@@ -176,8 +179,19 @@ One row per identity. This is the deliverable a team acts on.
 | `severity` | The level's **name**, converted from the stored number by schema — see section 8 |
 | `component` | `object` in v1, `component` in v2 |
 | `node_name`, `environment`, `provider`, `alert_rule_url`, `message` | From the identity's representative row |
+| `clear_count` | Rows in the window that clear the alert: v1 severity `clear`, v2 `status = resolved`. `0` when none |
+| `max_clear_cycles_24h` | The most fire-then-clear cycles inside any rolling 24 hours; a cycle is a clear row immediately preceded by a non-clear row. `0` when none |
+| `fire_pattern` | The R6 pattern: `flapping`, `spamming` or `stuck`, chosen in that order of priority. **Empty means no pattern, not unknown** |
+| `max_episode_firing_rows` | A stored diagnostic: the most firing rows in any one episode (it decides nothing, because a Grafana row count reflects evaluation frequency). An episode is a run of consecutive non-clear rows; a clear row closes it. `0` when the identity has no firing rows |
+| `open_since` | When the open episode began: the first firing row after the last clear, set only when the identity's **last** row is firing. Empty when it ended on a clear. `last_seen − open_since` is how long the open episode's firing rows span; `stuck` needs at least 72 hours of it on a Grafana alert, measured to the last firing row and never to the window's end |
+| `unseen` | `true` when every supplied panel for the schema hides this identity's rows by identity narrowing, `false` when a panel shows it, **empty when no panel was supplied** |
 
-Every field after `row_count` comes from the **representative row**: the identity's most
+`clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows`
+and `open_since` are the last six columns, after `message`. All but `unseen` are the stored
+facts behind R6 and are computed over every row of the identity in the window, not the
+representative row alone.
+
+Every field from `component` to `message` comes from the **representative row**: the identity's most
 recent row in the window. An alert enriched on Tuesday is judged as it stands on Friday.
 
 **CSV safety.** Cells beginning `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet
@@ -278,15 +292,17 @@ SQL and nowhere else.
 ## 10. The review portal
 
 The GET-only portal (design section 7.10) is not a run output: it renders **published**
-weeks from the store through four views using the application's `SQL_*` login. It is
+weeks from the store through six views using the application's `SQL_*` login. It is
 described here because its numbers are the ones most easily misread against the scorecard's.
 
 | View | One row per | Holds |
 |---|---|---|
-| `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness |
-| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention |
-| `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, and `attention_rank` |
+| `portal_reviews` | published week | team, week bounds, publication time, review note, phase, readiness, `basis_changed` (true when the previous published week of the team ran under a different basis, so the retirement estimate stops looking back; migration 008 compares the team's own registry entry, its operators and panels, instead of the whole-file registry version) and `v1_rule_effort_days` (the team's optional `planning.v1_rule_effort_days` override) |
+| `portal_schema_totals` | published week and schema | events, distinct alerts, rule-flagged events, suppressed events, the five state counts, readiness gaps, alerts needing attention, `unseen` (events, `NULL` when no panel was supplied or for a week stored before migration 005), `unseen_alerts` and `r6_alerts` |
+| `portal_alerts` | alert in a published week | the work-list columns plus `impact`, `runbook_url`, `alert_status` and `time_created` extracted from the stored document, `attention_rank`, and the R6 and `unseen` columns: `clear_count`, `max_clear_cycles_24h`, `fire_pattern`, `unseen`, `max_episode_firing_rows` (a diagnostic only) and `open_since` |
 | `portal_decisions` | human decision made on a published week | finding id, `pending` / `confirmed` / `dismissed`, note, time, operator |
+| `portal_rule_totals` | published week, schema and rule | weekly matched events and alerts per rule, for the team summary |
+| `portal_daily_metrics` | published week, schema and UTC day bucket | covered hours, distinct alerts and rule-flagged distinct alerts, for the summary slides' day-by-day charts, a within-week view of one published week labelled "by UTC day" (columns `alert_schema`, `snapshot_date`, `covered_hours`, `distinct_alerts`, `flagged_by_rule_distinct`) |
 
 **The portal's distinct count is a weekly total, and the scorecard's is a daily rate.**
 Portal: distinct `application + key_field` identities in the whole 168-hour window, which is
@@ -305,7 +321,7 @@ verdict stay exactly as the run stored them; the decision is a separate, append-
 keyed on the exact identity and finding id.
 
 What the views never expose: the complete source document (`representative_doc`), model
-request payloads, batch audit rows, the registry snapshot, or any week that is not
+request payloads, batch audit rows, the registry snapshot (the only value derived from it is the one planning override, `v1_rule_effort_days`, plus the `basis_changed` flag), or any week that is not
 currently published.
 
 ---
@@ -323,6 +339,8 @@ section 7.4.
 * **No combined v1 + v2 volume conclusion.** The two schemas' row counts are not
   like-for-like, and neither are their distinct counts: v1's key is
   `application + object + node_name`, v2's is a hash of roughly a dozen fields.
-* **`unseen`** — alerts a team owns that its own dashboard does not show — is a real on-call
-  hazard and is not measured yet.
-* **No spam-volume rule (R6).** Post-MVP; the fixtures already carry data for it.
+* **R6 never scores volume.** It flags one alert's firing episodes (stuck, spamming or
+  flapping); it never scores a team's total volume.
+* **`unseen` is a count, not a verdict.** It is empty, not zero, for a schema with no supplied
+  panel, or for a week stored before migration 005, because zero would claim the team's
+  dashboard was checked.

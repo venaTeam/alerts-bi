@@ -91,6 +91,9 @@ class TeamEntry:
     panels: tuple[Panel, ...] = ()
     #: Enrolled in the automatic weekly review (design section 7.11).
     weekly_review: bool = False
+    #: Optional planning override: working days to rebuild one v1 alert rule in v2, used by
+    #: the time-to-v2 estimate (team summary spec section 7.2). None means the default.
+    v1_rule_effort_days: float | None = None
     #: The entry exactly as it appeared in the registry document, preserved so the stored
     #: snapshot is the supplied text rather than a re-serialization of our own model.
     raw: dict[str, Any] | None = None
@@ -104,6 +107,7 @@ class TeamEntry:
             v2_operator=raw["v2_operator"],
             panels=tuple(Panel.from_dict(p) for p in raw.get("panels", [])),
             weekly_review=bool((raw.get("weekly_review") or {}).get("enabled", False)),
+            v1_rule_effort_days=(raw.get("planning") or {}).get("v1_rule_effort_days"),
             raw=raw,
         )
 

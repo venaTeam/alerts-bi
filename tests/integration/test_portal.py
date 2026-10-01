@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import secrets
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -18,13 +19,17 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import DBAPIError
+from src.admin.summary import _published_history, basis_changes
 from src.config import PortalSettings, SqlConfig, load_config
 from src.db.connection import connect
 from src.db.migrate import reset_test_database
 from src.db.reader import grant_reader, read_only_problems
 from src.db.repositories import PersistencePayload, RunIsPublished, persist_run
+from src.insights import DailyPoint
 from src.portal.app import build_portal
+from src.portal.charts import TIMES
 from src.portal.explain import EN_DASH
+from src.portal.summary_queries import load_portal_summary
 from src.review.decisions import DecisionRefused, record_decision
 from src.review.publication import PublicationRefused, publish_run, unpublish_run
 
@@ -85,6 +90,8 @@ def _findings(run_id: str) -> list[dict[str, Any]]:
             provider="grafana",
             alert_rule_url=None,
             row_count=592,
+            max_episode_firing_rows=3,
+            open_since=W3 - timedelta(days=3),
             core_rule_ids="R1,R4",
             quality_state="rule_flagged",
             llm_principle_id=None,
@@ -234,6 +241,37 @@ def _daily(run_id: str, team: str, end: datetime) -> list[dict[str, Any]]:
     return rows
 
 
+#: Per-rule events over the three dates `_daily` writes, matching the rich findings: R1 on
+#: the generic message (592) and on an earlier row of checkout-svc (3); R4 on the generic
+#: message; R8 and R9 on the critical sms-gateway alert.
+_RULE_EVENTS = {
+    ("v1", "R1"): (200, 198, 197),
+    ("v1", "R4"): (200, 196, 196),
+    ("v2", "R8"): (1, 1, 0),
+    ("v2", "R9"): (1, 1, 0),
+}
+
+
+def _rule_counts(run_id: str, team: str, end: datetime) -> list[dict[str, Any]]:
+    rows = []
+    for (schema, rule), events in _RULE_EVENTS.items():
+        for offset, count in enumerate(events):
+            if count:
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "team_id": team,
+                        "alert_schema": schema,
+                        "snapshot_date": (end - timedelta(days=offset + 1)).date().isoformat(),
+                        "rule_id": rule,
+                        "ruleset_version": "1.0.0",
+                        "match_count": count,
+                        "distinct_count": 1,
+                    }
+                )
+    return rows
+
+
 def _store(name: str, team: str, end: datetime, *, rich: bool = False) -> None:
     run_id = _run_id(name)
     payload = PersistencePayload(
@@ -246,6 +284,7 @@ def _store(name: str, team: str, end: datetime, *, rich: bool = False) -> None:
             window_end=end,
         ),
         daily_metrics=_daily(run_id, team, end),
+        rule_counts=_rule_counts(run_id, team, end) if rich else [],
         findings=_findings(run_id)
         if rich
         else [sample_finding(run_id=run_id, key_field=f"{name}:only", row_count=5)],
@@ -358,6 +397,72 @@ def test_the_reader_sees_only_published_weeks(reader: SqlConfig) -> None:
         }
     assert visible == {_run_id("wk1"), _run_id("wk2"), _run_id("wk3")}
     assert alerts == visible
+
+
+def test_the_daily_view_holds_published_weeks_only_with_the_stored_values(
+    reader: SqlConfig,
+) -> None:
+    columns = (
+        "alert_schema, snapshot_date, covered_hours, distinct_alerts, flagged_by_rule_distinct"
+    )
+    with connect(CONFIG.sql, DB) as owner:
+        applied = owner.query_one(
+            "SELECT version FROM schema_migrations WHERE version = '007_portal_daily'", {}
+        )
+        stored = owner.query(
+            f"SELECT {columns} FROM daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert applied is not None, "migration 007 applied"
+    with connect(reader, DB) as db:
+        visible = {
+            str(row["run_id"])
+            for row in db.query("SELECT DISTINCT run_id FROM portal_daily_metrics", {})
+            if str(row["run_id"]).startswith(("wk", "overlap", "unpub"))
+        }
+        viewed = db.query(
+            f"SELECT {columns} FROM portal_daily_metrics WHERE run_id = :r "
+            "ORDER BY alert_schema, snapshot_date",
+            {"r": _run_id("wk3")},
+        )
+    assert visible == {_run_id("wk1"), _run_id("wk2"), _run_id("wk3")}
+    assert stored and viewed == stored
+    loaded = load_portal_summary_daily(reader, _run_id("wk3"))
+    assert [(p.alert_schema, p.day) for p in loaded] == [
+        (str(row["alert_schema"]), row["snapshot_date"]) for row in stored
+    ]
+    assert [p.rule_flagged_distinct for p in loaded] == [
+        int(row["flagged_by_rule_distinct"]) for row in stored
+    ]
+
+
+def load_portal_summary_daily(reader: SqlConfig, run_id: str) -> tuple[DailyPoint, ...]:
+    with connect(reader, DB) as db:
+        return load_portal_summary(db, TEAM, run_id).daily
+
+
+def test_the_episode_facts_reach_the_store_and_the_alerts_view(reader: SqlConfig) -> None:
+    query = (
+        "SELECT max_episode_firing_rows, open_since FROM {table} "
+        "WHERE run_id = :r AND application = :a"
+    )
+    with connect(CONFIG.sql, DB) as owner:
+        stored = owner.query(
+            query.format(table="alert_findings"), {"r": _run_id("wk1"), "a": "notif-dispatcher"}
+        )
+        untouched = owner.query(
+            query.format(table="alert_findings"), {"r": _run_id("wk1"), "a": "checkout-svc"}
+        )
+    assert stored[0]["max_episode_firing_rows"] == 3
+    assert stored[0]["open_since"] == W3 - timedelta(days=3), "stored as naive UTC"
+    assert (untouched[0]["max_episode_firing_rows"], untouched[0]["open_since"]) == (0, None)
+    with connect(reader, DB) as db:
+        viewed = db.query(
+            query.format(table="portal_alerts"), {"r": _run_id("wk1"), "a": "notif-dispatcher"}
+        )
+    assert viewed[0]["max_episode_firing_rows"] == 3
+    assert viewed[0]["open_since"] == W3 - timedelta(days=3)
 
 
 def test_the_views_do_not_expose_the_complete_source_document(reader: SqlConfig) -> None:
@@ -553,13 +658,22 @@ def test_the_latest_week_is_the_default_and_every_week_is_addressable(portal: Te
 
 def test_history_has_one_point_per_published_week(portal: TestClient) -> None:
     page = portal.get(f"/teams/{TEAM}").text
-    # Two schemas x two measures, three contiguous weeks each.
+    # Two schemas x two measures, three contiguous weeks each. Checked again for the team
+    # summary: its widgets draw bars (rect geometry), never a line, so the count is still
+    # exactly the four history lines.
     assert page.count("<polyline") == 4
+    summary = page[page.index('id="summary"') : page.index("Over time")]
+    assert "<polyline" not in summary and "<rect" in summary
     assert page.count('class="dot v1') == 6 and page.count('class="dot v2') == 6
 
 
+def _worklist(page: str) -> str:
+    """The work list alone: the Summary above it quotes alert messages too."""
+    return page[page.index('id="worklist"') :]
+
+
 def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> None:
-    first = portal.get(f"/teams/{TEAM}").text
+    first = _worklist(portal.get(f"/teams/{TEAM}").text)
     assert "Needs attention · 5" in first and "All alerts · 8" in first
     assert "Showing 1&ndash;3 of 5" in first
     order = [
@@ -568,7 +682,7 @@ def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> No
     ]
     assert order == sorted(order), "rule findings by event count, then model findings"
 
-    second = portal.get(f"/teams/{TEAM}", params={"page": 2}).text
+    second = _worklist(portal.get(f"/teams/{TEAM}", params={"page": 2}).text)
     assert "Showing 4&ndash;5 of 5" in second
     assert "Nightly token cleanup" in second and "Something went wrong" not in second
 
@@ -576,6 +690,331 @@ def test_the_work_list_is_ordered_and_paginated_in_sql(portal: TestClient) -> No
         f"/teams/{TEAM}", params={"show": "all", "schema": "v2", "page": 2}
     ).text
     assert "Showing 4&ndash;4 of 4" in everything
+
+
+# ------------------------------------------------------------------ the Summary section
+
+
+def _summary_html(page: str) -> str:
+    return page[page.index('id="summary"') : page.index("Over time")]
+
+
+def test_the_summary_totals_are_the_stored_weekly_totals(
+    portal: TestClient, reader: SqlConfig
+) -> None:
+    with connect(reader, DB) as db:
+        schemas = {
+            str(row["alert_schema"]): (int(row["distinct_alerts"]), int(row["events"]))
+            for row in db.query(
+                "SELECT alert_schema, distinct_alerts, events FROM portal_schema_totals "
+                "WHERE run_id = :r",
+                {"r": _run_id("wk3")},
+            )
+        }
+        rules = {
+            (str(row["alert_schema"]), str(row["rule_id"])): (
+                int(row["events"]),
+                int(row["alerts"]),
+            )
+            for row in db.query(
+                "SELECT alert_schema, rule_id, events, alerts FROM portal_rule_totals "
+                "WHERE run_id = :r",
+                {"r": _run_id("wk3")},
+            )
+        }
+    assert rules == {
+        ("v1", "R1"): (595, 2),
+        ("v1", "R4"): (592, 1),
+        ("v2", "R8"): (2, 1),
+        ("v2", "R9"): (2, 1),
+    }
+
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    tiles = re.findall(
+        r'<span class="n">([\d,]+)</span><span class="u">distinct alerts this week</span>.*?'
+        r'<span class="n">([\d,]+)</span><span class="u">alert events this week</span>',
+        summary,
+    )
+    assert [(int(d.replace(",", "")), int(e.replace(",", ""))) for d, e in tiles] == [
+        schemas["v1"],
+        schemas["v2"],
+    ]
+
+    table = summary[summary.index("Flagged by rule") : summary.index("Hidden by your own panels")]
+    shown = {
+        (schema, rule): (int(events.replace(",", "")), int(alerts.replace(",", "")))
+        for rule, schema, events, alerts in re.findall(
+            r'<tr><td><a href="[^"]*">(R\d+)</a></td><td>.*?</td>'
+            r'<td><span class="chip (v\d)">v\d</span></td>'
+            r'<td class="num">([\d,]+)</td><td class="num">([\d,]+)</td>',
+            table,
+        )
+    }
+    assert shown == rules
+    assert 'href="/teams/portal-team/weeks/2026-08-30?rule=R1#worklist"' in summary
+    assert "per day" not in summary and _run_id("wk3") not in summary
+
+
+def test_why_flagged_offers_bars_and_a_donut_per_schema(portal: TestClient) -> None:
+    page = portal.get(f"/teams/{TEAM}").text
+    why = page[page.index("Why alerts were flagged") : page.index("Key findings")]
+    assert why.count('type="radio"') == 2 and ">Bars</label>" in why and ">Donut</label>" in why
+    assert 'class="view-bars"' in why and 'class="view-donut"' in why
+    donut = why[why.index('class="view-donut"') :]
+    # Both v1 rule-flagged alerts carry R1 first (one also R4): one full R1 ring.
+    assert 'aria-label="Appchi: 2 rule-flagged alerts"' in donut
+    assert donut.count('<path class="slice r1"') == 1 and 'fill-rule="evenodd"' in donut
+    assert "No rule-flagged v2 alerts this week." in donut
+    assert "<polyline" not in why
+
+
+def test_the_summary_says_not_measured_rather_than_zero(portal: TestClient) -> None:
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    unseen = summary[summary.index("Not on any of your dashboards") : summary.index("Migration")]
+    assert unseen.count("<b>Not measured this week</b>") == 2, "no panel for either schema"
+    assert "No dashboard supplied" not in unseen
+
+
+def test_the_summary_ends_with_two_presentation_slides(portal: TestClient) -> None:
+    summary = _summary_html(portal.get(f"/teams/{TEAM}").text)
+    slides = summary[summary.index(">Presentation</h3>") :]
+    assert slides.count('<section class="slide ') == 2
+    assert "stands</h4>" in slides and "The week, day by day</h4>" in slides
+    assert "Biggest single alert" in slides and "What to fix" not in slides
+    assert "Top rules" not in slides and "<polyline" not in slides
+    # Both fixtures store non-zero day buckets for v1 and v2: two charts, no empty box.
+    assert slides.count('<svg class="sl-chart"') == 2
+    assert "No v1 alerts this week" not in slides
+    assert "No v2 alerts this week" not in slides
+    assert "week ending 30 Aug 2026 · Alerts BI" in slides
+    assert _run_id("wk3") not in slides and "href=" not in slides
+
+
+def test_the_work_list_filters_by_state_and_rule(portal: TestClient) -> None:
+    page = portal.get(
+        f"/teams/{TEAM}", params={"show": "all", "state": "rule_flagged", "rule": "R1"}
+    ).text
+    listing = page[page.index('id="worklist"') :]
+    assert "Showing 1&ndash;2 of 2" in listing
+    assert "All alerts · 2" in listing
+    assert "Something went wrong" in listing and "Cart error rate" in listing
+    for other in ("Unhandled exception", "Nightly token cleanup", "SMS failure rate"):
+        assert other not in listing, other
+    assert "Rule R1 · Generic message" in listing
+
+    readiness = portal.get(f"/teams/{TEAM}", params={"rule": "R9"}).text
+    listing = readiness[readiness.index('id="worklist"') :]
+    assert "Showing 1&ndash;1 of 1" in listing and "SMS failure rate" in listing
+
+    nothing = portal.get(f"/teams/{TEAM}", params={"state": "assessed_good", "rule": "R1"}).text
+    assert "Nothing matches this filter." in nothing
+
+    assert portal.get(f"/teams/{TEAM}", params={"rule": "R11"}).status_code == 422
+    assert portal.get(f"/teams/{TEAM}", params={"state": "bad"}).status_code == 422
+
+
+def test_paging_keeps_the_filters(portal: TestClient) -> None:
+    params = {"show": "all", "state": "assessed_good"}
+    first = portal.get(f"/teams/{TEAM}", params=params).text
+    listing = first[first.index('id="worklist"') :]
+    assert "Showing 1&ndash;3 of 4" in listing
+    assert "show=all&amp;state=assessed_good&amp;page=2#worklist" in listing
+    second = portal.get(f"/teams/{TEAM}", params={**params, "page": 2}).text
+    assert "Showing 4&ndash;4 of 4" in second
+
+
+PACE_TEAM = "pace-team"
+#: Four back-to-back published weeks whose v1 rules shrink a, b, c, d -> a.
+PACE_WEEKS = {
+    # Older than the lookback of the latest week: never read for it.
+    "pace0": (W1 - 2 * WEEK, "abcdefgh"),
+    "pace1": (W1 - WEEK, "abcd"),
+    "pace2": (W1, "abc"),
+    "pace3": (W2, "ab"),
+    "pace4": (W3, "a"),
+}
+
+
+def _pace_run(name: str, end: datetime, rules: str, *, effort: float | None = None) -> None:
+    RUN[name] = name.ljust(64, "2")
+    run_id = _run_id(name)
+    snapshot: dict[str, Any] = {"team_id": PACE_TEAM}
+    if effort is not None:
+        snapshot["planning"] = {"v1_rule_effort_days": effort}
+    findings = [
+        sample_finding(
+            run_id=run_id,
+            alert_schema="v1",
+            application=f"app-{rule}",
+            key_field=f"app-{rule}:c:n",
+            alert_rule_url=f"https://grafana.internal/rules/{rule}",
+            row_count=10,
+            first_seen=end - timedelta(days=2),
+            last_seen=end - timedelta(hours=1),
+        )
+        for rule in rules
+    ]
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=run_id,
+                    team_id=PACE_TEAM,
+                    team_display_name="Pace Team",
+                    run_at=end,
+                    window_start=end - WEEK,
+                    window_end=end,
+                    registry_entry_snapshot=json.dumps(snapshot),
+                ),
+                daily_metrics=_daily(run_id, PACE_TEAM, end),
+                findings=findings,
+            ),
+        )
+
+
+def test_the_estimate_is_drawn_from_published_weeks_only(portal: TestClient) -> None:
+    for name, (end, rules) in PACE_WEEKS.items():
+        _pace_run(name, end, rules, effort=2.0 if name == "pace4" else None)
+    # An unpublished run overlapping an earlier week, firing rules nobody published. Were it
+    # read, four more rules would count as retired and the pace would change.
+    _pace_run("pace-shadow", W2 - timedelta(hours=49), "wxyz")
+    with connect(CONFIG.sql, DB) as db:
+        for name in PACE_WEEKS:
+            publish_run(db, _run_id(name), published_by="operator")
+
+    page = portal.get(f"/teams/{PACE_TEAM}").text
+    progress = page[page.index("Migration progress") : page.index("Over time")]
+    # Three earlier weeks back to back; b, c and d stopped firing: pace 1 rule a week, and
+    # the one rule left projects one week past the selected week.
+    assert "week of 6 Sep 2026" in progress
+    assert "3 rules stopped firing across the 3 earlier published weeks" in progress
+    assert "pace: 1 rule a week" in progress
+    assert "2 working days" in progress and "set for this team" in progress
+    assert "configured, not measured" in progress
+    assert "cleanup rather than migration" in progress
+    assert "registry" not in page and "per day" not in page
+
+    # Only the selected week and the three before it are read: the oldest week's extra
+    # rules (e..h) would otherwise be there to retire.
+    with connect(CONFIG.sql, DB) as db:
+        history = load_portal_summary(db, PACE_TEAM, _run_id("pace4")).history
+    assert [week.week_end for week in history] == [W1 - WEEK, W1, W2, W3]
+
+    # An earlier week sees only the weeks before it, never a later one: one earlier week.
+    earlier = portal.get(f"/teams/{PACE_TEAM}/weeks/{(W1 - WEEK).date()}").text
+    progress = earlier[earlier.index("Migration progress") : earlier.index("Over time")]
+    assert "No estimate:" in progress
+    assert (
+        "Needs at least 2 earlier published weeks back to back; only 1 was published before "
+        "this week."
+    ) in progress
+    assert "2 working days" in progress
+    assert f"4 v1 alert rules {TIMES} 0.5 working days each (default)" in progress
+
+
+BASIS_TEAM = "basis-team"
+_BASIS_ENTRY: dict[str, Any] = {
+    "team_id": BASIS_TEAM,
+    "display_name": "Basis Team",
+    "v1_operators": ["basis", "BASIS"],
+    "v2_operator": "basis-v2",
+    "panels": [{"panel_id": "p1", "schema": "v1", "sql": "SELECT 1 WHERE node_name != 'x'"}],
+}
+_PANEL = _BASIS_ENTRY["panels"][0]
+#: Back-to-back published weeks: (registry_version, ruleset_version, entry changes, whether
+#: the week was measured differently from the one before it).
+_BASIS_WEEKS: tuple[tuple[str, str, dict[str, Any], bool], ...] = (
+    ("r1", "1.1.0", {}, False),
+    # Another team was enrolled: the file's version moved, this team's entry did not.
+    ("r2", "1.1.0", {}, False),
+    ("r3", "1.1.0", {"display_name": "Basis", "weekly_review": {"enabled": True}}, False),
+    ("r3", "1.1.0", {"planning": {"v1_rule_effort_days": 2}}, False),
+    ("r4", "1.1.0", {"v1_operators": ["basis"]}, True),
+    ("r5", "1.1.0", {"v1_operators": ["basis"]}, False),
+    # Operators match case-sensitively, so a case change is a change despite the collation.
+    ("r5", "1.1.0", {"v1_operators": ["Basis"]}, True),
+    ("r5", "1.1.0", {"v1_operators": ["Basis"], "panels": [{**_PANEL, "sql": "SELECT 1"}]}, True),
+    (
+        "r5",
+        "1.1.0",
+        {
+            "v1_operators": ["Basis"],
+            "panels": [
+                {
+                    **_PANEL,
+                    "sql": "SELECT 1",
+                    "variables": [{"name": "n", "type": "constant", "value": "x"}],
+                }
+            ],
+        },
+        True,
+    ),
+    ("r6", "1.1.0", {"v1_operators": ["Basis"], "v2_operator": None, "panels": []}, True),
+    ("r6", "1.1.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, True),
+    ("r6", "1.2.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, True),
+    ("r7", "1.2.0", {"v1_operators": ["Basis"], "v2_operator": "basis-v2 ", "panels": []}, False),
+)
+
+
+def test_the_view_and_the_operator_app_agree_on_when_measurement_changed(
+    portal: TestClient,
+) -> None:
+    """portal_reviews.basis_changed (migration 008) and the admin app's Python mirror compare
+    the same thing: the ruleset and the team's own operators and panels, never the registry
+    file's version, which every enrolment bumps."""
+    first_end = W3 - len(_BASIS_WEEKS) * WEEK
+    ends = [first_end + index * WEEK for index in range(len(_BASIS_WEEKS))]
+    with connect(CONFIG.sql, DB) as db:
+        for index, (registry, ruleset, changes, _) in enumerate(_BASIS_WEEKS):
+            name = f"basis{index}"
+            RUN[name] = name.ljust(64, "3")
+            snapshot = json.dumps(
+                {**_BASIS_ENTRY, **changes}, separators=(",", ":"), ensure_ascii=False
+            )
+            persist_run(
+                db,
+                PersistencePayload(
+                    run=sample_run(
+                        run_id=_run_id(name),
+                        team_id=BASIS_TEAM,
+                        team_display_name="Basis Team",
+                        run_at=ends[index],
+                        window_start=ends[index] - WEEK,
+                        window_end=ends[index],
+                        registry_version=registry,
+                        ruleset_version=ruleset,
+                        registry_entry_snapshot=snapshot,
+                    ),
+                    daily_metrics=_daily(_run_id(name), BASIS_TEAM, ends[index]),
+                    findings=[sample_finding(run_id=_run_id(name), key_field=f"{name}:k")],
+                ),
+            )
+            publish_run(db, _run_id(name), published_by="operator")
+
+        view = db.query(
+            "SELECT basis_changed FROM portal_reviews WHERE team_id = :t ORDER BY window_end",
+            {"t": BASIS_TEAM},
+        )
+        stored = db.query(
+            "SELECT r.ruleset_version, r.registry_entry_snapshot FROM review_publications AS p "
+            "JOIN runs AS r ON r.run_id = p.run_id WHERE p.team_id = :t "
+            "AND p.withdrawn_at IS NULL ORDER BY p.window_end",
+            {"t": BASIS_TEAM},
+        )
+        admin = _published_history(db, BASIS_TEAM, ends[-1])
+
+    expected = [changed for *_, changed in _BASIS_WEEKS]
+    assert [bool(row["basis_changed"]) for row in view] == expected
+    assert basis_changes(stored) == expected
+    assert [week.basis_changed for week in admin] == expected
+
+    # The latest week's lookback stops at the ruleset change one week earlier, and the reason
+    # says so rather than counting weeks.
+    page = portal.get(f"/teams/{BASIS_TEAM}").text
+    progress = page[page.index("Migration progress") : page.index("Over time")]
+    assert "measured the same way" in progress and "changed 1 week earlier" in progress
+    assert "registry" not in page and "ruleset" not in page
 
 
 def _alert(portal: TestClient, schema: str, application: str, key: str, week: datetime = W3) -> str:

@@ -89,7 +89,7 @@ def _num(value: Any) -> float:
 
 def rollup_schema(daily: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Roll daily rows up for one schema using the approved formulas."""
-    totals = {
+    totals: dict[str, Any] = {
         key: sum(_num(row[key]) for row in daily)
         for key in (
             "alerts",
@@ -110,6 +110,11 @@ def rollup_schema(daily: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "key_inflation_denominator",
         )
     }
+    # ``unseen`` is NULL, not zero, where no panel was supplied: it stays None unless at
+    # least one bucket carries a measured count.
+    for key in ("unseen", "unseen_unmeasured"):
+        measured = [row.get(key) for row in daily if row.get(key) is not None]
+        totals[key] = sum(_num(v) for v in measured) if measured else None
     node_den = totals["node_name_denominator"]
     key_den = totals["key_inflation_denominator"]
     return {
@@ -280,8 +285,9 @@ def _render_volume(rollup: Mapping[str, Any]) -> str:
 
     return f"""<h2>Volume</h2>
 <p class="sub">Volume is displayed, not scored. No threshold declares an alert rate bad.
-Row counts are never compared across schemas: one alert moving from v1 to v2 divides its
-row count by 144 because of the repeat interval alone.</p>
+Row counts are never compared across schemas.</p>
+<p class="sub">A row count reflects how often rows are written. Grafana writes one on every
+evaluation, so alerts is evaluation load, not notifications.</p>
 {block("v1 (Appchi)", rollup["v1"])}
 {block("v2 (Appchi V2)", rollup["v2"])}"""
 
@@ -348,6 +354,17 @@ because that would count what nobody looked at as fine.</p>
 def _render_visibility(rollup: Mapping[str, Any], panels: Sequence[Mapping[str, Any]]) -> str:
     suppressed = rollup["v1"]["suppressed"] + rollup["v2"]["suppressed"]
     unmeasured = rollup["v1"]["suppression_unmeasured"] + rollup["v2"]["suppression_unmeasured"]
+
+    def per_schema(key: str) -> str:
+        parts = []
+        for schema in ("v1", "v2"):
+            value = rollup[schema][key]
+            shown = _int(value) if value is not None else "&mdash; no panel supplied"
+            parts.append(f'<span class="unseen-{schema}">{schema}: {shown}</span>')
+        return " &middot; ".join(parts)
+
+    unseen_card = per_schema("unseen")
+    unseen_unmeasured_card = per_schema("unseen_unmeasured")
     if panels:
         panel_rows = "".join(
             f"<tr><td>{escape_html(p['panel_id'])}</td><td>{escape_html(p['alert_schema'])}</td>"
@@ -371,6 +388,8 @@ rather than passing for zero.</p>
 <div class="cards">
   {_card("Suppressed (rows)", _int(suppressed))}
   {_card("Suppression unmeasured (leaves)", _int(unmeasured))}
+  {_card("Unseen (rows no panel shows)", unseen_card, "owned rows hidden by every supplied panel")}
+  {_card("Unseen unmeasured (leaves)", unseen_unmeasured_card)}
 </div>
 <h3>Supplied panels</h3>
 <div class="table-wrap"><table>
@@ -509,8 +528,8 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
 <ul class="limits">
   <li>This is a single week. There is no trend, delta, baseline or improvement percentage,
       and no cross-team leaderboard.</li>
-  <li>v1 and v2 row counts are never added together. v1 re-fires every 5 minutes and v2
-      every 12 hours, so raw volume is not comparable across schemas.</li>
+  <li>v1 and v2 row counts are never added together. A row count reflects how often
+      rows are written, so raw volume is not comparable across schemas.</li>
   <li>v1 and v2 <code>distinct_alerts</code> are not like-for-like: the v1 key is
       application + object + node_name, while the v2 key hashes roughly a dozen fields.</li>
   <li>Every distinct figure is a per-day rate. A seven-day total would be seven times a
@@ -521,6 +540,8 @@ def _render_limitations(run: Mapping[str, Any]) -> str:
   <li>Enriching a v2 alert mints a new <code>key_field</code>, so a team that just added
       <code>impact</code> or <code>runbook_url</code> can look briefly worse. The artefact
       clears within a week.</li>
+  <li>R6 flags one alert's firing episodes (stuck, spamming or flapping); it never scores a
+      team's total volume.</li>
   <li>Phase and readiness describe only alerts that fired in this window; silent rules and
       the external alert inventory are invisible to this tool.</li>
   {not_assessed}

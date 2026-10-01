@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-09-27 (portal SQL connection, design section 7.10)
+**Last updated:** 2026-10-01 (team summary, R6 and `unseen`, design section 7.14)
 
 This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
 
@@ -59,7 +59,7 @@ The tree holds `docs/` (design, runtime flow, blueprint, both alerting guides, f
 
 The drift recorded in design section 7.5 was reconciled on 2026-08-30:
 
-- The mock generator gained explicit index mappings, a guarded `RESET=1` clean reload, exact per-row timestamp control, and four appended `acceptance-*` teams covering the dense batching, over-200 group, R7 boundary, suppression-safety and blast-radius cases. It still generates post-MVP R6 and multi-month data, which is intended: the fixtures stay ready for R6 without re-seeding.
+- The mock generator gained explicit index mappings, a guarded `RESET=1` clean reload, exact per-row timestamp control, and six appended `acceptance-*` teams: four covering the dense batching, over-200 group, R7 boundary, suppression-safety and blast-radius cases, plus `acceptance-fire-patterns` (one identity per R6 boundary) and `acceptance-unseen` (the visibility measure). R6 is a core rule from ruleset 1.1.0 and the generator's multi-month data is still intended: the fixtures stay ready for history work without re-seeding.
 - The scale probe now reports `node_name_ratio` and `key_inflation_ratio` with their operands, scoped to one selected team, and states plainly that its figures are approximate.
 - `team_alert_status.md` was rewritten against the settled phase and rule definitions.
 
@@ -94,7 +94,8 @@ Keep these decisions intact unless the design is explicitly revised:
 - R3 checks required identity fields and an optional supplied `node_name`; an absent or empty optional `node_name` is valid.
 - R4 applies only when `provider = grafana`. API alerts do not carry an alert-rule URL and never match R4 for its absence.
 - R5 comes only from the approved panel-suppression evaluation.
-- R6 spam detection is post-MVP.
+- R6 is a core rule from ruleset 1.1.0 (design section 7.14), judged by firing episodes because the Grafana repeat interval is disabled in v1 and v2: flapping (≥3 fire→clear cycles in 24h), spamming (API alerts only: ≥24 events per 24h over ≥6h; Grafana writes a row per evaluation, so a Grafana row count is never judged), stuck (Grafana: the last row is firing and the open episode's firing rows span ≥72h, last firing row − `open_since`; never measured to the week's end, because silence after the last evaluation row means it stopped firing, so one row is never stuck). Never judge against a repeat interval, and never score a team's total volume. It shipped with prompt 1.3.0, because the prompt embeds `ruleset_version` and prompt artifacts are immutable per version.
+- `unseen` is a visibility measure, never a rule: rows every panel leaves out through a positive identity predicate, disjoint from `suppressed`, `NULL` when no panel was supplied.
 - R7 applies only to v1. `time_created` is valid on both inclusive boundaries from `@timestamp - 24h` through `@timestamp`; future and older values are invalid.
 - R8-R10 apply only to v2 and follow the exact catalogs and URL rules in the design.
 
@@ -130,7 +131,7 @@ Do not expand the MVP with deferred features. The approved next steps are:
 1. ~~Design and build the interactive frontend over persisted runs.~~ Delivered as the read-only review portal (design section 7.10). The HTTP trigger surface of section 7.9 stays separate and is never mounted on the portal.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
-Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. Plan the unattributed-alert audit, cross-team leaderboard, R6, the rest of the Kubernetes work, and other deferred work separately afterward.
+Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. The team summary (admin page and portal section), R6 and `unseen` are built (design section 7.14), including one scoped exception to the no-comparison rule: the estimated time to retire v1, computed from published weeks only and never written to the scorecard or exports. Plan the unattributed-alert audit, cross-team leaderboard, the rest of the Kubernetes work, and other deferred work separately afterward.
 
 ## Local mock environment
 
@@ -155,7 +156,7 @@ Useful scripts:
 - `scripts/es_scale_probe.py` is read-only and reports the two approved diagnostics with their operands, scoped to one selected team.
 - `scripts/create_kibana_panels.py` creates the scale-probe dashboard and is rerunnable.
 
-The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the four hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
+The generator's inputs live beside it: `scripts/mock_teams.json` holds the seven realistic teams, exported mechanically from the superseded JavaScript generator rather than retyped; `scripts/acceptance_teams.py` holds the six hand-authored `acceptance-*` teams; `scripts/_jsrandom.py` reproduces the JavaScript seeded RNG bit for bit, which is what keeps the dataset byte-stable across the port. `scripts/mock-data-stats.json` is the generator's committed summary of what it produced — regenerate it by running the generator, never by hand.
 
 Reset data only when the task requires a clean fixture load. Before deleting indices or recreating a database, verify that the endpoint is the explicit local mock and that the target database is the disposable `alerts_bi_test`. Never apply destructive fixture operations to production or an unknown endpoint.
 

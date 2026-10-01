@@ -64,6 +64,7 @@ Core findings affect the quality score and prevent the alert from being sent to 
 - **R3:** a required identity/ownership field is empty, or an identity/ownership field contains an exact placeholder value. An absent optional `node_name` is valid.
 - **R4:** missing alert-rule URL, but only when `provider = grafana`. API alerts never match R4.
 - **R5:** alert suppressed by the approved panel-filter logic.
+- **R6** (ruleset 1.1.0, design section 7.14): evaluated per identity over all of its rows in the window: stuck, spamming or flapping, judged by firing episodes (the Grafana repeat interval is disabled and Grafana writes a row per evaluation, so spamming applies to API alerts only). When it matches, every row of that identity carries the R6 finding.
 - **R7:** invalid v1 `time_created`. It is valid only when it falls within the inclusive interval from 24 hours before `@timestamp` through `@timestamp`. Future values and older values are flagged.
 
 An alert row may match several rules. For each rule, `count` is the number of matching rows and `distinct_count` is the number of identities with at least one matching row. `flagged_by_rule` counts the union of matching rows; `flagged_by_rule_distinct` counts the union of matching identities. Findings are not copied onto other non-matching rows under the same identity.
@@ -90,6 +91,8 @@ Suppression is measurable only when all applicable conditions are safe:
 - The resulting suppression set does not exceed the 50% blast-radius guard.
 
 If these conditions are not met, the alert is recorded as `suppression_unmeasured`; it is not silently suppressed. A valid suppression becomes the core R5 finding.
+
+The same parse yields `unseen` (design section 7.14): rows every panel for the schema leaves out through a positive identity predicate, minus suppressed rows. It is a visibility count, not a finding, and is `NULL` for a schema with no supplied panel.
 
 The MVP does not call Grafana. Query variables and missing required definitions remain unresolved and make the affected suppression leaf unmeasured.
 
@@ -137,7 +140,7 @@ The cached prompt prefix contains the approved alerting guides, the R/P catalogu
 
 The response is a closed object carrying the echoed batch ID and one verdict per alert ID. Each verdict contains an assessment, one primary principle, a confidence enum, and a required justification of at most 1,000 characters. The batch ID and alert-ID set must exactly match the request; duplicate IDs, invalid enum combinations, empty justifications, and additional fields reject the entire batch. Verdict order does not matter because IDs provide the binding.
 
-Prompt 1.2.0 adds evidence and applicability guidance without changing the guides, catalogue
+Prompt 1.3.0 carries 1.2.0's evidence and applicability guidance plus the R6 catalogue line for ruleset 1.1.0, without changing the guides, catalogue
 wording or verdict fields. Validation also rejects v2-only citations on v1, P7 outside v2
 critical, R7 on v2 and R4 outside Grafana. Refusal, incomplete and empty SDK responses are
 recorded failures; available model/token metadata is retained, with missing usage unknown.
@@ -210,4 +213,4 @@ A completed run is not yet visible to anyone outside the standardization team. A
 
 ## After the MVP
 
-The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, a cross-team leaderboard, and the spam/noise rule R6.
+The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, and a cross-team leaderboard. R6 is already built as a core rule (ruleset 1.1.0, judged by firing episodes; design section 7.14).

@@ -14,7 +14,7 @@ The wording of each principle is taken from the pinned catalogue in
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -26,12 +26,14 @@ __all__ = [
     "QUALITY_STATE_LABELS",
     "Evidence",
     "decision_question",
+    "dominant_r6_pattern",
     "format_date",
     "format_instant",
     "format_week",
     "list_reason",
     "principle_next_step",
     "principle_title",
+    "r6_next_step",
     "rule_explanation",
 ]
 
@@ -53,6 +55,117 @@ def _text(value: Any) -> str:
 
 
 # ------------------------------------------------------------------ deterministic rules
+
+
+_R6_COPY: Final[dict[str, tuple[str, str, str]]] = {
+    # pattern: (title, next step, what the pattern means)
+    "stuck": (
+        "Stuck: kept firing with no clear for days",
+        "Fix the condition or threshold so the alert clears once the problem is handled; "
+        "silence or delete an alert nobody acts on.",
+        "It kept firing without a clear for at least 72 hours, from its first to its last firing "
+        "row in the week.",
+    ),
+    "spamming": (
+        "Spamming: sent again while already firing",
+        "Send each alert once when it fires and once when it clears; remove duplicate senders.",
+        "It was sent again and again while it was already firing.",
+    ),
+    "flapping": (
+        "Flapping: fires and clears over and over",
+        'Add hysteresis or a pending period (a "for" duration) so the alert does not toggle '
+        "between firing and clear.",
+        "It fired and cleared at least three times inside 24 hours.",
+    ),
+    "neutral": (
+        "Firing pattern: stuck, spamming or flapping",
+        "Fix the condition behind the firing pattern so the alert fires only while there is a "
+        "problem and clears once it is handled; each alert names its own pattern.",
+        "Its firing pattern was stuck, spamming or flapping.",
+    ),
+}
+
+
+#: R6's own priority order (design 7.14): an alert carries the first pattern it matches.
+_R6_PRIORITY: Final = ("flapping", "spamming", "stuck")
+
+
+def _r6_pattern(evidence: Evidence) -> str:
+    pattern = _text(evidence.get("pattern"))
+    return pattern if pattern in _R6_COPY else "neutral"
+
+
+def r6_next_step(pattern: str | None) -> str:
+    """The R6 next step for one firing pattern; the neutral step for none or an unknown one.
+
+    Only spamming (API alerts, which send their own rows) is told to send once on fire and
+    once on clear: a Grafana alert writes a row on every evaluation (design 1.1), so that
+    advice cannot be followed for stuck or flapping alerts.
+    """
+    return _R6_COPY[pattern if pattern in _R6_COPY else "neutral"][1]
+
+
+def dominant_r6_pattern(alerts: Iterable[tuple[str | None, int]]) -> str | None:
+    """The firing pattern carried by the most alerts, from ``(fire_pattern, events)`` pairs.
+
+    Ties go to the pattern with more events, then to R6's own priority order (flapping,
+    spamming, stuck). ``None`` when no alert carries a pattern.
+    """
+    alerts_by: dict[str, int] = {}
+    events_by: dict[str, int] = {}
+    for pattern, events in alerts:
+        if pattern not in _R6_PRIORITY:
+            continue
+        alerts_by[pattern] = alerts_by.get(pattern, 0) + 1
+        events_by[pattern] = events_by.get(pattern, 0) + events
+    if not alerts_by:
+        return None
+    return min(alerts_by, key=lambda p: (-alerts_by[p], -events_by[p], _R6_PRIORITY.index(p)))
+
+
+def _r6_rate(evidence: Evidence) -> str:
+    """The API rate that justifies spamming, e.g. ``30 events per 24 h over 40 h``."""
+    events = evidence.get("events_per_24h")
+    if not isinstance(events, int | float) or evidence.get("span_hours") is None:
+        return ""
+    span = evidence.get("span_hours")
+    shown = f"{span:g}" if isinstance(span, int | float) else _text(span)
+    return f"{events:g} events per 24 h over {shown} h"
+
+
+def _r6_why(evidence: Evidence) -> str:
+    pattern = _r6_pattern(evidence)
+    if evidence.get("rows") is None:
+        return _R6_COPY[pattern][2]
+    open_hours = evidence.get("open_hours")
+    open_part = (
+        ""
+        if open_hours is None
+        else (f" Its firing events since the last clear span {_text(open_hours)} hours.")
+    )
+    rate = _r6_rate(evidence) if pattern == "spamming" else ""
+    open_part += f" {rate[0].upper()}{rate[1:]}." if rate else ""
+    return (
+        f"{_R6_COPY[pattern][2]} Events: {_text(evidence.get('rows'))}, "
+        f"{_text(evidence.get('max_episode_firing_rows'))} in the longest firing episode, "
+        f"{_text(evidence.get('clear_count'))} clears, "
+        f"{_text(evidence.get('max_clear_cycles_24h'))} fire-and-clear cycles in the busiest "
+        f"24 hours.{open_part}"
+    )
+
+
+def _r6_observed(evidence: Evidence) -> str:
+    open_hours = evidence.get("open_hours")
+    return (
+        f"{_r6_pattern(evidence)} \u00b7 {_text(evidence.get('rows'))} events \u00b7 "
+        f"{_text(evidence.get('max_episode_firing_rows'))} in one episode"
+        + (f" \u00b7 open {_text(open_hours)} h" if open_hours is not None else "")
+        + (
+            f" \u00b7 {_r6_rate(evidence)}"
+            if _r6_pattern(evidence) == "spamming" and _r6_rate(evidence)
+            else ""
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +311,13 @@ RULE_TEXT: Final[dict[str, RuleText]] = {
             "from the panel."
         ),
     ),
+    "R6": RuleText(
+        title=_R6_COPY["neutral"][0],
+        reason=lambda e: _R6_COPY[_r6_pattern(e)][0],
+        why=_r6_why,
+        observed=_r6_observed,
+        next_step=_R6_COPY["neutral"][1],
+    ),
     "R7": RuleText(
         title="Creation time out of range",
         reason=lambda _: "Creation time outside the allowed 24 hours",
@@ -260,13 +380,16 @@ def rule_explanation(rule_id: str, evidence: Evidence | None) -> RuleExplanation
         return RuleExplanation(
             rule_id, rule_id, f"Rule {rule_id}", f"Rule {rule_id} matched.", "", "", False
         )
+    title, next_step = text.title, text.next_step
+    if rule_id == "R6":
+        title, next_step = _R6_COPY[_r6_pattern(sample)][:2]
     return RuleExplanation(
         rule_id=rule_id,
-        title=text.title,
+        title=title,
         reason=text.reason(sample),
         why=text.why(sample),
         observed=text.observed(sample),
-        next_step=text.next_step,
+        next_step=next_step,
         readiness=text.readiness,
     )
 

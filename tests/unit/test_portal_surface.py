@@ -18,8 +18,13 @@ from src.config import load_config
 from src.config.portal import PortalSettings, parse_networks
 from src.portal.app import SECURITY_HEADERS, build_portal, client_allowed
 from src.portal.charts import ChartPoint, line_chart
-from src.portal.pages import alert_page, safe_link, team_page
+from src.portal.pages import alert_page, rule_link_for, safe_link, team_page
 from src.portal.queries import AlertDetail, AlertRow, Decision, Review, SchemaTotals, WorklistPage
+from src.portal.summary_view import render_summary_sections
+
+from tests.unit.test_portal_summary_view import ALERTS as SUMMARY_ALERTS
+from tests.unit.test_portal_summary_view import alert as summary_alert
+from tests.unit.test_portal_summary_view import build_summary
 
 PORTAL_DIR = Path(__file__).resolve().parents[2] / "src" / "portal"
 SETTINGS = PortalSettings(sql=load_config().sql, database="alerts_bi_test")
@@ -198,7 +203,15 @@ def _alert(**overrides: object) -> AlertRow:
     return AlertRow(**values)  # type: ignore[arg-type]
 
 
-def _pages() -> list[str]:
+def _summary(review: Review) -> str:
+    """The week's Summary, from the same hand-built summary the renderer's tests use, with
+    hostile alert text so the whole page is checked for escaping."""
+    hostile = summary_alert(message=HOSTILE, application=f"app {HOSTILE}")
+    summary = build_summary(alerts=(hostile, *SUMMARY_ALERTS[1:]))
+    return render_summary_sections(summary, rule_link=rule_link_for(review.team_id, review.week))
+
+
+def _pages(*, state: str = "all", rule: str = "") -> list[str]:
     review = _review()
     alert = _alert()
     decision = Decision("P2", "pending", f"asked {HOSTILE}", END, f"op {HOSTILE}")
@@ -210,6 +223,9 @@ def _pages() -> list[str]:
         show="attention",
         schema="all",
         counts={"attention": 1, "all": 11},
+        summary=_summary(review),
+        state=state,
+        rule=rule,
     )
     detail = alert_page(review, AlertDetail(alert, {"P2": [decision]}))
     return [team, detail]
@@ -243,6 +259,34 @@ def test_the_team_page_shows_totals_not_rates_and_no_service_internals() -> None
     assert "per day" not in team
     for internal in ("run_id", "r3", "registry", "ruleset", "prompt", "model version"):
         assert internal not in team, internal
+
+
+def test_the_summary_sits_between_this_week_and_over_time() -> None:
+    team = _pages()[0]
+    order = [team.index(text) for text in ("This week", "Summary", "Over time", "Work list")]
+    assert order == sorted(order)
+    tile = '<span class="u">distinct alerts this week</span>'
+    assert team.count(tile) == 2, "one tile per schema, shown once"
+
+
+def test_summary_rule_links_open_the_work_list_filtered_by_that_rule() -> None:
+    team = _pages()[0]
+    assert 'href="/teams/team%3Cx%3E/weeks/2026-08-30?rule=R6#worklist"' in team
+
+
+def test_the_filters_keep_each_other_and_name_the_active_rule() -> None:
+    team = _pages(state="rule_flagged", rule="R1")[0]
+    assert "Rule R1 · Generic message" in team
+    # Changing the schema keeps the state and rule filters.
+    assert "schema=v1&amp;state=rule_flagged&amp;rule=R1#worklist" in team
+    # Clearing the rule keeps the state.
+    assert 'href="/teams/team%3Cx%3E/weeks/2026-08-30?state=rule_flagged#worklist"' in team
+
+
+def test_the_filter_parameters_are_bounded() -> None:
+    with TestClient(build_portal(SETTINGS), client=("10.1.2.3", 50000)) as client:
+        for params in ({"state": "evil"}, {"rule": "R11"}, {"rule": "R1' OR 1=1"}):
+            assert client.get("/teams/x", params=params).status_code == 422, params
 
 
 # ------------------------------------------------------------------ charts

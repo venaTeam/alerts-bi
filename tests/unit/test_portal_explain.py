@@ -14,10 +14,12 @@ import pytest
 from src.portal.explain import (
     EN_DASH,
     decision_question,
+    dominant_r6_pattern,
     format_instant,
     format_week,
     principle_next_step,
     principle_title,
+    r6_next_step,
     rule_explanation,
 )
 from src.rules.catalogs import ALL_RULE_IDS, PRINCIPLE_CATALOG, V2_READINESS_RULE_IDS
@@ -28,6 +30,15 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "R3": {"violations": [{"field": "application", "reason": "placeholder", "normalized": "test"}]},
     "R4": {"provider": "grafana", "alert_rule_url": None},
     "R5": {"panels": ["team-v1-main"], "reason": "excluded by every supplied panel"},
+    "R6": {
+        "pattern": "stuck",
+        "rows": 2,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 2,
+        "open_hours": 80.0,
+        "events_per_24h": None,
+    },
     "R7": {
         "reason": "older_than_24h",
         "time_created": "2026-08-20T00:00:00Z",
@@ -88,3 +99,92 @@ def test_dates_are_shown_in_utc_in_one_format() -> None:
     assert format_week(datetime(2026, 8, 23, 16, 44), datetime(2026, 8, 30, 16, 44)) == (
         f"23 Aug {EN_DASH} 30 Aug 2026"
     )
+
+
+def test_r6_copy_follows_the_stored_pattern() -> None:
+    for pattern, word in (("stuck", "Stuck"), ("spamming", "Spamming"), ("flapping", "Flapping")):
+        explained = rule_explanation("R6", {**SAMPLES["R6"], "pattern": pattern})
+        assert explained.title.startswith(word)
+        assert explained.next_step
+
+
+def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
+    forbidden = ("per day", "run_id", "registry", "ruleset", "prompt", "model version")
+    for pattern in ("stuck", "spamming", "flapping", "bogus"):
+        for evidence in ({**SAMPLES["R6"], "pattern": pattern}, {"pattern": pattern}):
+            e = rule_explanation("R6", evidence)
+            text = " ".join((e.title, e.reason, e.why, e.observed, e.next_step)).lower()
+            assert not [f for f in forbidden if f in text]
+
+
+def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:
+    assert "stuck" not in principle_next_step("R6").lower()
+    # Grafana writes a row per evaluation, so send-once advice is for API spamming only.
+    assert "once when it fires" not in principle_next_step("R6")
+    assert "send" not in principle_next_step("R6").lower()
+
+
+def test_each_r6_pattern_has_its_own_next_step() -> None:
+    assert r6_next_step("stuck") == (
+        "Fix the condition or threshold so the alert clears once the problem is handled; "
+        "silence or delete an alert nobody acts on."
+    )
+    flapping = r6_next_step("flapping")
+    assert "hysteresis" in flapping and '"for" duration' in flapping
+    assert "once when it fires" in r6_next_step("spamming")
+    for pattern in (None, "bogus", "neutral"):
+        assert r6_next_step(pattern) == principle_next_step("R6")
+        assert "once when it fires" not in r6_next_step(pattern)
+    for pattern in ("stuck", "flapping"):
+        assert "once when it fires" not in r6_next_step(pattern)
+        explained = rule_explanation("R6", {**SAMPLES["R6"], "pattern": pattern})
+        assert explained.next_step == r6_next_step(pattern)
+
+
+def test_stuck_open_hours_mean_the_span_of_the_open_episode() -> None:
+    explained = rule_explanation("R6", SAMPLES["R6"])
+    # Stuck is judged on the open episode's own firing rows, never measured to the week end.
+    assert "Its firing events since the last clear span 80.0 hours." in explained.why
+    assert "end of the week" not in explained.why
+    assert "open 80.0 h" in explained.observed
+
+
+def test_the_dominant_r6_pattern_is_the_one_most_alerts_carry() -> None:
+    assert dominant_r6_pattern([]) is None
+    assert dominant_r6_pattern([(None, 900), ("bogus", 5)]) is None
+    assert dominant_r6_pattern([("stuck", 10), ("stuck", 10), ("spamming", 999)]) == "stuck"
+    # A tie on alerts goes to more events, then to R6's own priority order.
+    assert dominant_r6_pattern([("stuck", 10), ("spamming", 30)]) == "spamming"
+    assert dominant_r6_pattern([("stuck", 10), ("flapping", 10)]) == "flapping"
+
+
+def test_api_spamming_shows_the_rate_that_justifies_it() -> None:
+    evidence = {
+        "pattern": "spamming",
+        "rows": 30,
+        "span_hours": 10.0,
+        "events_per_24h": 72.0,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 30,
+        "open_hours": None,
+    }
+    explained = rule_explanation("R6", evidence)
+    assert "72 events per 24 h over 10 h" in explained.why
+    assert "72 events per 24 h over 10 h" in explained.observed
+    assert "per day" not in (explained.why + explained.observed)
+
+
+def test_only_spamming_shows_a_rate() -> None:
+    base = {
+        "rows": 30,
+        "span_hours": 10.0,
+        "events_per_24h": 72.0,
+        "clear_count": 0,
+        "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 30,
+        "open_hours": 80.0,
+    }
+    for pattern in ("stuck", "flapping"):
+        explained = rule_explanation("R6", {**base, "pattern": pattern})
+        assert "events per 24 h" not in explained.why + explained.observed

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from src.db.connection import Database
 
@@ -76,6 +76,8 @@ _DAILY_METRIC_COLUMNS = (
     "phase2_gaps",
     "suppressed",
     "suppression_unmeasured",
+    "unseen",
+    "unseen_unmeasured",
 )
 
 _RULE_COUNT_COLUMNS = (
@@ -115,6 +117,12 @@ _FINDING_COLUMNS = (
     "llm_confidence",
     "llm_justification",
     "unassessed_reason",
+    "clear_count",
+    "max_clear_cycles_24h",
+    "fire_pattern",
+    "unseen",
+    "max_episode_firing_rows",
+    "open_since",
 )
 
 _BATCH_ATTEMPT_COLUMNS = (
@@ -202,9 +210,20 @@ def _insert_statement(table: str, columns: Sequence[str]) -> str:
     return f"INSERT INTO {table} ({names}) VALUES ({placeholders})"
 
 
+#: Columns whose absence means a counted zero rather than NULL: the R6 facts are counts, and
+#: a row built before they existed simply observed no clears.
+_ZERO_DEFAULTS: Final = frozenset(
+    {"clear_count", "max_clear_cycles_24h", "max_episode_firing_rows"}
+)
+
+
 def _project(rows: Sequence[dict[str, Any]], columns: Sequence[str]) -> list[dict[str, Any]]:
-    """Keep exactly the declared columns, defaulting anything absent to NULL."""
-    return [{name: row.get(name) for name in columns} for row in rows]
+    """Keep exactly the declared columns, defaulting anything absent to NULL (or 0 for a
+    count in ``_ZERO_DEFAULTS``)."""
+    return [
+        {name: row.get(name, 0 if name in _ZERO_DEFAULTS else None) for name in columns}
+        for row in rows
+    ]
 
 
 @dataclass(slots=True)

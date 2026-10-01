@@ -79,6 +79,41 @@ def test_persists_a_run_and_reads_it_back(db: Database) -> None:
     assert len(get_findings(db, run["run_id"])) == 1
 
 
+def test_unseen_round_trips_as_null_and_as_an_integer(db: Database) -> None:
+    run = sample_run(run_id="f" * 64)
+    persist_run(
+        db,
+        PersistencePayload(
+            run=run,
+            daily_metrics=[
+                sample_daily(run_id=run["run_id"], unseen=None, unseen_unmeasured=None),
+                sample_daily(
+                    run_id=run["run_id"],
+                    alert_schema="v2",
+                    unseen=4,
+                    unseen_unmeasured=1,
+                ),
+            ],
+            findings=[
+                sample_finding(run_id=run["run_id"], unseen=None),
+                sample_finding(run_id=run["run_id"], key_field="other-key", unseen=True),
+                sample_finding(run_id=run["run_id"], key_field="third-key", unseen=False),
+            ],
+        ),
+    )
+
+    daily = {row["alert_schema"]: row for row in get_daily_metrics(db, run["run_id"])}
+    assert daily["v1"]["unseen"] is None
+    assert daily["v1"]["unseen_unmeasured"] is None
+    assert daily["v2"]["unseen"] == 4
+    assert daily["v2"]["unseen_unmeasured"] == 1
+
+    findings = {row["key_field"]: row for row in get_findings(db, run["run_id"])}
+    assert findings["checkout-api:cart:node-1"]["unseen"] is None
+    assert findings["other-key"]["unseen"] is True
+    assert findings["third-key"]["unseen"] is False
+
+
 def test_re_persisting_the_same_run_id_replaces_its_rows(db: Database) -> None:
     run = sample_run(run_id="d" * 64)
     persist_run(db, PersistencePayload(run=run, daily_metrics=[sample_daily(run_id=run["run_id"])]))

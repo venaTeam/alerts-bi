@@ -28,6 +28,8 @@ ACCEPTANCE_TEAMS = (
     "acceptance-batching",
     "acceptance-suppression",
     "acceptance-blast-radius",
+    "acceptance-fire-patterns",
+    "acceptance-unseen",
 )
 
 
