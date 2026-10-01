@@ -54,11 +54,7 @@ def fire_rows(alerts: tuple[AlertRow, ...]) -> tuple[FireRow, ...]:
     for alert in alerts:
         interval = REPEAT_INTERVAL[alert.schema]
         span = alert.last_seen - alert.first_seen + interval
-        ratio = (
-            alert.row_count / (span / interval)
-            if (alert.provider or "").lower() == "grafana"
-            else None
-        )
+        ratio = alert.row_count / (span / interval) if alert.provider == "grafana" else None
         rows.append(
             FireRow(
                 alert=alert,

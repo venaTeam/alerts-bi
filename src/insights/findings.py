@@ -8,7 +8,6 @@ from src.insights.model import AlertRow, KeyFinding, SummaryInputs
 
 _CORE_RULES = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
 _MAX_FINDINGS = 5
-_CONCENTRATION_SHARE = 0.8
 
 
 def _largest(inputs: SummaryInputs) -> KeyFinding | None:
@@ -62,7 +61,7 @@ def _concentration(inputs: SummaryInputs) -> KeyFinding | None:
     for alert in alerts:
         acc += alert.row_count
         k += 1
-        if acc >= _CONCENTRATION_SHARE * total:
+        if acc * 5 >= total * 4:
             break
     if k >= n:
         return None
@@ -97,12 +96,14 @@ def _unseen(inputs: SummaryInputs) -> KeyFinding | None:
     shown = [s for s in inputs.schemas.values() if s.unseen is not None and s.unseen > 0]
     if not shown:
         return None
-    alerts = sum(s.unseen_alerts or 0 for s in shown)
-    events = sum(s.unseen or 0 for s in shown)
+    parts = [
+        f"{s.unseen_alerts or 0:,} {s.schema} alerts ({s.unseen or 0:,} events)"
+        for s in sorted(shown, key=lambda t: t.schema)
+    ]
     return KeyFinding(
         "unseen",
         "Some alerts reach none of your dashboards",
-        f"{alerts:,} alerts ({events:,} events) are outside every panel's narrowing.",
+        " and ".join(parts) + " are outside every panel's narrowing.",
         "Widen a panel to include them, or confirm they are meant to stay out of view.",
         None,
     )
