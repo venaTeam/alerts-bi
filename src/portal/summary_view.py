@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import date, timedelta
 
 from src.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
-from src.portal.charts import TIMES, Segment, level_bar, ratio_bar, stacked_bar
+from src.portal.charts import TIMES, Segment, level_bar, stacked_bar
 from src.portal.explain import (
     QUALITY_STATE_LABELS,
     format_instant,
@@ -27,15 +27,13 @@ from src.portal.explain import (
     principle_title,
     rule_explanation,
 )
-from src.portal.pages import PHASE_STEPS, REPEATS, SCHEMA_NAMES, h, safe_link
+from src.portal.pages import PHASE_STEPS, SCHEMA_NAMES, h, safe_link
 from src.rules.catalogs import (
-    R6_API_MIN_SPAN,
     R6_API_SPAM_PER_24H,
     R6_FLAP_CYCLES,
     R6_FLAP_WINDOW,
-    R6_SPAM_RATIO,
-    R6_STUCK_MIN_SPAN,
-    R6_STUCK_RATIO,
+    R6_SPAM_EPISODE_ROWS,
+    R6_STUCK_OPEN,
     V2_READINESS_RULE_IDS,
 )
 
@@ -66,8 +64,6 @@ _STATES = (
     ("unassessed", "q-un"),
 )
 
-_PATTERN_CSS = {"stuck": "f-ready", "spamming": "f-rule", "flapping": "f-model"}
-
 
 # ------------------------------------------------------------------ small helpers
 
@@ -97,21 +93,19 @@ FIRE_THRESHOLDS = (
     (
         "flapping",
         "Flapping",
-        f"{R6_FLAP_CYCLES} or more fire-and-clear cycles inside any {_hours(R6_FLAP_WINDOW)} "
-        "hours, on any provider.",
+        f"{R6_FLAP_CYCLES} or more fire\u2192clear cycles in {_hours(R6_FLAP_WINDOW)} hours",
     ),
     (
         "spamming",
         "Spamming",
-        f"a Grafana alert firing at {_dec(R6_SPAM_RATIO)}{TIMES} its repeat interval or more; "
-        f"an API alert with {_dec(R6_API_SPAM_PER_24H)} or more events per 24 hours, over at "
-        f"least {_hours(R6_API_MIN_SPAN)} hours.",
+        f"{R6_SPAM_EPISODE_ROWS} or more firing rows in one episode (re-sent while firing), or "
+        f"an API alert at {_dec(R6_API_SPAM_PER_24H)} or more events per {_hours(R6_FLAP_WINDOW)} "
+        "hours",
     ),
     (
         "stuck",
         "Stuck",
-        f"a Grafana alert firing at {_dec(R6_STUCK_RATIO)}{TIMES} its repeat interval or more "
-        f"for at least {_hours(R6_STUCK_MIN_SPAN)} hours, never cleared.",
+        f"still firing, no clear for \u2265{_hours(R6_STUCK_OPEN)} hours before the week ends",
     ),
 )
 
@@ -178,10 +172,7 @@ def _span(hours: float) -> str:
 def _glance(summary: TeamSummary, schema: str) -> str:
     totals = summary.inputs.schemas[schema]
     admin = summary.inputs.surface == "admin"
-    heading = (
-        f'<h3><span class="chip {schema}">{schema}</span>{SCHEMA_NAMES[schema]} '
-        f"<small>{REPEATS[schema]}</small></h3>"
-    )
+    heading = f'<h3><span class="chip {schema}">{schema}</span>{SCHEMA_NAMES[schema]}</h3>'
     if totals.events == 0 and totals.distinct_alerts == 0:
         return (
             f'<article class="card schema {schema}">{heading}'
@@ -419,15 +410,8 @@ def _by_application(summary: TeamSummary, rule_link: RuleLink) -> str:
 # ------------------------------------------------------------------ 7: how often alerts fire
 
 
-def _fire_rate(row: FireRow) -> str:
-    if row.ratio is None:
-        return (
-            f'<span class="sub">{_dec(row.events_per_24h)} events per 24 h · '
-            "no repeat interval</span>"
-        )
-    css = _PATTERN_CSS.get(row.pattern or "", f"f-{row.alert.schema}")
-    bar = ratio_bar(row.ratio, css=css, label=f"{row.ratio:.1f} times the repeat interval")
-    return f'<span class="rate">{bar}<b>{row.ratio:.1f}{TIMES}</b></span>'
+def _open_for(row: FireRow) -> str:
+    return '<span class="sub">\u2014</span>' if row.open_hours is None else _span(row.open_hours)
 
 
 def _fire(summary: TeamSummary) -> str:
@@ -437,9 +421,9 @@ def _fire(summary: TeamSummary) -> str:
     )
     legend_html = (
         f'<ul class="thresholds">{legend}</ul>'
-        '<p class="sub">Fire rate is events against the events expected at the schema\'s repeat '
-        f"interval: 1{TIMES} is a still-firing alert re-sent on schedule. Active time runs from the "
-        "first to the last event, plus one repeat interval.</p>"
+        '<p class="sub">An episode is a run of firing events with no clear between them. A '
+        "Grafana alert is expected to send once when it fires and once when it clears. Active "
+        "time runs from the first to the last event.</p>"
     )
     if not summary.fire:
         return _card(
@@ -447,12 +431,8 @@ def _fire(summary: TeamSummary) -> str:
         )
 
     def block(schema: str) -> str:
-        # Ranked within the schema: v2 repeats 144 times more slowly than v1, so a shared
-        # ranking by events would push every v2 alert out of sight.
         top = [row for row in summary.fire if row.alert.schema == schema][:TOP_FIRING_PER_SCHEMA]
-        heading = (
-            f'<div class="eyebrow">{_chip(schema)} {SCHEMA_NAMES[schema]} · {REPEATS[schema]}</div>'
-        )
+        heading = f'<div class="eyebrow">{_chip(schema)} {SCHEMA_NAMES[schema]}</div>'
         if not top:
             return heading + _empty(f"No {schema} alerts this week.")
         rows = []
@@ -460,18 +440,27 @@ def _fire(summary: TeamSummary) -> str:
             pattern = (
                 f'<span class="pill {h(row.pattern)}">{h(row.pattern)}</span>'
                 if row.pattern
-                else '<span class="sub">—</span>'
+                else '<span class="sub">\u2014</span>'
             )
             rows.append(
                 f'<tr><td class="alert">{_alert_line(row.alert)}</td>'
                 f'<td class="num">{row.alert.row_count:,}</td>'
                 f'<td class="num">{_span(row.span_hours)}</td>'
-                f"<td>{_fire_rate(row)}</td>"
                 f'<td class="num">{row.alert.max_clear_cycles_24h:,}</td>'
+                f'<td class="num">{row.max_episode_firing_rows:,}</td>'
+                f'<td class="num">{_open_for(row)}</td>'
                 f"<td>{pattern}</td></tr>"
             )
         return heading + _table(
-            ("Alert", "Events", "Active for", "Fire rate", "Clear cycles in 24 h", "Pattern"),
+            (
+                "Alert",
+                "Events",
+                "Active",
+                "Episodes (clear cycles)",
+                "Most rows in one episode",
+                "Open for",
+                "Pattern",
+            ),
             rows,
             "fire",
         )
@@ -479,8 +468,7 @@ def _fire(summary: TeamSummary) -> str:
     return _card(
         "fire",
         "How often alerts fire",
-        f"Each schema's {TOP_FIRING_PER_SCHEMA} alerts with the most events this week, against "
-        "that schema's repeat interval.",
+        f"Each schema's {TOP_FIRING_PER_SCHEMA} alerts with the most events this week.",
         "".join(block(schema) for schema in SCHEMAS) + legend_html,
     )
 

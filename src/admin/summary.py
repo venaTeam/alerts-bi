@@ -96,7 +96,7 @@ _ALERT_COLUMNS: Final = (
     "alert_schema, application, key_field, message, severity, provider, alert_rule_url, "
     "component, node_name, row_count, first_seen, last_seen, quality_state, core_rule_ids, "
     "readiness_rule_ids, llm_principle_id, llm_confidence, clear_count, max_clear_cycles_24h, "
-    "fire_pattern, unseen"
+    "fire_pattern, unseen, max_episode_firing_rows, open_since"
 )
 
 
@@ -196,6 +196,8 @@ def alert_row(row: Mapping[str, Any]) -> AlertRow:
         max_clear_cycles_24h=int(row.get("max_clear_cycles_24h") or 0),
         fire_pattern=_optional(row.get("fire_pattern")),
         unseen=None if unseen is None else bool(unseen),
+        max_episode_firing_rows=int(row.get("max_episode_firing_rows") or 0),
+        open_since=row.get("open_since"),
     )
 
 

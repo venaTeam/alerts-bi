@@ -246,24 +246,30 @@ def test_by_application_counts_and_order() -> None:
     assert b.rules == ("R1", "R3")
 
 
-def test_fire_rows_single_row_has_one_interval_span() -> None:
-    (row,) = fire_rows((alert(row_count=1),))
-    assert row.span_hours == 5 / 60
-    assert row.ratio == 1.0
-    assert row.events_per_24h == 288.0
+def test_fire_rows_single_row_has_zero_span_and_no_events_rate() -> None:
+    (row,) = fire_rows((alert(row_count=1),), T0)
+    assert row.span_hours == 0.0
+    assert row.events_per_24h is None
+    assert row.open_hours is None
+    assert row.max_episode_firing_rows == 0
 
 
-def test_fire_rows_api_alert_has_no_ratio_and_orders_by_events() -> None:
-    api = alert(
-        provider="api", key_field="x", row_count=48, last_seen=T0 + timedelta(hours=23, minutes=55)
+def test_fire_rows_open_hours_run_to_the_week_end_and_orders_by_events() -> None:
+    api = alert(provider="api", key_field="x", row_count=48, last_seen=T0 + timedelta(hours=24))
+    small = alert(
+        key_field="y",
+        row_count=2,
+        max_episode_firing_rows=2,
+        open_since=T0 - timedelta(hours=30),
     )
-    small = alert(key_field="y", row_count=2)
-    rows = fire_rows((small, api))
+    rows = fire_rows((small, api), T0 + timedelta(hours=10))
     assert [r.alert.key_field for r in rows] == ["x", "y"]
-    assert rows[0].ratio is None
     assert rows[0].events_per_24h == 48.0
+    assert rows[0].span_hours == 24.0
     assert rows[0].pattern is None
-    flagged = fire_rows((alert(fire_pattern="stuck"),))
+    assert rows[1].open_hours == 40.0
+    assert rows[1].max_episode_firing_rows == 2
+    flagged = fire_rows((alert(fire_pattern="stuck"),), T0)
     assert flagged[0].pattern == "stuck"
 
 
@@ -443,7 +449,7 @@ def test_summarize_assembles_everything() -> None:
     assert summary.inputs is source
     assert summary.key_findings == key_findings(source)
     assert summary.by_application == by_application(source.alerts)
-    assert summary.fire == fire_rows(source.alerts)
+    assert summary.fire == fire_rows(source.alerts, source.window_end)
     assert summary.biggest == biggest(source.alerts)
     assert summary.estimate == estimate(source)
 

@@ -30,12 +30,12 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "R5": {"panels": ["team-v1-main"], "reason": "excluded by every supplied panel"},
     "R6": {
         "pattern": "stuck",
-        "rows": 865,
-        "span_hours": 72.08,
-        "ratio": 1.0,
-        "events_per_24h": 287.78,
+        "rows": 2,
         "clear_count": 0,
         "max_clear_cycles_24h": 0,
+        "max_episode_firing_rows": 2,
+        "open_hours": 80.0,
+        "events_per_24h": None,
     },
     "R7": {
         "reason": "older_than_24h",
@@ -113,7 +113,7 @@ def test_r6_copy_never_uses_forbidden_portal_substrings() -> None:
             e = rule_explanation("R6", evidence)
             text = " ".join((e.title, e.reason, e.why, e.observed, e.next_step)).lower()
             assert not [f for f in forbidden if f in text]
-    assert "per repeat interval" in principle_next_step("R6")
+    assert "once when it fires" in principle_next_step("R6")
 
 
 def test_r6_next_step_for_a_bare_rule_id_is_pattern_neutral() -> None:

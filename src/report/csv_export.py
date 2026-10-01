@@ -204,6 +204,8 @@ WORKLIST_HEADERS: Final = (
     "max_clear_cycles_24h",
     "fire_pattern",
     "unseen",
+    "max_episode_firing_rows",
+    "open_since",
 )
 
 
@@ -240,6 +242,8 @@ def alert_worklist_csv(findings: Sequence[Mapping[str, Any]]) -> str:
             row.get("max_clear_cycles_24h", 0),
             row.get("fire_pattern"),
             _bit(row.get("unseen")),
+            row.get("max_episode_firing_rows", 0),
+            row.get("open_since"),
         ]
         for row in findings
     ]

@@ -23,9 +23,8 @@ __all__ = [
     "R6_API_SPAM_PER_24H",
     "R6_FLAP_CYCLES",
     "R6_FLAP_WINDOW",
-    "R6_SPAM_RATIO",
-    "R6_STUCK_MIN_SPAN",
-    "R6_STUCK_RATIO",
+    "R6_SPAM_EPISODE_ROWS",
+    "R6_STUCK_OPEN",
     "R10_TECHNICAL_CAUSE_IMPACTS",
     "V2_READINESS_RULE_IDS",
     "Principle",
@@ -68,23 +67,23 @@ R10_TECHNICAL_CAUSE_IMPACTS: Final = frozenset(
     {"high cpu", "high cpu usage", "cpu usage is high", "cpu is high"}
 )
 
-#: R6 thresholds (team summary spec section 5.2). Catalogue constants under
-#: ``RULESET_VERSION``, never environment settings: changing one changes what a past number
-#: meant.
-#: Flapping: fire -> clear cycles inside any rolling window of this length (spec 5.1).
+#: R6 thresholds (design 7.14). Catalogue constants under ``RULESET_VERSION``, never
+#: environment settings: changing one changes what a past number meant. R6 judges firing
+#: EPISODES, not a repeat interval: Grafana repeat is disabled on both schemas, so a firing
+#: alert sends once when it fires and once when it clears.
+#: Flapping: fire -> clear cycles inside any rolling window of this length (design 7.14).
 R6_FLAP_WINDOW: Final = timedelta(hours=24)
 #: Flapping: at least this many cycles inside the window, on any provider.
 R6_FLAP_CYCLES: Final = 3
-#: Spamming (Grafana): rows / expected rows at or above this ratio.
-R6_SPAM_RATIO: Final = 2.0
-#: Spamming (API): events per 24 h of active span at or above this rate ...
-R6_API_SPAM_PER_24H: Final = 24.0
-#: ... and only when the active span is at least this long.
+#: Spamming (Grafana): at least this many firing rows in one episode. One notification is
+#: expected and one duplicate is tolerated (replicas); three means it is re-sent.
+R6_SPAM_EPISODE_ROWS: Final = 3
+#: Spamming (non-Grafana): rows per 24 h of span at or above this rate ...
+R6_API_SPAM_PER_24H: Final = 24
+#: ... and only when the span is at least this long.
 R6_API_MIN_SPAN: Final = timedelta(hours=6)
-#: Stuck (Grafana, never cleared): fire-rate ratio at or above this ...
-R6_STUCK_RATIO: Final = 0.9
-#: ... over an active span of at least this long.
-R6_STUCK_MIN_SPAN: Final = timedelta(hours=72)
+#: Stuck (Grafana): the open episode has lasted at least this long at the window's end.
+R6_STUCK_OPEN: Final = timedelta(hours=72)
 
 #: Rule set membership (design section 3.6): core rules read v1 and v2 side by side.
 CORE_RULE_IDS: Final = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")

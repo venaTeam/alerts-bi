@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from src.domain.normalize import AlertRecord, select_representative
 from src.rules.catalogs import CORE_RULE_IDS, V2_READINESS_RULE_IDS
@@ -81,6 +82,10 @@ class EvaluatedIdentity:
     """Most fire -> clear cycles inside any rolling 24 hours (R6 fact)."""
     fire_pattern: str | None = None
     """``stuck``, ``spamming`` or ``flapping`` when R6 matched, else None."""
+    max_episode_firing_rows: int = 0
+    """Most firing rows in any one episode (R6 fact)."""
+    open_since: datetime | None = None
+    """First firing row of the open episode when the last row is firing (R6 fact)."""
 
 
 @dataclass(slots=True)
@@ -100,7 +105,7 @@ class RuleBucketCount:
     """Identities with at least one matching row in this bucket."""
 
 
-def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
+def evaluate_rows(rows: Sequence[AlertRecord], window_end: datetime) -> Evaluation:
     """Evaluate every row of one schema and aggregate to identities."""
     evaluated = [
         EvaluatedRow(
@@ -122,17 +127,26 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
         # R6 judges the identity's whole firing pattern, so a match belongs to every row
         # of the identity and the per-bucket allocation then applies unchanged.
         facts = firing_facts(
-            representative.schema, [item.row for item in group], representative.provider
+            representative.schema,
+            [item.row for item in group],
+            representative.provider,
+            window_end,
         )
         if facts.pattern is not None:
             evidence = {
                 "pattern": facts.pattern,
                 "rows": len(group),
-                "span_hours": round(facts.span.total_seconds() / 3600, 2),
-                "ratio": None if facts.ratio is None else round(facts.ratio, 3),
-                "events_per_24h": round(facts.events_per_24h, 2),
                 "clear_count": facts.clear_count,
                 "max_clear_cycles_24h": facts.max_clear_cycles_24h,
+                "max_episode_firing_rows": facts.max_episode_firing_rows,
+                "open_hours": (
+                    None
+                    if facts.open_since is None
+                    else round((window_end - facts.open_since).total_seconds() / 3600, 2)
+                ),
+                "events_per_24h": (
+                    None if facts.events_per_24h is None else round(facts.events_per_24h, 2)
+                ),
             }
             for item in group:
                 item.core_findings.append(
@@ -163,6 +177,8 @@ def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
             clear_count=facts.clear_count,
             max_clear_cycles_24h=facts.max_clear_cycles_24h,
             fire_pattern=facts.pattern,
+            max_episode_firing_rows=facts.max_episode_firing_rows,
+            open_since=facts.open_since,
         )
 
     return Evaluation(rows=evaluated, identities=identities)

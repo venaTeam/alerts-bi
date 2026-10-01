@@ -134,27 +134,30 @@ def test_without_the_model_every_week_is_held_for_a_person(
 def test_a_failed_model_week_is_held_and_the_healthy_week_after_it_waits(
     fresh: None, registry: str, tmp_path: Path
 ) -> None:
-    weekly(registry, MOCK_NOW, tmp_path, teams=[TEAM])
-    assert published(TEAM) == [MONDAY]
+    # checkout-api still has a v2 alert in the week ending 31 Aug that no core rule (R6
+    # included) withholds from the model, so the failing client has something to fail on.
+    team = "checkout-api"
+    weekly(registry, MOCK_NOW, tmp_path, teams=[team])
+    assert published(team) == [MONDAY]
 
     # Every model call fails. The week ending 31 Aug holds the mock's last alerts and
     # exhausts its batches; the week ending 7 Sep has none, so it is healthy but must wait.
     failing = FakeLlmClient(fallback=ScriptedResult("transport_error"))
     now = datetime(2026, 9, 8, 1, 0, tzinfo=UTC)
-    first = weekly(registry, now, tmp_path, teams=[TEAM], llm_client=failing)
+    first = weekly(registry, now, tmp_path, teams=[team], llm_client=failing)
     assert [o.outcome for o in first] == ["held", "stored"]
     assert "not assessed" in (first[0].detail or "")
     assert "waiting for the week ending 2026-08-31" in (first[1].detail or "")
-    assert published(TEAM) == [MONDAY]
+    assert published(team) == [MONDAY]
     with connect(CONFIG.sql, DB) as db:
         log = db.query(
-            "SELECT outcome FROM weekly_review_log WHERE team_id = :t ORDER BY log_id", {"t": TEAM}
+            "SELECT outcome FROM weekly_review_log WHERE team_id = :t ORDER BY log_id", {"t": team}
         )
     assert [row["outcome"] for row in log] == ["published", "held", "stored"]
 
-    resolved = weekly(registry, now, tmp_path, teams=[TEAM])
+    resolved = weekly(registry, now, tmp_path, teams=[team])
     assert [o.outcome for o in resolved] == ["published", "published"]
-    assert published(TEAM) == [MONDAY + timedelta(days=d) for d in (0, 7, 14)]
+    assert published(team) == [MONDAY + timedelta(days=d) for d in (0, 7, 14)]
 
 
 def test_weeks_past_retention_are_skipped_and_the_gap_is_published_across(

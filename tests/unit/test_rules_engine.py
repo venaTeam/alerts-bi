@@ -1,20 +1,32 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
-from src.domain.normalize import identity_of
+from src.domain.normalize import AlertRecord, identity_of
 from src.domain.window import build_run_window
 from src.rules.core import Finding
 from src.rules.engine import (
+    Evaluation,
     attach_row_findings,
     compare_rule_ids,
     compute_daily_flagged,
     compute_daily_rule_counts,
     count_phase2_gap_identities,
-    evaluate_rows,
+)
+from src.rules.engine import (
+    evaluate_rows as _evaluate_rows,
 )
 
 from tests.helpers.rows import v1_row, v2_row
+
+# Close to the rows, so a single open Grafana row is never R6 'stuck' as a side effect.
+WINDOW_END = datetime(2026, 8, 20, 13, 0, tzinfo=UTC)
+
+
+def evaluate_rows(rows: Sequence[AlertRecord]) -> Evaluation:
+    return _evaluate_rows(rows, WINDOW_END)
+
 
 DATES = build_run_window(datetime.fromisoformat("2026-08-25T18:00:00+00:00")).snapshot_dates
 
@@ -35,6 +47,8 @@ def test_core_rules_are_evaluated_on_every_raw_row_not_the_representative_alone(
                 "@timestamp": "2026-08-20T12:00:00Z",
                 "key_field": "k",
                 "message": "Real failure detail",
+                # A clear row ends the episode, so this is not R6 spamming.
+                "severity": 1,
             }
         ),
     ]

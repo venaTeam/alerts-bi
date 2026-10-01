@@ -87,6 +87,8 @@ def _alert(row: dict[str, Any]) -> AlertRow:
         max_clear_cycles_24h=_int(row["max_clear_cycles_24h"]),
         fire_pattern=row["fire_pattern"],
         unseen=None if unseen is None else bool(unseen),
+        max_episode_firing_rows=_int(row["max_episode_firing_rows"]),
+        open_since=row["open_since"],
     )
 
 
@@ -208,7 +210,8 @@ def load_portal_summary(db: Database, team_id: str, run_id: str) -> SummaryInput
         SELECT alert_schema, application, key_field, message, severity, provider,
                alert_rule_url, component, node_name, row_count, first_seen, last_seen,
                quality_state, core_rule_ids, readiness_rule_ids, llm_principle_id,
-               llm_confidence, clear_count, max_clear_cycles_24h, fire_pattern, unseen
+               llm_confidence, clear_count, max_clear_cycles_24h, fire_pattern, unseen,
+               max_episode_firing_rows, open_since
         FROM portal_alerts
         WHERE run_id = :run_id
         ORDER BY alert_schema ASC, application ASC, key_field ASC
