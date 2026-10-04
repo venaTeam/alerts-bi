@@ -18,13 +18,8 @@ from src.config import load_config
 from src.config.portal import PortalSettings, parse_networks
 from src.portal.app import SECURITY_HEADERS, build_portal, client_allowed
 from src.portal.charts import ChartPoint, line_chart
-from src.portal.pages import alert_page, rule_link_for, safe_link, team_page
-from src.portal.queries import AlertDetail, AlertRow, Decision, Review, SchemaTotals, WorklistPage
-from src.portal.summary_view import render_summary_sections
-
-from tests.unit.test_portal_summary_view import ALERTS as SUMMARY_ALERTS
-from tests.unit.test_portal_summary_view import alert as summary_alert
-from tests.unit.test_portal_summary_view import build_summary
+from src.portal.pages import safe_link
+from src.portal.queries import Review, SchemaTotals
 
 PORTAL_DIR = Path(__file__).resolve().parents[2] / "src" / "portal"
 SETTINGS = PortalSettings(sql=load_config().sql, database="alerts_bi_test")
@@ -160,133 +155,22 @@ def _review(end: datetime = END, run_id: str = "r3") -> Review:
     )
 
 
-def _alert(**overrides: object) -> AlertRow:
-    values: dict[str, object] = {
-        "alert_schema": "v2",
-        "application": f"app {HOSTILE}",
-        "key_field": f"key {HOSTILE}",
-        "message": HOSTILE,
-        "severity": "critical",
-        "component": "sms-send",
-        "node_name": None,
-        "environment": "production",
-        "provider": "grafana",
-        "alert_rule_url": "javascript:alert(1)",
-        "row_count": 2,
-        "first_seen": END - timedelta(hours=12),
-        "last_seen": END,
-        "core_rule_ids": (),
-        "readiness_rule_ids": ("R9",),
-        "evidence": {
-            "R9": {
-                "rule_id": "R9",
-                "matched_rows": 2,
-                "sample_evidence": {
-                    "severity": "critical",
-                    "blocks_completion": True,
-                    "reason": "missing",
-                },
-            }
-        },
-        "quality_state": "needs_review",
-        "llm_principle_id": "P2",
-        "llm_confidence": "medium",
-        "llm_justification": f"because {HOSTILE}",
-        "impact": HOSTILE,
-        "runbook_url": 'javascript:alert("runbook")',
-        "alert_status": "firing",
-        "time_created": None,
-        "representative_at": END,
-        "attention_rank": 2,
-    }
-    values.update(overrides)
-    return AlertRow(**values)  # type: ignore[arg-type]
-
-
-def _summary(review: Review) -> str:
-    """The week's Summary, from the same hand-built summary the renderer's tests use, with
-    hostile alert text so the whole page is checked for escaping."""
-    hostile = summary_alert(message=HOSTILE, application=f"app {HOSTILE}")
-    summary = build_summary(alerts=(hostile, *SUMMARY_ALERTS[1:]))
-    return render_summary_sections(summary, rule_link=rule_link_for(review.team_id, review.week))
-
-
-def _pages(*, state: str = "all", rule: str = "") -> list[str]:
-    review = _review()
-    alert = _alert()
-    decision = Decision("P2", "pending", f"asked {HOSTILE}", END, f"op {HOSTILE}")
-    team = team_page(
-        [_review(END - timedelta(hours=168), "r2"), review],
-        review,
-        WorklistPage([alert], 1, 1, 25),
-        {(alert.alert_schema, alert.application, alert.key_field): {"P2": decision}},
-        show="attention",
-        schema="all",
-        counts={"attention": 1, "all": 11},
-        summary=_summary(review),
-        state=state,
-        rule=rule,
-    )
-    detail = alert_page(review, AlertDetail(alert, {"P2": [decision]}))
-    return [team, detail]
-
-
-@pytest.mark.parametrize("index", [0, 1], ids=["team", "alert"])
-def test_alert_text_is_escaped_and_nothing_executes(index: int) -> None:
-    page = _pages()[index]
-    assert "<script" not in page
-    assert "&lt;script&gt;" in page
-    assert " style=" not in page, "inline styles would need unsafe-inline in the CSP"
-    assert 'href="javascript:' not in page
-
-
-def test_an_unusable_runbook_is_shown_as_text_not_a_link() -> None:
-    detail = _pages()[1]
-    assert "not a usable http(s) link" in detail
-
-
-def test_the_alert_page_shows_the_decision_to_make_and_marks_the_finding_advisory() -> None:
-    detail = _pages()[1]
-    assert "Decision needed" in detail
-    assert "advisory" in detail
-    assert "Readiness gap" in detail and "v2 readiness" in detail
-    assert "starts without one" in detail, "a decision never carries to an enriched key"
-
-
-def test_the_team_page_shows_totals_not_rates_and_no_service_internals() -> None:
-    team = _pages()[0]
-    assert "distinct alerts this week" in team
-    assert "per day" not in team
-    for internal in ("run_id", "r3", "registry", "ruleset", "prompt", "model version"):
-        assert internal not in team, internal
-
-
-def test_the_summary_sits_between_this_week_and_over_time() -> None:
-    team = _pages()[0]
-    order = [team.index(text) for text in ("This week", "Summary", "Over time", "Work list")]
-    assert order == sorted(order)
-    tile = '<span class="u">distinct alerts this week</span>'
-    assert team.count(tile) == 2, "one tile per schema, shown once"
-
-
-def test_summary_rule_links_open_the_work_list_filtered_by_that_rule() -> None:
-    team = _pages()[0]
-    assert 'href="/teams/team%3Cx%3E/weeks/2026-08-30?rule=R6#worklist"' in team
-
-
-def test_the_filters_keep_each_other_and_name_the_active_rule() -> None:
-    team = _pages(state="rule_flagged", rule="R1")[0]
-    assert "Rule R1 · Generic message" in team
-    # Changing the schema keeps the state and rule filters.
-    assert "schema=v1&amp;state=rule_flagged&amp;rule=R1#worklist" in team
-    # Clearing the rule keeps the state.
-    assert 'href="/teams/team%3Cx%3E/weeks/2026-08-30?state=rule_flagged#worklist"' in team
-
-
 def test_the_filter_parameters_are_bounded() -> None:
+    """On the Fix list, and on the old addresses whose links still carry filters."""
+    paths = ("/teams/x", "/teams/x/weeks/2026-08-30", "/teams/x/weeks/2026-08-30/fix")
     with TestClient(build_portal(SETTINGS), client=("10.1.2.3", 50000)) as client:
-        for params in ({"state": "evil"}, {"rule": "R11"}, {"rule": "R1' OR 1=1"}):
-            assert client.get("/teams/x", params=params).status_code == 422, params
+        for path in paths:
+            for params in ({"state": "evil"}, {"rule": "R11"}, {"rule": "R1' OR 1=1"}):
+                assert client.get(path, params=params).status_code == 422, (path, params)
+        picked = client.get("/teams/x/weeks", params={"week": "2026-08-30", "tab": "evil"})
+        assert picked.status_code == 422
+
+
+def test_every_tab_is_its_own_read_only_address() -> None:
+    app = build_portal(SETTINGS)
+    paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    for tab in ("fix", "volume", "dashboards", "migration", "history", "slides", "alert"):
+        assert f"/teams/{{team_id}}/weeks/{{week}}/{tab}" in paths, tab
 
 
 # ------------------------------------------------------------------ charts

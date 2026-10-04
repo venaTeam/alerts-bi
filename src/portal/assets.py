@@ -257,6 +257,97 @@ svg.donut .r3,.dlegend .r3{fill:var(--r3)} svg.donut .r4,.dlegend .r4{fill:var(-
 svg.donut .r5,.dlegend .r5{fill:var(--r5)} svg.donut .r6,.dlegend .r6{fill:var(--r6)}
 svg.donut .r7,.dlegend .r7{fill:var(--r7)}
 /* ---- end of the Bars / Donut toggle ---- */
+/* ---- The team week in tabs (src/portal/tabs.py) ----
+   One tab per question. No script: the week and outcome menus are <details> lists of links.
+   Group rows of a table read as section bands, distinct from the header row and the items. */
+.src{color:var(--ink-2);font-size:12.5px}
+.head{align-items:center}
+.wk{display:flex;gap:8px;align-items:center}
+details.menu{position:relative}
+details.menu > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);font-weight:600;font-size:13.5px;white-space:nowrap}
+details.menu > summary::-webkit-details-marker{display:none}
+details.menu > summary:hover{border-color:var(--ink-2)}
+svg.chev{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
+details.menu[open] svg.chev{transform:rotate(180deg)}
+.menu-list{position:absolute;right:0;top:calc(100% + 6px);z-index:5;margin:0;padding:6px;list-style:none;background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;box-shadow:0 8px 24px rgba(21,32,43,.14);min-width:220px}
+.filters details.menu .menu-list{left:0;right:auto}
+.menu-list a{display:block;padding:8px 12px;border-radius:6px;color:var(--ink);text-decoration:none;white-space:nowrap}
+.menu-list a:hover{background:var(--surface-2)}
+.menu-list a[aria-current]{font-weight:600;background:var(--bg)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-strong);overflow-x:auto}
+.tab{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;color:var(--ink-2);text-decoration:none;font-weight:500;border-bottom:3px solid transparent;white-space:nowrap}
+.tab:hover{color:var(--ink);border-bottom-color:var(--line-strong)}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+.cnt{background:var(--ink);color:var(--surface);border-radius:999px;font-size:11px;font-weight:600;padding:0 7px;line-height:18px}
+.tab.on .cnt{background:var(--rule)}
+.split{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.colmain{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px}
+.colside{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:20px}
+.card.pad{padding:18px 20px}
+.stack{display:flex;flex-direction:column;gap:14px}
+.stack.tight{gap:6px}
+.stack > h2,.card > h2{font-size:17px;font-weight:600}
+.card.v1{border-top:3px solid var(--v1)} .card.v2{border-top:3px solid var(--v2)}
+.kp{display:flex;flex-wrap:wrap;gap:12px 32px}
+.kp > div{display:flex;flex-direction:column}
+.big{font-size:32px;font-weight:600;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+.col{display:flex;flex-direction:column;gap:3px;min-width:0}
+ol.findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+ol.findings li{display:flex;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+ol.findings li:first-child{border-top:0;padding-top:0}
+ol.findings li:last-child{padding-bottom:0}
+.n1{flex:none;width:26px;height:26px;border-radius:999px;background:var(--ink);color:var(--surface);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+ol.vsteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+ol.vsteps li{padding:6px 10px;border-radius:6px;font-size:13px;color:var(--muted)}
+ol.vsteps li.on{background:var(--ink);color:var(--surface);font-weight:600}
+dl.tot{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;margin:0;font-size:13.5px}
+dl.tot dt{color:var(--ink-2)} dl.tot dd{margin:0;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.button.primary{background:var(--ink);color:var(--surface);border-color:var(--ink);font-weight:600;text-align:center;padding:10px 16px}
+.card-h{display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between;align-items:baseline;padding:14px 20px;border-bottom:1px solid var(--line)}
+.card-h h2{font-size:17px;font-weight:600}
+.card-h h2 .sub{font-weight:400;font-size:13px}
+table.list{width:100%;border-collapse:collapse;min-width:560px}
+table.list th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600;text-align:left;padding:10px 14px;border-bottom:2px solid var(--line-strong);background:var(--surface);white-space:nowrap}
+table.list td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+table.list tr:last-child td{border-bottom:0}
+table.list .r{text-align:right}
+table.list th .chip{text-transform:none;letter-spacing:0}
+table.list td.r .sub{display:block}
+table.list tr.grp td{background:var(--surface-2);color:var(--ink);font-size:13px;font-weight:700;padding:8px 14px;border-top:1px solid var(--line)}
+table.list tr.g-fix td{background:var(--rule-soft);color:var(--rule)}
+table.list tr.g-adv td{background:var(--model-soft);color:var(--model)}
+table.list tr.g-ready td{background:var(--ready-soft);color:var(--ready)}
+table.list tr.current td{background:var(--surface-2);font-weight:600}
+table.list .msg{font-size:14px;color:var(--ink);text-decoration:none}
+table.list a.msg:hover{text-decoration:underline}
+.item{font-weight:400}
+.filters{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line)}
+.seg a.on{background:var(--ink);color:var(--surface)}
+.quiet{margin:16px 20px;padding:12px 16px;border:1px dashed var(--line-strong);border-radius:8px;background:var(--surface-2);color:var(--ink-2)}
+.colmain > .quiet,.colside > .quiet{margin:0}
+.banner{display:flex;flex-wrap:wrap;gap:12px 32px;align-items:center;justify-content:space-between}
+.banner > .stack{flex:1 1 420px}
+.banner dl.tot{min-width:220px}
+.fixline{margin:0;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:13.5px}
+.pad-x{margin:12px 20px}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.stat{display:flex;flex-direction:column}
+details.more{border-top:1px solid var(--line)}
+details.more > summary{cursor:pointer;padding:12px 20px;font-size:13px;color:var(--focus)}
+ul.plain{margin:0;padding:0 20px 16px 38px;display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2)}
+ol.phasecards{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+ol.phasecards li{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;font-size:13.5px}
+ol.phasecards li.on{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+ol.phasecards li.on .sub{color:var(--line)}
+@media (max-width:760px){ol.phasecards{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr}}
+.chip.review{background:var(--ready-soft);color:var(--ready)}
+.chip.un{background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line-strong)}
+.fcard h3{font-size:15px;font-weight:600;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.alert-title{font-size:24px;font-weight:600;letter-spacing:-.01em;overflow-wrap:anywhere}
+.history{border-top:1px dashed var(--line);padding-top:8px}
+.history p{margin:0}
+.decide{margin:0}
+/* ---- end of the tabs ---- */
 /* ---- Presentation slides (src/portal/slides.py) ----
    Two frames of exactly 1280x720 CSS px to screenshot and paste as slides. Always a light
    palette, also in dark mode, for projection: the colours are scoped to .slide and never read

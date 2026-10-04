@@ -1,6 +1,6 @@
 # Alerts BI repository instructions
 
-**Last updated:** 2026-10-01 (team summary, R6 and `unseen`, design section 7.14)
+**Last updated:** 2026-10-04 (portal team week in tabs, design section 7.10)
 
 This is the canonical copy of the repository instructions; `CLAUDE.md` points here.
 
@@ -131,7 +131,7 @@ Do not expand the MVP with deferred features. The approved next steps are:
 1. ~~Design and build the interactive frontend over persisted runs.~~ Delivered as the read-only review portal (design section 7.10). The HTTP trigger surface of section 7.9 stays separate and is never mounted on the portal.
 2. Add deterministic historical backfill, oldest retained data first, with no LLM backfill.
 
-Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. The team summary (admin page and portal section), R6 and `unseen` are built (design section 7.14), including one scoped exception to the no-comparison rule: the estimated time to retire v1, computed from published weeks only and never written to the scorecard or exports. Deploying that release (migrations 005-008, pre-flight checks, rollout order, warnings) is handed off in [`docs/handoffs/2026-10-01-team-summary-release.md`](docs/handoffs/2026-10-01-team-summary-release.md). Plan the unattributed-alert audit, cross-team leaderboard, the rest of the Kubernetes work, and other deferred work separately afterward.
+Automatic weekly reviews are built (design section 7.11); the OpenShift CronJob that triggers them is documented but unproven on a cluster. The team summary (admin page; on the portal, spread over the team week's tabs of design section 7.10, which name problems without rule ids), R6 and `unseen` are built (design section 7.14), including one scoped exception to the no-comparison rule: the estimated time to retire v1, computed from published weeks only and never written to the scorecard or exports. Deploying that release (migrations 005-008, pre-flight checks, rollout order, warnings) is handed off in [`docs/handoffs/2026-10-01-team-summary-release.md`](docs/handoffs/2026-10-01-team-summary-release.md). Plan the unattributed-alert audit, cross-team leaderboard, the rest of the Kubernetes work, and other deferred work separately afterward.
 
 ## Local mock environment
 

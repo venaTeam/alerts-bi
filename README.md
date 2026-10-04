@@ -262,8 +262,10 @@ use it anywhere shared.
 alerts were flagged, key findings, noisy alerts by application, how often alerts fire, the
 biggest single source, the per-rule table, hidden and `unseen` alerts, migration progress,
 the estimated time to retire v1, and a filterable work list. v1 and v2 are never summed.
-The reader portal shows the same building blocks as a Summary section on the team week page
-for published weeks only, under the portal's rules (weekly totals, no run id or version).
+The reader portal shows published weeks only, split into tabs (see below), under the portal's
+rules (weekly totals, no run id or version). Its Volume and Migration tabs leave out the
+per-application table and the phase-1 estimate; both stay on this admin page and on the
+portal's presentation slides.
 
 ---
 
@@ -351,20 +353,30 @@ refuses, and the week has to be withdrawn first.
 ### What readers see
 
 - A **team directory** with each team's latest published week, listed alphabetically.
-- For each team, a **week picker**, the week's migration phase and readiness, and for v1 and
-  v2 separately the **distinct alerts in the week** and the **alert events in the week**.
-  These are weekly totals, not the scorecard's per-day rate, and v1 and v2 are never added
-  together.
-- A **Summary section** and its presentation slides for the selected week, with a day-by-day
-  chart of distinct and rule-flagged distinct alerts for that one week, labelled "by UTC
-  day" (a within-week view, never a comparison across weeks).
-- **History charts**: one point per published week, one chart per schema and measure. No
-  deltas, percentages or "fixed" labels.
-- A **work list**, paginated, leading with each alert's latest message and a plain-language
-  reason. Opening an alert shows its latest firing, every finding with its stored
-  evidence (an older matching firing is labelled apart from the latest one), advisory model
-  findings with their original reasoning, the decision a person has to make for an
-  uncertain one, v2 readiness gaps in their own section, and the decision history.
+- For each team, a **week menu** (plain links, so it keeps the open tab) and the week in
+  **seven tabs**, each its own address under `/teams/{team}/weeks/{week}`:
+  - **Overview** (the week's own address): for v1 and v2 separately the alerts and events of
+    the week and what the review found, the key findings, the phase, and the loudest alert.
+    These are weekly totals, not the scorecard's per-day rate, and v1 and v2 are never added
+    together.
+  - **Fix list** (`/fix`): what to change, grouped as fix or delete, advisory and get v2
+    ready, with each schema's alerts side by side; then every alert, paginated and
+    filtered by schema, outcome and problem. Opening an alert shows each finding with its
+    stored evidence (an older matching event is labelled apart from the latest one), advisory
+    model findings with their original reasoning, the decision a person has to make for an
+    uncertain one, v2 readiness in its own section, and the decision history.
+  - **Volume** (`/volume`): the loudest alerts per schema and any stuck, spamming or flapping
+    pattern.
+  - **Dashboards** (`/dashboards`): alerts your own panels hide, and alerts on no dashboard.
+  - **Migration** (`/migration`): the phase, what is left in v1, phase-2 readiness and the
+    critical alerts without a runbook.
+  - **History** (`/history`): one point per published week, one chart per schema and measure,
+    and the list of published weeks. No deltas, percentages or "fixed" labels.
+  - **Slides** (`/slides`): two presentation slides for the week, with a day-by-day chart of
+    distinct and rule-flagged distinct alerts labelled "by UTC day" (a within-week view,
+    never a comparison across weeks).
+- Problems are named in plain words ("No rule link", "Generic message"); rule ids are not
+  shown. Links from before the tabs, such as `/teams/{team}?rule=R1`, redirect to the Fix list.
 
 It never shows a run id, registry, ruleset, prompt or model version. The scorecard keeps
 those.

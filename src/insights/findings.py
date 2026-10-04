@@ -1,9 +1,13 @@
-"""Key-findings sentences (spec section 4): templated from stored counts, never model text."""
+"""Key-findings sentences (spec section 4): templated from stored counts, never model text.
+
+A sentence names a problem in plain words and never its rule id (product owner, 2026-10-04);
+the id travels only in :attr:`KeyFinding.rule_filter`, for the link to the alerts."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 
+from src.insights.labels import problem
 from src.insights.model import AlertRow, KeyFinding, SummaryInputs
 
 _CORE_RULES = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
@@ -42,8 +46,8 @@ def _largest(inputs: SummaryInputs) -> KeyFinding | None:
     carriers = [a for a in inputs.alerts if a.schema == schema and rid in a.core_rule_ids]
     others = {tuple(sorted(set(a.core_rule_ids) - {rid})) for a in carriers}
     if carriers and len(others) == 1 and len(next(iter(others))) == 1:
-        body += f" The same alerts also match {next(iter(others))[0]}."
-    return KeyFinding("largest", f"{rid} is your largest finding", body, None, rid)
+        body += f" The same alerts also have: {problem(next(iter(others))[0]).lower()}."
+    return KeyFinding("largest", f"Biggest problem: {problem(rid).lower()}", body, None, rid)
 
 
 def _unassessed(inputs: SummaryInputs) -> KeyFinding | None:
@@ -107,7 +111,7 @@ def _hidden(inputs: SummaryInputs) -> KeyFinding | None:
     return KeyFinding(
         "hidden",
         "Your own panels hide alerts you still send",
-        f"{_joined(parts)} {verb} a filter in your dashboard (R5).",
+        f"{_joined(parts)} {verb} a filter in your dashboard.",
         None,
         "R5",
     )
