@@ -29,12 +29,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from src.config import PortalSettings
 from src.config.portal import IpNetwork
 from src.db.connection import Database, connect
+from src.insights import TeamSummary
 from src.insights.summary import summarize
 from src.logging_setup import log, redact_error
-from src.portal import pages, queries
+from src.portal import pages, queries, tabs
 from src.portal.assets import STYLESHEET, STYLESHEET_PATH
 from src.portal.summary_queries import load_portal_summary
-from src.portal.summary_view import render_summary_sections
 from src.versions import APP_VERSION
 
 __all__ = ["READ_METHODS", "SECURITY_HEADERS", "build_portal", "client_allowed"]
@@ -61,6 +61,11 @@ StateFilter = Annotated[
 ]
 RuleFilter = Annotated[str, Query(pattern="^(R(10|[1-9]))?$")]
 Page = Annotated[int, Query(ge=1, le=100_000)]
+TabName = Annotated[
+    str, Query(pattern="^(overview|fix|volume|dashboards|migration|history|slides)$")
+]
+#: The parameters the old work list at the bottom of the week page carried.
+WORKLIST_PARAMS = ("show", "schema", "state", "rule", "page")
 
 
 def client_allowed(host: str | None, networks: tuple[IpNetwork, ...]) -> bool:
@@ -163,78 +168,87 @@ def build_portal(settings: PortalSettings) -> FastAPI:
                 return review
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No published review for that week.")
 
-    def _team_response(
-        db: Database,
-        reviews: list[queries.Review],
-        selected: queries.Review,
-        show: str,
-        schema: str,
-        page: int,
-        state: str,
-        rule: str,
-    ) -> HTMLResponse:
-        attention_only = show != "all"
-        schema_filter = schema if schema in ("v1", "v2") else None
-        state_filter = state if state in queries.QUALITY_STATES else None
-        rule_filter = rule or None
-        listing = queries.worklist(
-            db,
-            selected.run_id,
-            attention_only=attention_only,
-            schema=schema_filter,
-            state=state_filter,
-            rule=rule_filter,
-            page=page,
-            page_size=settings.page_size,
-        )
-        counts = queries.worklist_counts(
-            db, selected.run_id, schema=schema_filter, state=state_filter, rule=rule_filter
-        )
-        decided = queries.latest_decisions(db, selected.run_id, listing.rows)
-        summary = summarize(load_portal_summary(db, selected.team_id, selected.run_id))
-        return HTMLResponse(
-            pages.team_page(
-                reviews,
-                selected,
-                listing,
-                decided,
-                show="all" if not attention_only else "attention",
-                schema=schema_filter or "all",
-                counts=counts,
-                summary=render_summary_sections(
-                    summary, rule_link=pages.rule_link_for(selected.team_id, selected.week)
-                ),
-                state=state_filter or "all",
-                rule=rule_filter or "",
-            )
-        )
+    def _summary(db: Database, selected: queries.Review) -> TeamSummary:
+        return summarize(load_portal_summary(db, selected.team_id, selected.run_id))
 
+    def _legacy_worklist(
+        team_id: str, selected: queries.Review, request: Request
+    ) -> RedirectResponse | None:
+        """The work list used to sit at the bottom of the week page, and its filter links
+        carried query parameters. Send those to the Fix list, filters intact."""
+        if not any(key in request.query_params for key in WORKLIST_PARAMS):
+            return None
+        params = {
+            key: request.query_params[key] for key in WORKLIST_PARAMS if key in request.query_params
+        }
+        target = pages.tab_url(team_id, selected.week, "fix", **params) + "#alerts"
+        return RedirectResponse(target, status.HTTP_303_SEE_OTHER)
+
+    def _tab(team_id: str, week: str | None, tab: str) -> HTMLResponse:
+        with database() as db:
+            reviews = _reviews(db, team_id)
+            selected = reviews[-1] if week is None else _week(reviews, week)
+            if tab == "history":
+                return HTMLResponse(tabs.history_page(reviews, selected))
+            summary = _summary(db, selected)
+        render = {
+            "overview": tabs.overview_page,
+            "volume": tabs.volume_page,
+            "dashboards": tabs.dashboards_page,
+            "migration": tabs.migration_page,
+            "slides": tabs.slides_page,
+        }[tab]
+        return HTMLResponse(render(reviews, selected, summary))
+
+    # The filter parameters stay declared on the week's own address so an old link with a
+    # bad value is refused (422) instead of being redirected.
     @app.get("/teams/{team_id}", response_class=HTMLResponse)
     def team_latest(
         team_id: str,
+        request: Request,
         show: Show = "attention",
         schema: SchemaFilter = "all",
         page: Page = 1,
         state: StateFilter = "all",
         rule: RuleFilter = "",
-    ) -> HTMLResponse:
+    ) -> Response:
         with database() as db:
-            reviews = _reviews(db, team_id)
-            return _team_response(db, reviews, reviews[-1], show, schema, page, state, rule)
+            latest = _reviews(db, team_id)[-1]
+        return _legacy_worklist(team_id, latest, request) or _tab(team_id, None, "overview")
 
     @app.get("/teams/{team_id}/weeks")
-    def pick_week(team_id: str, week: Annotated[str, Query(max_length=10)]) -> Response:
-        """The week picker is a GET form; send it to the week's own address."""
+    def pick_week(
+        team_id: str,
+        week: Annotated[str, Query(max_length=10)],
+        tab: TabName = "overview",
+    ) -> Response:
+        """The old week-picker form. The week menu is plain links now; this keeps old
+        bookmarks working."""
         try:
             chosen = date.fromisoformat(week)
         except ValueError:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, "No published review for that week."
             ) from None
-        return RedirectResponse(pages.week_url(team_id, chosen), status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(pages.tab_url(team_id, chosen, tab), status.HTTP_303_SEE_OTHER)
 
     @app.get("/teams/{team_id}/weeks/{week}", response_class=HTMLResponse)
     def team_week(
+        team_id: str,
+        week: str,
+        request: Request,
+        show: Show = "attention",
+        schema: SchemaFilter = "all",
+        page: Page = 1,
+        state: StateFilter = "all",
+        rule: RuleFilter = "",
+    ) -> Response:
+        with database() as db:
+            selected = _week(_reviews(db, team_id), week)
+        return _legacy_worklist(team_id, selected, request) or _tab(team_id, week, "overview")
+
+    @app.get("/teams/{team_id}/weeks/{week}/fix", response_class=HTMLResponse)
+    def fix_list(
         team_id: str,
         week: str,
         show: Show = "attention",
@@ -243,11 +257,54 @@ def build_portal(settings: PortalSettings) -> FastAPI:
         state: StateFilter = "all",
         rule: RuleFilter = "",
     ) -> HTMLResponse:
+        schema_filter = schema if schema in ("v1", "v2") else None
+        state_filter = state if state in queries.QUALITY_STATES else None
+        rule_filter = rule or None
         with database() as db:
             reviews = _reviews(db, team_id)
-            return _team_response(
-                db, reviews, _week(reviews, week), show, schema, page, state, rule
+            selected = _week(reviews, week)
+            listing = queries.worklist(
+                db,
+                selected.run_id,
+                attention_only=show == "attention",
+                schema=schema_filter,
+                state=state_filter,
+                rule=rule_filter,
+                page=page,
+                page_size=settings.page_size,
             )
+            counts = queries.worklist_counts(
+                db, selected.run_id, schema=schema_filter, state=state_filter, rule=rule_filter
+            )
+            decided = queries.latest_decisions(db, selected.run_id, listing.rows)
+            summary = _summary(db, selected)
+        return HTMLResponse(
+            tabs.fix_page(
+                reviews,
+                selected,
+                summary,
+                listing,
+                decided,
+                counts,
+                show=show,
+                schema=schema,
+                state=state,
+                rule=rule,
+            )
+        )
+
+    def _register(tab: str) -> None:
+        def one_tab(team_id: str, week: str) -> HTMLResponse:
+            return _tab(team_id, week, tab)
+
+        app.get(
+            f"/teams/{{team_id}}/weeks/{{week}}/{tab}",
+            response_class=HTMLResponse,
+            name=f"tab_{tab}",
+        )(one_tab)
+
+    for name in ("volume", "dashboards", "migration", "history", "slides"):
+        _register(name)
 
     @app.get("/teams/{team_id}/weeks/{week}/alert", response_class=HTMLResponse)
     def alert(
@@ -258,12 +315,13 @@ def build_portal(settings: PortalSettings) -> FastAPI:
         key: Annotated[str, Query(max_length=512)],
     ) -> HTMLResponse:
         with database() as db:
-            selected = _week(_reviews(db, team_id), week)
+            reviews = _reviews(db, team_id)
+            selected = _week(reviews, week)
             detail = queries.alert_detail(db, selected.run_id, schema, application, key)
         if detail is None:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, "That alert is not in this week's review."
             )
-        return HTMLResponse(pages.alert_page(selected, detail))
+        return HTMLResponse(tabs.alert_page(reviews, selected, detail))
 
     return app

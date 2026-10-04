@@ -1,7 +1,7 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13); team summary, R6 and `unseen` (section 7.14)
-**Last updated:** 2026-10-01
+**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13); team summary, R6 and `unseen` (section 7.14); the portal's team week split into tabs (section 7.10, amended 2026-10-04)
+**Last updated:** 2026-10-04
 
 ---
 
@@ -750,7 +750,7 @@ Four states are kept distinct and never inferred from one another:
 * A **`needs_review`** finding states the specific decision a person has to make.
 * **v2 readiness gaps** are shown in their own section, apart from quality.
 
-`key_field` and rule ids sit in a collapsed technical area. The portal never queries Elasticsearch. It reads the stored representative document through database views that extract only the fields above. All alert text is HTML-escaped, and a link is rendered only for an absolute `http(s)` URL.
+`key_field` sits in a collapsed technical area; rule ids are not shown at all (amended 2026-10-04, below). The portal never queries Elasticsearch. It reads the stored representative document through database views that extract only the fields above. All alert text is HTML-escaped, and a link is rendered only for an absolute `http(s)` URL.
 
 **Human decisions are a separate, append-only record.** A decision attaches to one finding on one exact identity (`alert_schema`, `application`, `key_field`, finding id), is made against a published week, and is never updated or deleted: a later decision is a new row, and readers see the whole history. It never alters `quality_state` or the stored model verdict. Because it is keyed on the exact identity, it does not carry over to the new v2 key minted when a team enriches an alert (section 3.7).
 
@@ -761,6 +761,14 @@ Four states are kept distinct and never inferred from one another:
 * **The operator surface** is the admin web app of section 7.12, and the command line with the same SQL credential: `publish`, `unpublish`, `publications`, `decide` and `decisions`. The unauthenticated run endpoint of section 7.9 stays on its own loopback listener and is never mounted on the portal.
 
 Scope is otherwise unchanged. A run still names one team, `run_at` is still captured once, and the scorecard and the three CSV exports are unchanged. Nothing here ranks teams against each other: the directory lists teams alphabetically.
+
+**Amended 2026-10-04 (product owner): the team week in tabs.** One long page had become hard to read, so a team's published week is split into seven tabs, each its own GET address under `/teams/{team}/weeks/{week}`: **Overview** (the week's own address: each schema's alerts, events and review outcome, the key findings, the phase and the loudest alert), **Fix list** (`/fix`: what to change, grouped as fix or delete, advisory and get v2 ready, then the paginated alert list with its filters; the alert page opens from it), **Volume** (`/volume`: the loudest alerts and their firing patterns), **Dashboards** (`/dashboards`: hidden and `unseen` alerts), **Migration** (`/migration`: phases, what is left in v1, phase-2 readiness and the critical alerts without a runbook), **History** (`/history`: the weekly charts and the list of published weeks) and **Slides** (`/slides`: the presentation frames of section 7.14). Every rule of this section still holds on every tab.
+
+* **Problems are named, never numbered.** The portal shows a problem in plain words ("No rule link", "Generic message") and never a rule id; ids travel only in the query strings of filter links. The key-finding sentences, shared with the admin app, follow the same rule.
+* **Copy is short.** A label, a number and one sentence to fix; no explanatory paragraphs. An empty section is one line.
+* **The week menu is a list of links,** because there is no script to submit a select; it keeps the open tab. Each schema's card is named by its schema name alone.
+* **Two widgets are not on the portal's tabs:** the per-application table and the phase-1 estimate. They stay on the admin summary, and the presentation slides keep both. The estimate's bounds in section 7.14 are unchanged.
+* Links from before the tabs (`/teams/{team}?rule=R1` and the other work-list parameters) redirect to the Fix list with their filters; a bad filter value is still refused.
 
 ### 7.11 Automatic weekly reviews
 
@@ -892,7 +900,7 @@ The proposed gates and remaining policy decisions remain in `llm_review_upgrade_
 gains `GET /teams/{team_id}/summary` for any completed run, internals included. The reader
 portal (section 7.10) gains a Summary section on the team week page for published weeks,
 under every portal rule: weekly totals, no per-day rate, no run id or version, no script. Its presentation slides add one within-week view, the day-by-day distinct and rule-flagged distinct alerts of the one selected published week, labelled "by UTC day" (section 7.10, amended 2026-10-01).
-Both are rendered from the same pure building blocks (`src/insights`). The summary shows,
+Both are rendered from the same pure building blocks (`src/insights`). **Amended 2026-10-04:** the portal spreads them over the tabs of section 7.10 instead of one Summary section, without the per-application table and without the estimate outside the slides. The summary shows,
 for one run: volume and rule-flagged tiles per schema, model coverage, phase, why alerts
 were flagged by rule, templated key findings, noisy alerts by application, how often alerts
 fire, the biggest single source, the per-rule table with what to change, hidden and

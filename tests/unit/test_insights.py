@@ -374,8 +374,8 @@ def test_key_findings_order_and_cap() -> None:
 
 def test_largest_and_co_occurrence() -> None:
     f = key_findings(full_inputs())[0]
-    assert f.title == "R1 is your largest finding"
-    assert f.body == "950 v1 events from 2 alerts. The same alerts also match R4."
+    assert f.title == "Biggest problem: generic message"
+    assert f.body == "950 v1 events from 2 alerts. The same alerts also have: no rule link."
     assert f.rule_filter == "R1"
     assert f.fix is None
 
@@ -415,7 +415,7 @@ def test_counts_of_one_read_in_the_singular() -> None:
     )
     found = {f.kind: f for f in key_findings(one)}
     assert found["largest"].body == "1 v1 event from 1 alert."
-    assert found["hidden"].body == "1 v1 event matches a filter in your dashboard (R5)."
+    assert found["hidden"].body == "1 v1 event matches a filter in your dashboard."
     assert found["unseen"].body == "1 v1 alert (1 event) is outside every panel's narrowing."
 
 
@@ -445,7 +445,7 @@ def test_hidden_omitted_when_nothing_suppressed() -> None:
     clean = replace(base, schemas={"v1": totals("v1", events=1000), "v2": totals("v2")})
     assert all(f.kind != "hidden" for f in key_findings(clean))
     hidden = next(f for f in key_findings(base) if f.kind == "hidden")
-    assert hidden.body == "7 v1 events and 2 v2 events match a filter in your dashboard (R5)."
+    assert hidden.body == "7 v1 events and 2 v2 events match a filter in your dashboard."
     assert hidden.rule_filter == "R5"
 
 

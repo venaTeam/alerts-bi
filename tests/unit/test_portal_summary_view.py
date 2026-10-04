@@ -210,7 +210,7 @@ def build_summary(
         else (
             KeyFinding(
                 "largest",
-                "R6 is your largest finding",
+                "Biggest problem: firing pattern",
                 "864 v1 events from 1 alert.",
                 None,
                 "R6",
@@ -463,7 +463,7 @@ def test_rule_links_come_from_the_callback() -> None:
 def test_a_key_finding_on_a_rule_offers_its_next_step_and_its_alerts() -> None:
     html = render()
     findings = html[html.index("Key findings") : html.index("Noisy alerts by application")]
-    assert "R6 is your largest finding" in findings
+    assert "Biggest problem: firing pattern" in findings
     assert 'href="/wl?rule=R6"' in findings
     assert "Widen a panel" in findings
 
