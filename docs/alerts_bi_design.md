@@ -991,3 +991,44 @@ gain the new columns, `basis_changed` and the planning override, and a new
 `daily_metrics.csv` and `alert_worklist.csv` gain the new columns and the scorecard's
 dashboard-visibility section shows `unseen` (`outputs.md`). Migration `006_r6_episodes` adds
 `alert_findings.max_episode_firing_rows` and `open_since` and exposes both on `portal_alerts`. Migration `007_portal_daily` adds the `portal_daily_metrics` view (published weeks only: per schema and UTC day bucket, covered hours, distinct alerts and rule-flagged distinct alerts) for the summary slides' day-by-day charts, a within-week view of one published week (section 7.10). Migration `008` changes `portal_reviews.basis_changed` to compare the team's own registry entry (its operators and panels) instead of the whole-file registry version, so an edit to another team's entry no longer marks this team's basis as changed.
+
+
+### 7.15 Incremental analysis for million-event weeks
+
+**Implementation approved 2026-10-04.** Teams can exceed two million events in one
+week; the service currently has 1 CPU and 4 GiB RAM. The run processes every event,
+but no longer retains the complete week's raw documents in Python. This changes
+implementation only: counts, rules, representatives, evidence, LLM contracts, SQL
+transactions and the four output files retain their existing meanings.
+
+Elasticsearch is scanned in timestamp order with a PIT and `search_after`. Exact
+hits are counted on the first page only and reconciled against the complete scan.
+The newest returned PIT id is used and closed, including on failure. Timed-out or
+partial-shard responses fail the run. HTTP compression is enabled; page size stays
+configurable with the existing conservative default of 1,000. No parallel scan is
+introduced. Progress logs and final timing counters contain counts and durations,
+never alert documents: search round-trip (including client decoding), cluster
+`took`, normalization, and incremental consumption are distinguished.
+
+The accumulator keeps the latest full document per identity, daily counts, exact
+distinct diagnostic scopes, and one evidence sample and count per matched rule.
+Hashing uses the unchanged canonical encoding, only for tied representative
+candidates and final representatives. Timestamp ties choose the same smallest hash.
+R6 keeps episode counters and clear-cycle timestamps in its rolling 24-hour queue;
+same-instant firing rows are processed before clears, even across page boundaries.
+Its provider still comes from the final representative, not from the first event.
+
+Suppression is not judged page by page. Each safe leaf's matches are counted over
+the full schema; compact signatures per identity/date retain predicate membership,
+ordinary core-match status and unanimous identity hiding. After the global 50% guard
+is resolved, these signatures yield exact R5, core-union and disjoint unseen counts.
+No raw events are persisted to a temporary database or disk spool. SQL report data
+still commits only after the complete read, analysis and assessment succeed.
+
+Memory consequently depends on distinct identities, daily diagnostic tuples,
+predicate-signature combinations, active clear cycles and one response page. It is
+not a universal fixed memory ceiling: millions of unique identities or diagnostic
+scopes still require capacity. Materialized analysis functions remain available
+as a small-input reference for parity testing. `scripts/benchmark_streaming.py`
+reuses the existing mock generator to measure repeated-event scaling without ES,
+SQL or model calls; it does not create another fixture system or acceptance oracle.

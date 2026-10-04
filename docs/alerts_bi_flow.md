@@ -25,7 +25,7 @@ The tool queries Elasticsearch directly:
 
 The queries do not restrict `application`, apply Grafana panel filters, read the SQL hot table, or sweep alerts belonging to other teams.
 
-The tool keeps every returned row for volume metrics. It does not persist or depend on Elasticsearch row IDs because source documents expire.
+The tool counts and evaluates every returned row incrementally, then releases its document. It retains exact daily and identity facts and the latest full representative, not the entire raw week (design section 7.15). It does not persist or depend on Elasticsearch row IDs because source documents expire.
 
 ## 3. Normalize, identify, and count
 
@@ -35,7 +35,7 @@ For both schemas, the alert identity is:
 
 The tool then produces two views of the input:
 
-- **Raw rows:** used for alert volume and row-level counts.
+- **Raw rows:** visited once for alert volume and row-level counts; compact facts survive processing.
 - **Distinct alerts:** one record per identity, used for identity-level aggregation and LLM assessment. The most recent row in the run is the representative document.
 
 Metrics are assigned to the UTC calendar date of `@timestamp` and rolled up into the seven-day team scorecard. A rolling 168-hour window normally touches eight UTC dates, so the first and last buckets may be partial; every row stores its exact boundaries and covered hours. The main volume metrics are total alerts, distinct alerts, and alerts per hour.

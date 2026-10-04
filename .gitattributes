@@ -1,3 +1,6 @@
 # Exact guide bytes form part of the versioned LLM prompt on every operating system.
 docs/Alerting_Guide_Appchi_EN.md text eol=lf
 docs/what_is_an_incorrect_alert_EN.md text eol=lf
+
+# This historical fixture is compared to the JavaScript implementation's byte hash.
+test/fixtures/registry-javascript-mvp.json text eol=lf

@@ -35,6 +35,7 @@ def build_client(config: EsConfig) -> Elasticsearch:
         # paging request could duplicate rows.
         "max_retries": 0,
         "retry_on_timeout": False,
+        "http_compress": True,
     }
     if config.username:
         kwargs["basic_auth"] = (config.username, config.password)

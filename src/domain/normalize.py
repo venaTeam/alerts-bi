@@ -144,7 +144,9 @@ class AlertRecord:
     """SHA-256 over the canonical encoding of ``source``."""
 
 
-def normalize_row(schema: str, source: dict[str, Any]) -> AlertRecord:
+def normalize_row(
+    schema: str, source: dict[str, Any], *, hash_document: bool = True
+) -> AlertRecord:
     """Adapt one raw Elasticsearch ``_source`` document."""
     application = _str_or_none(source.get("application")) or ""
     key_field = _str_or_none(source.get("key_field")) or ""
@@ -176,7 +178,9 @@ def normalize_row(schema: str, source: dict[str, Any]) -> AlertRecord:
         timestamp=timestamp,
         snapshot_date=utc_date_key(timestamp),
         source=source,
-        doc_hash=sha256_of(source),
+        # The streaming path hashes only representative candidates tied at the latest
+        # instant, and the final representative. Its transient rows never leave analysis.
+        doc_hash=sha256_of(source) if hash_document else "",
     )
 
 
