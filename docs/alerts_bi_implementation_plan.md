@@ -66,7 +66,7 @@ Implement separate v1 and v2 queries using the selected team's operators and the
 
 Capture `run_at` once, use UTC throughout, and query the exact half-open interval from `run_at - 168 hours` through but excluding `run_at`. Assign rows to UTC calendar dates and persist exact boundaries and covered hours for partial first and last buckets.
 
-The reader should return normalized records while retaining the complete source document for representative selection and LLM input. Reported distinct counts must be exact; use composite aggregation or exact counting over the paged result instead of relying on approximate cardinality.
+The reader consumes normalized records one page at a time; the accumulator retains the complete representative source document for LLM input (design section 7.15). Reported distinct counts must be exact; use composite aggregation or exact counting over the paged result instead of relying on approximate cardinality.
 
 ### 2.4 Normalization and metric engine
 
@@ -75,7 +75,7 @@ Implement schema adapters that map v1 and v2 documents into a common internal re
 The engine must:
 
 - Build identity from `application + key_field`.
-- Retain all rows for volume metrics.
+- Count every row for volume metrics without retaining the full raw week.
 - Choose the latest row as the distinct alert's representative.
 - Evaluate core rules on every raw row before aggregating findings by identity.
 - Produce daily metrics and seven-day rollups.

@@ -17,11 +17,9 @@ from src.config import AppConfig
 from src.db.connection import Database
 from src.db.llm_audit import SqlLlmJournal
 from src.db.repositories import PersistencePayload, find_verdicts
-from src.domain.metrics import compute_daily_volume
 from src.domain.normalize import AlertRecord
 from src.domain.window import build_run_window
 from src.es.client import EsClient
-from src.es.reader import read_team_alerts
 from src.hashing import compact_json, sha256_of
 from src.llm.assess import AssessmentOutcome, assess_alerts, mark_all_unassessed
 from src.llm.client import LlmClient
@@ -29,16 +27,9 @@ from src.llm.openai_client import OpenAiLlmClient
 from src.llm.prompt import build_prompt
 from src.logging_setup import log
 from src.registry import load_registry, select_team, snapshot_team_entry
-from src.rules.engine import (
-    Evaluation,
-    attach_row_findings,
-    compute_daily_flagged,
-    compute_daily_rule_counts,
-    evaluate_rows,
-)
 from src.rules.phase import derive_phase
 from src.rules.readiness import phase2_readiness_pct
-from src.suppression.evaluate import build_r5_findings, evaluate_suppression
+from src.run.streaming import SchemaAccumulator, StreamIdentity, analyze_team
 from src.timefmt import iso_instant
 from src.versions import APP_VERSION, PARSER_VERSION, PROMPT_VERSION, RULESET_VERSION
 
@@ -155,25 +146,9 @@ def execute_run(
         registry_version=loaded.registry_version,
     )
 
-    # 2. Read both schemas, scoped to this team's operators only.
-    read = read_team_alerts(es_client, team, window)
-    rows_by_schema = {schema: read[schema].rows for schema in SCHEMAS}
-
-    # 3-4. Evaluate every raw row, then aggregate to identity.
-    evaluation = {
-        schema: evaluate_rows(rows_by_schema[schema], window.window_end) for schema in SCHEMAS
-    }
-
-    # 5. Suppression, which produces core rule 5 and can withhold identities from the LLM.
-    suppression = {
-        schema: evaluate_suppression(rows_by_schema[schema], team.panels_for(schema))
-        for schema in SCHEMAS
-    }
-    for schema in SCHEMAS:
-        attach_row_findings(
-            evaluation[schema],
-            build_r5_findings(suppression[schema].suppressed_row_ids, team.panels_for(schema)),
-        )
+    # 2-5. Read pages and aggregate exact facts without retaining raw event documents.
+    evaluation = analyze_team(es_client, team, window)
+    suppression = {schema: evaluation[schema].suppression for schema in SCHEMAS}
 
     # 6. Assess the identities that carry no core finding.
     eligible = [
@@ -273,12 +248,12 @@ def execute_run(
     seen_parses: set[tuple[str, str]] = set()
 
     for schema in SCHEMAS:
-        daily = compute_daily_volume(rows_by_schema[schema], window)
-        flagged = compute_daily_flagged(evaluation[schema].rows, snapshot_dates)
+        daily = evaluation[schema].daily_volume()
+        flagged = evaluation[schema].daily_flagged()
         quality = _allocate_quality_by_date(evaluation[schema], outcomes, snapshot_dates)
-        suppressed_by_date = _count_suppressed_by_date(evaluation[schema], snapshot_dates)
-        unseen_by_date = _count_unseen_by_date(
-            evaluation[schema], suppression[schema].unseen_row_ids, snapshot_dates
+        suppressed_by_date = evaluation[schema].daily_visibility("suppressed")
+        unseen_by_date = (
+            evaluation[schema].daily_visibility("unseen") if team.panels_for(schema) else None
         )
 
         for index, day in enumerate(daily):
@@ -331,7 +306,7 @@ def execute_run(
                 }
             )
 
-        for count in compute_daily_rule_counts(evaluation[schema].rows, snapshot_dates):
+        for count in evaluation[schema].daily_rules():
             payload.rule_counts.append(
                 {
                     "run_id": run_id,
@@ -351,7 +326,7 @@ def execute_run(
                     run_id,
                     identity,
                     outcomes.get(identity.identity),
-                    suppression[schema].unseen_row_ids,
+                    None,
                 )
             )
 
@@ -400,8 +375,8 @@ def execute_run(
         team_id=team.team_id,
         phase=phase,
         readiness=readiness,
-        v1_rows=len(rows_by_schema["v1"]),
-        v2_rows=len(rows_by_schema["v2"]),
+        v1_rows=evaluation["v1"].row_count,
+        v2_rows=evaluation["v2"].row_count,
         v1_identities=len(evaluation["v1"].identities),
         v2_identities=len(evaluation["v2"].identities),
         llm_eligible=len(eligible),
@@ -411,7 +386,7 @@ def execute_run(
 
 
 def _allocate_quality_by_date(
-    evaluation: Evaluation,
+    evaluation: SchemaAccumulator,
     outcomes: dict[str, AssessmentOutcome],
     snapshot_dates: list[str],
 ) -> dict[str, dict[str, int]]:
@@ -452,10 +427,7 @@ def _allocate_quality_by_date(
         if outcome is None:
             continue
 
-        rows_per_date: dict[str, int] = {}
-        for evaluated in identity.rows:
-            key = evaluated.row.snapshot_date
-            rows_per_date[key] = rows_per_date.get(key, 0) + 1
+        rows_per_date = {date: day.count for date, day in identity.days.items()}
 
         for date_key in identity.present_dates:
             entry = accumulator.get(date_key)
@@ -470,39 +442,6 @@ def _allocate_quality_by_date(
     return accumulator
 
 
-def _count_suppressed_by_date(evaluation: Evaluation, snapshot_dates: list[str]) -> dict[str, int]:
-    """``suppressed`` is rule 5's row count promoted to a headline column.
-
-    It is counted on the dates of the rows that actually matched, which keeps it a subset
-    of ``flagged_by_rule`` rather than an addition to it.
-    """
-    counts = dict.fromkeys(snapshot_dates, 0)
-    for evaluated in evaluation.rows:
-        if any(f.rule_id == "R5" for f in evaluated.core_findings):
-            key = evaluated.row.snapshot_date
-            if key in counts:
-                counts[key] += 1
-    return counts
-
-
-def _count_unseen_by_date(
-    evaluation: Evaluation, unseen_row_ids: set[int] | None, snapshot_dates: list[str]
-) -> dict[str, int] | None:
-    """Rows no panel shows, on the dates of the rows themselves.
-
-    ``None`` when the schema has no panel: that is "not measured", which is not zero.
-    """
-    if unseen_row_ids is None:
-        return None
-    counts = dict.fromkeys(snapshot_dates, 0)
-    for evaluated in evaluation.rows:
-        if id(evaluated.row) in unseen_row_ids:
-            key = evaluated.row.snapshot_date
-            if key in counts:
-                counts[key] += 1
-    return counts
-
-
 def _build_finding_row(
     run_id: str,
     identity: Any,
@@ -510,22 +449,37 @@ def _build_finding_row(
     unseen_row_ids: set[int] | None,
 ) -> dict[str, Any]:
     representative: AlertRecord = identity.representative
-    timestamps = [evaluated.row.timestamp for evaluated in identity.rows]
+    if isinstance(identity, StreamIdentity):
+        row_count = identity.row_count
+        first_seen = identity.first_seen
+        last_seen = representative.timestamp
+        evidence_rows = identity.evidence()
+        unseen = identity.unseen
+    else:
+        timestamps = [evaluated.row.timestamp for evaluated in identity.rows]
 
-    # Evidence is summarized per rule rather than per row: a v1 alert re-firing every five
-    # minutes would otherwise store thousands of near-identical evidence objects.
-    evidence: dict[str, dict[str, Any]] = {}
-    for evaluated in identity.rows:
-        for finding in (*evaluated.core_findings, *evaluated.readiness_findings):
-            existing = evidence.get(finding.rule_id)
-            if existing is not None:
-                existing["matched_rows"] += 1
-            else:
-                evidence[finding.rule_id] = {
-                    "rule_id": finding.rule_id,
-                    "matched_rows": 1,
-                    "sample_evidence": finding.evidence,
-                }
+        # Evidence is summarized per rule rather than per row: a v1 alert re-firing every five
+        # minutes would otherwise store thousands of near-identical evidence objects.
+        evidence: dict[str, dict[str, Any]] = {}
+        for evaluated in identity.rows:
+            for finding in (*evaluated.core_findings, *evaluated.readiness_findings):
+                existing = evidence.get(finding.rule_id)
+                if existing is not None:
+                    existing["matched_rows"] += 1
+                else:
+                    evidence[finding.rule_id] = {
+                        "rule_id": finding.rule_id,
+                        "matched_rows": 1,
+                        "sample_evidence": finding.evidence,
+                    }
+        row_count = len(identity.rows)
+        first_seen, last_seen = min(timestamps), max(timestamps)
+        evidence_rows = list(evidence.values())
+        unseen = (
+            None
+            if unseen_row_ids is None
+            else any(id(evaluated.row) in unseen_row_ids for evaluated in identity.rows)
+        )
 
     state = (
         "rule_flagged"
@@ -549,12 +503,12 @@ def _build_finding_row(
         "environment": representative.environment,
         "provider": representative.provider,
         "alert_rule_url": representative.alert_rule_url,
-        "row_count": len(identity.rows),
-        "first_seen": _naive(min(timestamps)),
-        "last_seen": _naive(max(timestamps)),
+        "row_count": row_count,
+        "first_seen": _naive(first_seen),
+        "last_seen": _naive(last_seen),
         "core_rule_ids": ",".join(identity.core_rule_ids),
         "readiness_rule_ids": ",".join(identity.readiness_rule_ids),
-        "findings_evidence": compact_json(list(evidence.values())),
+        "findings_evidence": compact_json(evidence_rows),
         "quality_state": state,
         "llm_principle_id": None
         if is_rule_flagged
@@ -575,9 +529,5 @@ def _build_finding_row(
         "max_episode_firing_rows": identity.max_episode_firing_rows,
         "open_since": None if identity.open_since is None else _naive(identity.open_since),
         # NULL with no panel; otherwise true when any row of the identity is unseen.
-        "unseen": (
-            None
-            if unseen_row_ids is None
-            else any(id(evaluated.row) in unseen_row_ids for evaluated in identity.rows)
-        ),
+        "unseen": unseen,
     }

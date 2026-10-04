@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 from src.config import load_config
-from src.es.reader import ReadResult
 from src.run import orchestrator
 from src.run.orchestrator import execute_run
+from src.run.streaming import SchemaAccumulator
 
 from tests.helpers.rows import v1_row, v2_row
 
@@ -53,13 +53,17 @@ def _run(monkeypatch: pytest.MonkeyPatch, registry: str) -> Any:
     ]
     v2 = [v2_row(application="b", key_field="k3", **{"@timestamp": DAY_1})]
 
-    def fake_read(_client: Any, _team: Any, _window: Any) -> dict[str, ReadResult]:
-        return {
-            "v1": ReadResult(rows=v1, pages=1, reported_total=len(v1)),
-            "v2": ReadResult(rows=v2, pages=1, reported_total=len(v2)),
-        }
+    def fake_read(_client: Any, _team: Any, _window: Any) -> dict[str, SchemaAccumulator]:
+        result = {}
+        for schema, rows in (("v1", v1), ("v2", v2)):
+            analysis = SchemaAccumulator(schema, _window, _team.panels_for(schema))
+            for row in rows:
+                analysis.add(row)
+            analysis.finish()
+            result[schema] = analysis
+        return result
 
-    monkeypatch.setattr(orchestrator, "read_team_alerts", fake_read)
+    monkeypatch.setattr(orchestrator, "analyze_team", fake_read)
     payload, _summary = execute_run(
         team_id="t1",
         run_at=RUN_AT,
