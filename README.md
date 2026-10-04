@@ -513,6 +513,33 @@ scripted by `(batch_id, attempt)`, which is what makes "the second attempt succe
 "all three attempts fail" expressible without timing or randomness. Live endpoint
 validation is separate and opt-in.
 
+### Large weekly event volumes
+
+The production path processes Elasticsearch pages incrementally (design section 7.15).
+It retains representative documents and compact exact facts instead of the full raw
+week. Memory still grows with distinct alert identities, diagnostic scopes, predicate
+combinations and active clear cycles; it is not capped solely by `ES_PAGE_SIZE`.
+
+`ES_PAGE_SIZE` remains 1,000 by default. HTTP compression is enabled and exact total
+hits are requested on the first page only. `es.read_progress` logs counts roughly every
+30 seconds while pages are consumed. `es.read_schema` records `search_seconds`
+(round trips, including transfer and client decoding), `cluster_seconds` (sum of ES
+`took`), `normalize_seconds`, `consume_seconds`, and `elapsed_seconds`. Cluster work
+is inside search time; subtracting it does not isolate network time from decoding.
+
+A repeatable Python-only scale probe uses the existing mock definitions without
+connecting to Elasticsearch, SQL Server or the model:
+
+```bash
+uv run python scripts/benchmark_streaming.py --events 300000 --mode materialized
+uv run python scripts/benchmark_streaming.py --events 300000 --mode streaming
+uv run python scripts/benchmark_streaming.py --events 2000000 --mode streaming
+```
+
+Run each mode in a fresh process. It prints peak process resident memory and times
+for fixture construction, JSON decoding and analysis separately. It checks the event
+count but is not a substitute for acceptance verification or production measurements.
+
 ### Acceptance verification
 
 ```bash

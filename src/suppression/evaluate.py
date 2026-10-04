@@ -14,6 +14,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Final
 
 from src.domain.normalize import AlertRecord
@@ -102,6 +103,7 @@ class SuppressionResult:
     """Identity leaves that could not be evaluated (OR-nested or unresolved variable)."""
 
 
+@lru_cache(maxsize=1024)
 def like_to_regex(pattern: str) -> re.Pattern[str]:
     """Convert a SQL LIKE pattern to an anchored regular expression.
 
